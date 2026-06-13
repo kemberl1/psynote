@@ -1,0 +1,135 @@
+# ============================================================================
+# AI MED — docker-compose (Этап 1, каркас).
+#
+# Топология соответствует docs/02_system_architecture.md §7:
+#   frontend (:5173) → gateway (Go, :8080) → rag (Python, :8000) → qdrant (:6333)
+#   gateway → postgres (:5432)
+#   gateway → X5 CoPilot LLM (внешний выход)
+#
+# Сервис `embeddings` (docs/02 §7) на каркасе НЕ выделен в отдельный контейнер:
+# по архитектуре он «может быть частью rag» — локальная модель e5 поднимется
+# внутри rag на Этапе 2 (docs/03 §3). При необходимости легко вынести позже.
+#
+# Запуск: cp .env.example .env && docker compose up --build
+# ============================================================================
+
+name: ai-med
+
+services:
+  # ─── PostgreSQL (без ПДн, docs/05) ──────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: aimed-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aimed}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aimed_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-aimed}
+    ports:
+      # ВНЕШНИЙ (хост) порт ⇒ внутренний. Дефолт 5433, чтобы не конфликтовать
+      # с локальным PostgreSQL на 5432 (см. .env.example).
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Init-скрипты выполняются один раз при пустом томе (схема + seed).
+      - ./deploy/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aimed} -d ${POSTGRES_DB:-aimed}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aimed-net
+
+  # ─── Qdrant (векторная БД, docs/03) ─────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: aimed-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_HOST_PORT:-6333}:6333"       # REST/Dashboard
+      - "${QDRANT_GRPC_HOST_PORT:-6334}:6334"  # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - aimed-net
+
+  # ─── RAG-сервис (Python / FastAPI) ──────────────────────────────────────
+  rag:
+    build:
+      context: ./services/rag
+      dockerfile: Dockerfile
+    container_name: aimed-rag
+    restart: unless-stopped
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-corpus_diaries}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      RAG_PORT: "8000"
+    ports:
+      - "${RAG_HOST_PORT:-8001}:8000"
+    depends_on:
+      qdrant:
+        condition: service_started
+    networks:
+      - aimed-net
+
+  # ─── API-Gateway (Go: API · анонимизация · экспорт) ─────────────────────
+  gateway:
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+    container_name: aimed-gateway
+    restart: unless-stopped
+    environment:
+      GATEWAY_HTTP_ADDR: ":8080"
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-aimed}:${POSTGRES_PASSWORD:-aimed_dev_password}@postgres:5432/${POSTGRES_DB:-aimed}?sslmode=disable"
+      QDRANT_URL: http://qdrant:6333
+      RAG_BASE_URL: http://rag:8000
+      JWT_SECRET: ${JWT_SECRET:-change_me_dev_secret}
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-http://localhost:5174}
+      # LLM (X5 CoPilot) — docs/03 §9. На каркасе вызовы не выполняются.
+      X5_BASE_URL: ${X5_BASE_URL:-https://api-copilot.x5.ru/aigw/v1/}
+      X5_API_KEY: ${X5_API_KEY:-}
+      LLM_CA_BUNDLE: ${LLM_CA_BUNDLE:-/app/certs/x5_root_ca.pem}
+      LLM_MODEL_LARGE: ${LLM_MODEL_LARGE:-x5-airun-large}
+      LLM_MODEL_MEDIUM: ${LLM_MODEL_MEDIUM:-x5-airun-medium}
+      LLM_MODEL_SMALL: ${LLM_MODEL_SMALL:-x5-airun-small}
+    ports:
+      - "${GATEWAY_HOST_PORT:-8081}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rag:
+        condition: service_started
+    # Корпоративный CA-bundle монтируется сюда (docs/03 §9.2). Файл — вне git.
+    # Раскомментировать, когда появится сертификат:
+    # volumes:
+    #   - ./deploy/certs/x5_root_ca.pem:/app/certs/x5_root_ca.pem:ro
+    networks:
+      - aimed-net
+
+  # ─── Frontend (React 19 + Vite) ─────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aimed-frontend
+    restart: unless-stopped
+    environment:
+      VITE_GATEWAY_URL: http://gateway:8080
+    ports:
+      - "${FRONTEND_HOST_PORT:-5174}:5173"
+    depends_on:
+      gateway:
+        condition: service_started
+    networks:
+      - aimed-net
+
+volumes:
+  postgres_data:
+  qdrant_data:
+
+networks:
+  aimed-net:
+    driver: bridge
