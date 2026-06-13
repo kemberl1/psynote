@@ -85,6 +85,43 @@ docker compose down -v     # + удалить volume-данные (postgres/qdra
 
 ---
 
+## Ingestion корпуса в Qdrant (Этап 3)
+
+Пайплайн индексации обезличенного корпуса дневников в векторную БД Qdrant.
+Строгий порядок (приватность, [`docs/04_anonymization.md`](docs/04_anonymization.md) §1):
+**парсинг → анонимизация через gateway `/api/v1/anonymize` → чанкинг
+обезличенного текста → локальные эмбеддинги e5 → upsert в Qdrant**. Сырой текст
+с ПДн и имена файлов с ФИО НИКОГДА не попадают в Qdrant/логи/репозиторий.
+
+```bash
+# 0. Поднять зависимости пайплайна (Qdrant + Go-анонимайзер gateway)
+docker compose up -d qdrant gateway
+
+# 1. Полный прогон ingestion (one-shot контейнер; первый запуск качает модель e5 ~2 ГБ)
+docker compose run --rm rag python -m app.ingest ingest
+
+# 1а. Быстрый smoke-прогон на нескольких документах
+docker compose run --rm rag python -m app.ingest ingest --limit 3
+
+# 1б. Включить .xlsx (листы назначений) — по умолчанию только дневники .docx/.odt/.doc
+docker compose run --rm rag python -m app.ingest ingest --include-tables
+
+# 2. АУДИТ ПРИВАТНОСТИ: выгрузить выборку обезличенных чанков для ручной проверки
+docker compose run --rm rag python -m app.ingest audit --sample 20
+#    либо через FastAPI-эндпоинт:
+curl "http://localhost:8001/admin/audit-sample?sample=20"
+```
+
+- Корпус монтируется в контейнер `rag` **только для чтения** (`./Документы:/data/corpus:ro`).
+- Идемпотентность: id чанка детерминирован (UUIDv5 от обезличенного текста + метаданных),
+  повторный прогон не плодит дубликаты.
+- Логи содержат только счётчики (`removed_by_type`, `blocked_pii`, `chunks_written`)
+  и обезличенный `source_ref` — без ПДн.
+- Подробности дизайна — [`docs/03_rag_design.md`](docs/03_rag_design.md) §4–5,
+  [`docs/05_data_model.md`](docs/05_data_model.md) §3.
+
+---
+
 ## Структура репозитория
 
 ```

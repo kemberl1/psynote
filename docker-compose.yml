@@ -65,9 +65,25 @@ services:
       QDRANT_URL: http://qdrant:6333
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-corpus_diaries}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      # Анонимайзер-гейт: ingestion вызывает Go gateway ДО эмбеддинга (docs/04 §1).
+      GATEWAY_URL: ${GATEWAY_URL:-http://gateway:8080}
+      # Корпус монтируется volume'ом read-only (см. volumes ниже), docs/03 §5.
+      CORPUS_DIR: ${CORPUS_DIR:-/data/corpus}
+      CORPUS_DIARIES_SUBDIR: ${CORPUS_DIARIES_SUBDIR:-02_корпус/сборник_дневников_ИБ}
+      # Чанкинг (docs/03 §4).
+      CHUNK_MAX_CHARS: ${CHUNK_MAX_CHARS:-1200}
+      CHUNK_OVERLAP_CHARS: ${CHUNK_OVERLAP_CHARS:-150}
       RAG_PORT: "8000"
     ports:
       - "${RAG_HOST_PORT:-8001}:8000"
+    volumes:
+      # Корпус мед.документов — ТОЛЬКО чтение (:ro). НЕ копируется в образ,
+      # НЕ коммитится в git (.gitignore: Документы/). docs/03 §5.
+      - ./Документы:/data/corpus:ro
+      # Кэш HF-моделей e5 — чтобы не качать модель при каждом запуске ingestion.
+      - rag_hf_cache:/app/.cache/huggingface
     depends_on:
       qdrant:
         condition: service_started
@@ -129,6 +145,7 @@ services:
 volumes:
   postgres_data:
   qdrant_data:
+  rag_hf_cache:   # кэш локальной модели эмбеддингов e5 (docs/03 §3)
 
 networks:
   aimed-net:

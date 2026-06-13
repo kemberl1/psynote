@@ -4,7 +4,8 @@
 чанкинг медицинских документов, локальные эмбеддинги, retrieval из Qdrant,
 построение промпта, ingestion корпуса.
 
-Этап 1 (каркас): рабочий /health-эндпоинт + заглушки модулей.
+Этап 3 (ingestion): реализован пайплайн extract → anonymize(gateway) →
+chunk → embed(e5 локально) → upsert в Qdrant + CLI и аудит приватности.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"

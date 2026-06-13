@@ -1,19 +1,23 @@
-# RAG service dependencies — Этап 1 (каркас).
-# Только то, что нужно для рабочего /health и будущей структуры.
-# Тяжёлые ML-зависимости закомментированы, чтобы образ собирался быстро.
+# RAG service dependencies — Этап 3 (ingestion корпуса → Qdrant).
+# Образ потяжелел за счёт ML-зависимостей (torch, sentence-transformers) — это
+# ожидаемо для Этапа 3 (локальные эмбеддинги e5, docs/03 §3).
 
 # --- Web framework (каркас) ---
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 
-# --- Vector DB client (нужен с этапа 2; лёгкий, оставляем) ---
+# --- Vector DB client (docs/05 §3) ---
 qdrant-client==1.12.1
 
-# --- HTTP client (для вызовов LLM «План Б» / межсервисного обмена) ---
+# --- HTTP client (вызов анонимайзера gateway /api/v1/anonymize, docs/04 §1) ---
 httpx==0.28.1
 
-# --- Future (этап 2+): тяжёлые ML-зависимости. Раскомментировать при реализации. ---
-# sentence-transformers==3.3.1   # локальные эмбеддинги e5 (docs/03 §3)
-# torch                          # бэкенд для sentence-transformers (большой!)
-# python-docx==1.1.2             # извлечение текста из .docx (docs/03 §5)
-# odfpy==1.4.1                   # извлечение текста из .odt (docs/03 §5)
+# --- Парсеры форматов корпуса (docs/03 §5) ---
+python-docx==1.1.2     # извлечение текста из .docx
+odfpy==1.4.1           # извлечение текста из .odt
+openpyxl==3.1.5        # извлечение из .xlsx (листы назначений, опц. --include-tables)
+
+# --- Локальные эмбеддинги e5 (docs/03 §3) — медтекст не уходит в облако ---
+# CPU-сборка torch (без CUDA) ставится с дефолтного индекса PyPI.
+sentence-transformers==3.3.1
+torch==2.5.1
