@@ -11,19 +11,30 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/aimed/gateway/internal/anonymizer"
 	"github.com/aimed/gateway/internal/config"
 )
 
 // NewRouter builds the HTTP handler tree using the standard library
 // net/http router (Go 1.22+ pattern routing). chi can be introduced later
 // without changing this contract (см. docs/02 §5 — chi или net/http).
-func NewRouter(cfg config.Config) http.Handler {
+//
+// anon is the PII gate (docs/04). It is injected so that future business
+// handlers (/generate, /attachments) reuse the SAME gate instance.
+func NewRouter(cfg config.Config, anon anonymizer.Anonymizer) http.Handler {
 	mux := http.NewServeMux()
 
 	// Health endpoint. Доступен и по корню, и под префиксом /api/v1
 	// (проверка из docs/10 Этап 0: `GET /api/v1/health`).
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("GET "+config.APIPrefix+"/health", healthHandler)
+
+	// Служебный эндпоинт PII-гейта (docs/04). Прямой доступ к анонимизатору
+	// для проверки/демонстрации; бизнес-потоки (/generate, /attachments)
+	// вызывают тот же пайплайн внутри себя.
+	if anon != nil {
+		mux.HandleFunc("POST "+config.APIPrefix+"/anonymize", newAnonymizeHandler(anon))
+	}
 
 	// TODO(этап 5): auth-роуты — POST /api/v1/auth/{register,login,refresh,logout}, GET /me.
 	// TODO(этап 4): GET /api/v1/document-types, GET /api/v1/questionnaire.

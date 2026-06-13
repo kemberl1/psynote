@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aimed/gateway/internal/anonymizer"
 	"github.com/aimed/gateway/internal/config"
 	"github.com/aimed/gateway/internal/handlers"
 )
@@ -30,7 +31,18 @@ func main() {
 
 	cfg := config.Load()
 
-	mux := handlers.NewRouter(cfg)
+	// PII-гейт (docs/04). Словари — встроенные (go:embed) или из ANONYMIZER_DICT_DIR.
+	// NER-сайдкар на Этапе 2 не подключаем — работает Go-only MVP (docs/04 §6).
+	anon, err := anonymizer.New(anonymizer.Options{
+		DictionaryDir: cfg.AnonymizerDictDir,
+		FailClosed:    cfg.AnonymizerFailClosed,
+	})
+	if err != nil {
+		slog.Error("anonymizer init failed", "error", err)
+		os.Exit(1)
+	}
+
+	mux := handlers.NewRouter(cfg, anon)
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

@@ -44,6 +44,15 @@ type Config struct {
 
 	// CORS: разрешённый origin фронтенда (см. docs/09 §6).
 	CORSAllowedOrigin string
+
+	// Anonymizer (PII-гейт, см. docs/04_anonymization.md).
+	// AnonymizerDictDir — путь к словарям на диске; пусто = встроенные (go:embed).
+	AnonymizerDictDir string
+	// AnonymizerNERURL — адрес ЛОКАЛЬНОГО Python NER-сайдкара (Natasha).
+	// Пусто = NER отключён, работает Go-only MVP (docs/04 §6). PII не покидает периметр.
+	AnonymizerNERURL string
+	// AnonymizerFailClosed — при сомнении блокировать (по умолчанию true, docs/04 §1).
+	AnonymizerFailClosed bool
 }
 
 // Load reads configuration from the environment, applying sensible defaults
@@ -64,6 +73,25 @@ func Load() Config {
 		LLMModelSmall:  getEnv("LLM_MODEL_SMALL", "x5-airun-small"),
 
 		CORSAllowedOrigin: getEnv("CORS_ALLOWED_ORIGIN", "http://localhost:5173"),
+
+		AnonymizerDictDir:    getEnv("ANONYMIZER_DICT_DIR", ""),
+		AnonymizerNERURL:     getEnv("ANONYMIZER_NER_URL", ""),
+		AnonymizerFailClosed: getEnvBool("ANONYMIZER_FAIL_CLOSED", true),
+	}
+}
+
+// getEnvBool reads a boolean env var, treating "0"/"false"/"no" as false and
+// any other non-empty value as true; missing/empty falls back to the default.
+func getEnvBool(key string, fallback bool) bool {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return fallback
+	}
+	switch v {
+	case "0", "false", "FALSE", "False", "no", "NO":
+		return false
+	default:
+		return true
 	}
 }
 
