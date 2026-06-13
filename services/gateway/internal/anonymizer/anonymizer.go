@@ -55,6 +55,13 @@ type Options struct {
 	// FailClosed, when true (default), forces Anonymize to surface gate failures
 	// via Result.Clean=false. The Gate method always enforces fail-closed.
 	FailClosed bool
+	// RedactClockTime controls БАГ №2: when true, standalone time-of-day in the
+	// чч:мм form («23:00», «18:00») is also redacted as [ВРЕМЯ]. DEFAULT false —
+	// standalone clock time is NOT a patient identifier (см. docs/04 §2, где как
+	// ПДн указана лишь клиническая форма «время: 10 час. 18 мин.», она ловится
+	// всегда детектором time_clinical). Включать стоит только если чч:мм в данных
+	// жёстко привязано к дате/событию визита.
+	RedactClockTime bool
 }
 
 // Pipeline is the production multi-level anonymizer (replaces Stub).
@@ -81,7 +88,7 @@ func New(opts Options) (*Pipeline, error) {
 	wl := newWhitelist()
 	return &Pipeline{
 		dict:      d,
-		detectors: buildRegexDetectors(),
+		detectors: buildRegexDetectors(opts.RedactClockTime),
 		inst:      newInstitutionDetector(d),
 		fio:       newFIODetector(d),
 		wl:        wl,

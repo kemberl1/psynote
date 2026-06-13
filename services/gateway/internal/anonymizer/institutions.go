@@ -27,19 +27,42 @@ func newInstitutionDetector(d *dictionaries) *institutionDetector {
 // detect records institution spans. For each marker occurrence it expands the
 // span to include an adjacent quoted name, a trailing «им. ...», and an
 // optional «№ N».
+//
+// БАГ №1 (precision): сопоставление маркеров теперь учитывает ГРАНИЦЫ СЛОВА
+// вручную (Cyrillic-aware, см. hasWordBoundaries), потому что RE2 `\b` работает
+// только для ASCII. Маркеры-аббревиатуры (НИИ, ЦВЛ, ПНД, ГБУЗ …) сопоставляются
+// РЕГИСТРОЗАВИСИМО, чтобы окончание «-нии» в обычных словах («улучшении»,
+// «отделении», «линии») не принималось за маркер «НИИ».
 func (det *institutionDetector) detect(text string, set *spanSet) {
 	lower := strings.ToLower(text)
 	numRe := regexp.MustCompile(`(?i)^\s*№\s*\d+`)
 
 	for _, marker := range det.dict.institutions {
+		// Регистрозависимые аббревиатуры ищем в исходном тексте, полнословные
+		// маркеры — в lower-cased копии (регистронезависимо). Смещения совпадают:
+		// strings.ToLower для кириллицы/латиницы здесь длину рун не меняет.
+		hay := lower
+		needle := marker.text
+		if marker.caseSensitive {
+			hay = text
+		}
+
 		from := 0
 		for {
-			idx := strings.Index(lower[from:], marker)
+			idx := strings.Index(hay[from:], needle)
 			if idx < 0 {
 				break
 			}
 			start := from + idx
-			end := start + len(marker)
+			end := start + len(needle)
+
+			// Границы слова (Cyrillic-aware): маркер валиден, только если слева
+			// и справа от него НЕ буква/цифра. Иначе это подстрока обычного
+			// слова (НИИ в «улучшении», ПНД/ЦВЛ внутри слова) — пропускаем.
+			if !hasWordBoundaries(text, start, end) {
+				from = end
+				continue
+			}
 
 			// Расширяем вправо: « номер », « кавычки », « им. ... ».
 			rest := text[end:]

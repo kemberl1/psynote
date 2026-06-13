@@ -3,6 +3,7 @@ package anonymizer
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // normalizeText performs level-1 preprocessing (docs/04 §3, уровень 1):
@@ -41,6 +42,35 @@ func isUpperCyrillic(r rune) bool {
 // isCyrillicLetter reports whether r is any Cyrillic letter.
 func isCyrillicLetter(r rune) bool {
 	return unicode.IsLetter(r) && unicode.Is(unicode.Cyrillic, r)
+}
+
+// isWordRune reports whether r is a "word" character (letter or digit). Unlike
+// Go RE2 `\b`, this works correctly for Cyrillic because unicode.IsLetter
+// recognises non-ASCII letters (см. БАГ №1, docs/04 §3 уровень 3).
+func isWordRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+// hasWordBoundaries reports whether the half-open byte range [start, end) in
+// text is delimited on BOTH sides by a non-word rune (или краем строки). This
+// is a manual, Cyrillic-aware replacement for RE2 `\b`, which matches only
+// ASCII word boundaries and therefore would treat «нии» inside «улучшении» as a
+// standalone token. Offsets are byte offsets (как в spanSet).
+func hasWordBoundaries(text string, start, end int) bool {
+	if start < 0 || end > len(text) || start > end {
+		return false
+	}
+	if start > 0 {
+		if r, _ := utf8.DecodeLastRuneInString(text[:start]); isWordRune(r) {
+			return false
+		}
+	}
+	if end < len(text) {
+		if r, _ := utf8.DecodeRuneInString(text[end:]); isWordRune(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // startsUpperCyrillic reports whether a word begins with an upper-case Cyrillic

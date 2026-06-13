@@ -290,3 +290,123 @@ func TestPlaceholderMapping(t *testing.T) {
 		}
 	}
 }
+
+// TestInstitutionPrecisionNoFalsePositives — БАГ №1 (precision): маркеры-
+// аббревиатуры учреждений НЕ должны срабатывать как подстрока внутри обычных
+// русских слов, а общеупотребительная лексика («отделение») не должна
+// превращаться в [УЧРЕЖДЕНИЕ]. Все данные синтетические.
+func TestInstitutionPrecisionNoFalsePositives(t *testing.T) {
+	p := newTestPipeline(t)
+
+	cases := []struct {
+		name string
+		in   string
+		// keep — фрагмент, который ОБЯЗАН сохраниться без искажения.
+		keep string
+	}{
+		// «нии» как окончание обычных слов — НЕ маркер «НИИ».
+		{"uluchshenii", "Отмечается положительная динамика в улучшении сна.", "улучшении"},
+		{"otdelenii", "В отделении держится спокойно, жалоб нет.", "отделении"},
+		{"linii", "Походка ровная, по средней линии без отклонений.", "средней линии"},
+		// «отделение» само по себе — НЕ название учреждения.
+		{"otdelenie_word", "Переведён в отделение дневного пребывания.", "отделение"},
+		// аббревиатуры внутри слов в нижнем регистре не должны срабатывать.
+		{"pnd_substr", "Состояние без отрицательной динамики, аппетит сохранён.", "динамики"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := run(t, p, tc.in)
+			if strings.Contains(res.Text, "[УЧРЕЖДЕНИЕ]") {
+				t.Errorf("ложное [УЧРЕЖДЕНИЕ] в %q; got: %q", tc.in, res.Text)
+			}
+			if !strings.Contains(res.Text, tc.keep) {
+				t.Errorf("текст искажён: фрагмент %q пропал; got: %q", tc.keep, res.Text)
+			}
+		})
+	}
+}
+
+// TestInstitutionAbbreviationCaseSensitive — БАГ №1: маркеры-аббревиатуры
+// сопоставляются регистрозависимо. Нижний регистр «нии/пнд/цвл» как отдельное
+// слово (искусственно) НЕ должен вырезаться, но ЗАГЛАВНЫЕ — должны.
+func TestInstitutionAbbreviationCaseSensitive(t *testing.T) {
+	p := newTestPipeline(t)
+
+	// Заглавная аббревиатура как отдельное слово → вырезается.
+	pos := run(t, p, `Направлен в НИИ "Вымышленный" для консультации.`)
+	if !strings.Contains(pos.Text, "[УЧРЕЖДЕНИЕ]") {
+		t.Errorf("заглавный маркер НИИ должен вырезаться; got: %q", pos.Text)
+	}
+
+	// Нижний регистр (даже как отдельный токен) маркером не считается.
+	neg := run(t, p, "Слово нии встречается в окончаниях, это не учреждение.")
+	if strings.Contains(neg.Text, "[УЧРЕЖДЕНИЕ]") {
+		t.Errorf("нижний регистр «нии» не должен вырезаться; got: %q", neg.Text)
+	}
+}
+
+// TestInstitutionPositiveStillRedacted — контроль recall: реальные (синтети-
+// ческие) названия учреждений с маркером ДОЛЖНЫ по-прежнему вырезаться.
+func TestInstitutionPositiveStillRedacted(t *testing.T) {
+	p := newTestPipeline(t)
+
+	cases := []string{
+		`Госпитализирован в ГБУЗ "Городская больница №3".`,
+		`Наблюдается в ПНД №4 по месту жительства.`,
+		`Переведён в ЦВЛ им. Вымышленного для реабилитации.`,
+		`Направление в НИИ детской психиатрии №2 оформлено.`,
+	}
+	for _, in := range cases {
+		res := run(t, p, in)
+		if !strings.Contains(res.Text, "[УЧРЕЖДЕНИЕ]") {
+			t.Errorf("ожидался [УЧРЕЖДЕНИЕ] для %q; got: %q", in, res.Text)
+		}
+	}
+}
+
+// TestTimeOfDayPrecision — БАГ №2 (precision): одиночное время суток (чч:мм) в
+// рекомендациях НЕ должно вырезаться при дефолтных настройках (RedactClockTime
+// = false). Клиническая форма «10 час. 18 мин.» по-прежнему ПДн.
+func TestTimeOfDayPrecision(t *testing.T) {
+	p := newTestPipeline(t)
+
+	keepCases := []struct {
+		name string
+		in   string
+		keep string
+	}{
+		{"sleep_advice", "Рекомендован отбой до 23:00 для нормализации сна.", "23:00"},
+		{"wakeup", "Подъём в 18:00 без затруднений.", "18:00"},
+	}
+	for _, tc := range keepCases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := run(t, p, tc.in)
+			if strings.Contains(res.Text, "[ВРЕМЯ]") {
+				t.Errorf("одиночное время суток не должно вырезаться по умолчанию; got: %q", res.Text)
+			}
+			if !strings.Contains(res.Text, tc.keep) {
+				t.Errorf("время %q должно сохраниться; got: %q", tc.keep, res.Text)
+			}
+		})
+	}
+
+	// Клиническая форма времени остаётся ПДн (recall не ослаблен).
+	clin := run(t, p, "Время осмотра: 10 час. 18 мин.")
+	if !strings.Contains(clin.Text, "[ВРЕМЯ]") {
+		t.Errorf("клиническое время должно вырезаться; got: %q", clin.Text)
+	}
+}
+
+// TestTimeOfDayOptIn — при явном RedactClockTime=true чч:мм снова вырезается
+// (поведение конфигурируемо, дефолт безопасный).
+func TestTimeOfDayOptIn(t *testing.T) {
+	p, err := New(Options{RedactClockTime: true})
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+	res := run(t, p, "Подъём в 18:00 без затруднений.")
+	if !strings.Contains(res.Text, "[ВРЕМЯ]") {
+		t.Errorf("при RedactClockTime=true чч:мм должно вырезаться; got: %q", res.Text)
+	}
+}

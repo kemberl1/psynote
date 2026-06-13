@@ -19,8 +19,15 @@ const monthAlt = `(?:янв(?:ар[ья])?|фев(?:рал[ья])?|мар(?:та
 // buildRegexDetectors returns the ordered list of structured-PII detectors.
 // Order matters only for documentation; overlap resolution is handled by the
 // span engine, where longer/period spans win over single dates.
-func buildRegexDetectors() []regexDetector {
-	return []regexDetector{
+//
+// redactClockTime controls БАГ №2 (precision): standalone time-of-day in the
+// чч:мм form («до 23:00», «18:00») is NOT a patient identifier and by DEFAULT is
+// kept (redactClockTime=false). docs/04 §2 lists only the clinical form
+// «время: 10 час. 18 мин.» as PII — that is still always handled by the
+// `time_clinical` detector below. Operators who want to also strip чч:мм (e.g.
+// when it appears next to a visit date) can enable it via Options.RedactClockTime.
+func buildRegexDetectors(redactClockTime bool) []regexDetector {
+	dets := []regexDetector{
 		// --- ПЕРИОДЫ (диапазоны дат) — раньше одиночных дат, span длиннее ---
 		{
 			name: "date_range_numeric",
@@ -60,12 +67,8 @@ func buildRegexDetectors() []regexDetector {
 			re:  regexp.MustCompile(`(?i)\b\d{1,2}\s*(?:час\.?|ч\.?)\s*\d{1,2}\s*(?:мин\.?|м\.?)`),
 			typ: EntityTime,
 		},
-		{
-			name: "time_colon",
-			re:   regexp.MustCompile(`\b\d{1,2}:\d{2}(?::\d{2})?\b`),
-			typ:  EntityTime,
-		},
-
+		// time_colon (чч:мм) НЕ добавляется по умолчанию — см. БАГ №2 ниже,
+		// после формирования списка он включается лишь при redactClockTime.
 		// --- ТЕЛЕФОНЫ ---
 		{
 			name: "phone",
@@ -135,6 +138,19 @@ func buildRegexDetectors() []regexDetector {
 			typ: EntityAddress,
 		},
 	}
+
+	// БАГ №2: одиночное время суток (чч:мм) режем ТОЛЬКО при явном запросе
+	// оператора. По умолчанию оно сохраняется (например «до 23:00» в
+	// рекомендациях по сну — это не ПДн).
+	if redactClockTime {
+		dets = append(dets, regexDetector{
+			name: "time_colon",
+			re:   regexp.MustCompile(`\b\d{1,2}:\d{2}(?::\d{2})?\b`),
+			typ:  EntityTime,
+		})
+	}
+
+	return dets
 }
 
 // runRegexDetectors applies all level-2 detectors and records spans.

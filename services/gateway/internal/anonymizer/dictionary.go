@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"strings"
+	"unicode"
 )
 
 //go:embed dictionaries/*.txt
@@ -17,10 +18,41 @@ var embeddedDicts embed.FS
 // but an operator may override the directory via config to extend lists without
 // recompiling the detection logic.
 type dictionaries struct {
-	firstNames   *stemSet // основы имён (для сопоставления по префиксу)
-	surnames     *stemSet // основы фамилий
-	institutions []string // маркеры учреждений (lower-case)
+	firstNames   *stemSet            // основы имён (для сопоставления по префиксу)
+	surnames     *stemSet            // основы фамилий
+	institutions []institutionMarker // маркеры учреждений (с режимом регистра)
 	fioSkipWords map[string]struct{}
+}
+
+// institutionMarker is a single institution gazetteer entry (БАГ №1).
+//
+// caseSensitive markers are abbreviations (НИИ, ЦВЛ, ПНД, ГБУЗ …) that in real
+// data are ALWAYS written in capitals; matching them case-sensitively prevents
+// the lower-case substring «нии» inside ordinary words («улучшении») from being
+// treated as a marker. Full-word markers («больница», «диспансер») stay
+// case-insensitive but MUST still respect word boundaries (см. institutions.go).
+type institutionMarker struct {
+	// text is the literal searched for. For caseSensitive markers it is the
+	// original (upper-case) form; otherwise it is lower-cased.
+	text          string
+	caseSensitive bool
+}
+
+// isAbbreviationMarker reports whether a raw dictionary line is an
+// abbreviation-style marker: it contains letters and ALL of its letters are
+// upper-case (e.g. «ГБУЗ», «ЦВЛ», «ПНД», «НИИ»). Such markers are matched
+// case-sensitively. Mixed/lower-case full words («больница») return false.
+func isAbbreviationMarker(raw string) bool {
+	hasLetter := false
+	for _, r := range raw {
+		if unicode.IsLetter(r) {
+			hasLetter = true
+			if !unicode.IsUpper(r) {
+				return false
+			}
+		}
+	}
+	return hasLetter
 }
 
 // loadDictionaries reads all gazetteers. If dir is non-empty, files are read
@@ -62,7 +94,15 @@ func loadDictionaries(dir string) (*dictionaries, error) {
 		d.surnames.addStem(w)
 	}
 	for _, w := range inst {
-		d.institutions = append(d.institutions, strings.ToLower(w))
+		w = strings.TrimSpace(w)
+		if w == "" {
+			continue
+		}
+		if isAbbreviationMarker(w) {
+			d.institutions = append(d.institutions, institutionMarker{text: w, caseSensitive: true})
+		} else {
+			d.institutions = append(d.institutions, institutionMarker{text: strings.ToLower(w), caseSensitive: false})
+		}
 	}
 	for _, w := range skip {
 		d.fioSkipWords[normalizeWord(w)] = struct{}{}
