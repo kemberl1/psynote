@@ -186,6 +186,122 @@
   border-style: dashed;
 }
 
+/* ─── Кастом-чип «тег» (подтверждённый свой вариант) с действиями ────────── */
+/* Выглядит как обычный выбранный чип (chip--active), но содержит текст + ×. */
+.chip--tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: default;
+  padding-right: var(--space-2);
+  animation: chip-pop var(--transition);
+}
+.chip__text {
+  white-space: nowrap;
+}
+.chip__edit {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity var(--transition);
+}
+.chip__edit:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+.chip__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--accent);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.chip__remove:hover {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.chip__remove:focus-visible,
+.chip__edit:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-ring);
+  border-radius: var(--radius-sm);
+}
+
+/* Контейнер кастом-чипов под select (в multiselect они живут внутри .chips). */
+.custom-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  animation: field-reveal var(--transition);
+}
+
+@keyframes chip-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ─── Инлайн-поле «свой вариант» с кнопкой подтверждения ─────────────────── */
+.custom-input {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+.custom-input__field {
+  flex: 1 1 auto;
+}
+.custom-input__confirm {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-lg);
+  line-height: 1;
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    border-color var(--transition),
+    background var(--transition),
+    color var(--transition),
+    opacity var(--transition);
+}
+.custom-input__confirm:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.custom-input__confirm:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.custom-input__confirm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* ─── Boolean — переключатель да/нет ────────────────────────────────────── */
 .toggle-group {
   display: inline-flex;

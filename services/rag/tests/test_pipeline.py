@@ -265,6 +265,45 @@ def test_map_multiselect_custom_item_in_prompt() -> None:
     assert "чувство опустошённости" in joined
 
 
+def test_map_multiselect_multiple_custom_items_in_prompt() -> None:
+    """Этап 7.1: НЕСКОЛЬКО «своих вариантов» в multiselect — все в промпт-строке.
+
+    Фронт теперь позволяет добавить серию кастом-чипов; контракт сериализует их
+    как несколько объектов __custom__ в массиве. Маппинг обязан развернуть КАЖДЫЙ
+    в общую формулировку (вместе со стандартными кодами), без потерь.
+    """
+    mapped = map_answers(DOC_TYPE_DAILY, {
+        "mood": "lowered",
+        "mood_detail": [
+            "anxiety",
+            {"value": "__custom__", "custom_text": "беспокойство"},
+            {"value": "__custom__", "custom_text": "апатия"},
+        ],
+    })
+    joined = " ".join(mapped.prompt_lines)
+    assert "тревога" in joined
+    assert "беспокойство" in joined
+    assert "апатия" in joined
+
+
+def test_iter_free_text_covers_multiple_multiselect_customs() -> None:
+    """Этап 7.1: iter_free_text извлекает КАЖДЫЙ кастом multiselect по индексу.
+
+    Гарантирует, что все несколько кастом-элементов попадают на анонимайзер-гейт
+    (каждый по своему пути qid[idx].custom_text) — приватность сохранена.
+    """
+    answers = {
+        "mood_detail": [
+            "anxiety",
+            {"value": "__custom__", "custom_text": "беспокойство"},
+            {"value": "__custom__", "custom_text": "апатия"},
+        ],
+    }
+    found = dict(iter_free_text(DOC_TYPE_DAILY, answers))
+    assert found["mood_detail[1].custom_text"] == "беспокойство"
+    assert found["mood_detail[2].custom_text"] == "апатия"
+
+
 def test_map_exam_psych_status_and_syndrome_select() -> None:
     """Психический статус осмотра (мышление/внимание/интеллект) + syndrome-select.
 

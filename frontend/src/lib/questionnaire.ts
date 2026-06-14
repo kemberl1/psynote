@@ -316,15 +316,70 @@ export function collectConditionalIds(schema: QuestionnaireSchema): Set<string> 
 }
 
 // ─── Хелперы «своего варианта» в multiselect ────────────────────────────────
+// Формат значения multiselect — массив MultiAnswerItem: строковые коды опций
+// и/или НЕСКОЛЬКО объектов «свой вариант» {value:"__custom__", custom_text}.
+// Это согласовано с rag (map_answers разворачивает каждый custom-элемент, а
+// iter_free_text/_set_by_path обезличивают каждый по индексу qid[idx]) и с
+// gateway-контрактом (docs/06 §1.4, docs/07 §5) — несколько кастомов валидны.
 
-/** Есть ли в multiselect-значении кастом-элемент. */
+/** Есть ли в multiselect-значении хотя бы один кастом-элемент. */
 export function hasCustomItem(value: AnswerValue | undefined): boolean {
   return Array.isArray(value) && value.some((i) => isCustomAnswer(i));
 }
 
-/** Текст кастом-элемента multiselect (или ""). */
+/** Текст ПЕРВОГО кастом-элемента multiselect (или ""). Совместимость. */
 export function customItemText(value: AnswerValue | undefined): string {
   if (!Array.isArray(value)) return "";
   const found = value.find((i) => isCustomAnswer(i));
   return found && isCustomAnswer(found) ? found.custom_text : "";
+}
+
+/** Строковые коды выбранных опций multiselect (без кастомов), в порядке. */
+export function multiCodes(value: AnswerValue | undefined): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((i): i is string => typeof i === "string");
+}
+
+/** Все непустые кастом-тексты multiselect, в порядке добавления. */
+export function multiCustomTexts(value: AnswerValue | undefined): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((i): i is CustomAnswer => isCustomAnswer(i))
+    .map((i) => i.custom_text)
+    .filter((t) => t.trim().length > 0);
+}
+
+/**
+ * Добавляет новый кастом-вариант в multiselect-массив. Триммит, отбрасывает
+ * пустой ввод и дубликаты (без учёта регистра — сравнение по уже имеющимся
+ * кастом-текстам). Возвращает НОВЫЙ массив; при отказе — копию исходного.
+ */
+export function addCustomItem(
+  value: AnswerValue | undefined,
+  text: string,
+): MultiAnswerItem[] {
+  const items: MultiAnswerItem[] = Array.isArray(value) ? [...value] : [];
+  const trimmed = text.trim();
+  if (!trimmed) return items;
+  const existing = multiCustomTexts(items).map((t) => t.toLowerCase());
+  if (existing.includes(trimmed.toLowerCase())) return items;
+  items.push({ value: CUSTOM_VALUE, custom_text: trimmed });
+  return items;
+}
+
+/**
+ * Удаляет кастом-вариант по его порядковому номеру СРЕДИ кастомов (0-based).
+ * Коды опций не затрагиваются. Возвращает новый массив.
+ */
+export function removeCustomItemAt(
+  value: AnswerValue | undefined,
+  customIndex: number,
+): MultiAnswerItem[] {
+  const items: MultiAnswerItem[] = Array.isArray(value) ? [...value] : [];
+  let seen = -1;
+  return items.filter((item) => {
+    if (!isCustomAnswer(item)) return true;
+    seen += 1;
+    return seen !== customIndex;
+  });
 }

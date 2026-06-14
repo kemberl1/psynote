@@ -5,16 +5,20 @@
 //
 // Запуск: cd frontend && npm test
 import { describe, expect, it } from "vitest";
-import type { Answers, QuestionnaireSchema } from "../api/types";
+import type { Answers, MultiAnswerItem, QuestionnaireSchema } from "../api/types";
 import {
-    buildDefaults,
-    clearHiddenAnswers,
-    computeProgress,
-    computeVisibleIds,
-    CUSTOM_VALUE,
-    groupVisibleQuestions,
-    isAnswered,
-    prepareAnswers,
+  addCustomItem,
+  buildDefaults,
+  clearHiddenAnswers,
+  computeProgress,
+  computeVisibleIds,
+  CUSTOM_VALUE,
+  groupVisibleQuestions,
+  isAnswered,
+  multiCodes,
+  multiCustomTexts,
+  prepareAnswers,
+  removeCustomItemAt
 } from "./questionnaire";
 
 // Мини-схема, повторяющая ключевые ветвления docs/06: select→cascade,
@@ -205,6 +209,75 @@ describe("prepareAnswers", () => {
     // events: пустой кастом отброшен, остался код.
     expect(payload.events).toEqual(["exam"]);
     expect(payload.events_detail).toBe("результаты");
+  });
+});
+
+// ─── Этап 7.1: несколько «своих вариантов» в multiselect ───────────────────
+describe("multiselect custom helpers (Этап 7.1)", () => {
+  it("multiCodes/multiCustomTexts разделяют коды и кастомы", () => {
+    const value: MultiAnswerItem[] = [
+      "anxiety",
+      { value: CUSTOM_VALUE, custom_text: "беспокойство" },
+      "tearfulness",
+      { value: CUSTOM_VALUE, custom_text: "апатия" },
+    ];
+    expect(multiCodes(value)).toEqual(["anxiety", "tearfulness"]);
+    expect(multiCustomTexts(value)).toEqual(["беспокойство", "апатия"]);
+  });
+
+  it("addCustomItem добавляет несколько кастомов подряд (серия)", () => {
+    let value = addCustomItem(["anxiety"], "беспокойство");
+    value = addCustomItem(value, "апатия");
+    expect(multiCodes(value)).toEqual(["anxiety"]);
+    expect(multiCustomTexts(value)).toEqual(["беспокойство", "апатия"]);
+  });
+
+  it("addCustomItem триммит ввод", () => {
+    const value = addCustomItem([], "  беспокойство  ");
+    expect(multiCustomTexts(value)).toEqual(["беспокойство"]);
+  });
+
+  it("addCustomItem не добавляет пустой/пробельный ввод", () => {
+    expect(addCustomItem(["anxiety"], "   ")).toEqual(["anxiety"]);
+    expect(addCustomItem([], "")).toEqual([]);
+  });
+
+  it("addCustomItem не плодит дубликаты (без учёта регистра)", () => {
+    let value = addCustomItem([], "беспокойство");
+    value = addCustomItem(value, "Беспокойство");
+    value = addCustomItem(value, "  беспокойство ");
+    expect(multiCustomTexts(value)).toEqual(["беспокойство"]);
+  });
+
+  it("removeCustomItemAt удаляет один кастом, не трогая коды и другие кастомы", () => {
+    const value: MultiAnswerItem[] = [
+      "anxiety",
+      { value: CUSTOM_VALUE, custom_text: "беспокойство" },
+      { value: CUSTOM_VALUE, custom_text: "апатия" },
+    ];
+    const next = removeCustomItemAt(value, 0); // удалить «беспокойство»
+    expect(multiCodes(next)).toEqual(["anxiety"]);
+    expect(multiCustomTexts(next)).toEqual(["апатия"]);
+  });
+});
+
+describe("prepareAnswers (несколько custom)", () => {
+  it("сохраняет несколько непустых кастомов, отбрасывает пустые", () => {
+    const answers: Answers = {
+      events: [
+        "exam",
+        { value: CUSTOM_VALUE, custom_text: "беспокойство" },
+        { value: CUSTOM_VALUE, custom_text: "  " }, // пустой → отброшен
+        { value: CUSTOM_VALUE, custom_text: "апатия" },
+      ],
+    };
+    const visible = computeVisibleIds(schema, answers);
+    const payload = prepareAnswers(schema, answers, visible);
+    expect(payload.events).toEqual([
+      "exam",
+      { value: CUSTOM_VALUE, custom_text: "беспокойство" },
+      { value: CUSTOM_VALUE, custom_text: "апатия" },
+    ]);
   });
 });
 

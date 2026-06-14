@@ -1,22 +1,33 @@
 // QuestionField — рендер одного вопроса опросника (docs/06 §3, docs/08 §5.1).
 // Поддерживает select / multiselect / text / number / boolean и опцию «свой
-// вариант» (allow_custom) — в т.ч. внутри multiselect (Этап 7). Контролируемый
-// компонент: значение и onChange приходят сверху.
+// вариант» (allow_custom) — в т.ч. НЕСКОЛЬКО своих вариантов внутри multiselect
+// (Этап 7.1). Контролируемый компонент: значение и onChange приходят сверху.
+//
+// UX «своего варианта» (Этап 7.1):
+//   • multiselect: кнопка «＋ Свой вариант» открывает инлайн-поле; ввод
+//     подтверждается Enter или кнопкой «＋» → текст превращается в выбранный
+//     чип-тег (как обычная опция), поле очищается и остаётся в фокусе для
+//     серии. Каждый кастом-чип удаляется крестиком ×. Пустой ввод/дубликаты не
+//     добавляются. Esc или клик вне — закрыть поле без добавления.
+//   • select (одиночный): «Свой вариант» открывает поле; Enter/кнопка
+//     подтверждают значение (показывается как выбранное, можно изменить/очистить).
 //
 // Приватность (docs/06 §1.4, docs/09): свободный ввод анонимизируется на
 // gateway — на фронте только подсказка «без персональных данных», ничего не
 // хранится локально сверх стейта формы.
+import { useEffect, useRef, useState } from "react";
 import type {
   AnswerValue,
-  CustomAnswer,
   MultiAnswerItem,
-  Question,
+  Question
 } from "../../api/types";
 import {
+  addCustomItem,
   CUSTOM_VALUE,
-  customItemText,
-  hasCustomItem,
   isCustomAnswer,
+  multiCodes,
+  multiCustomTexts,
+  removeCustomItemAt,
 } from "../../lib/questionnaire";
 
 interface QuestionFieldProps {
@@ -90,7 +101,29 @@ function FieldControl({ question, value, onChange }: ControlProps) {
 // ─── select (+ свой вариант) ─────────────────────────────────────────────────
 function SelectField({ question, value, onChange }: ControlProps) {
   const custom = isCustomAnswer(value);
+  const customText = custom ? value.custom_text : "";
   const selected = custom ? CUSTOM_VALUE : typeof value === "string" ? value : "";
+
+  // Поле редактирования открыто, пока кастом выбран, но ещё не подтверждён
+  // (нет текста) ИЛИ пользователь явно нажал «изменить».
+  const [editing, setEditing] = useState(custom && customText.length === 0);
+
+  // Открыть поле, когда переключились на «Свой вариант» без текста.
+  useEffect(() => {
+    if (custom && customText.length === 0) setEditing(true);
+  }, [custom, customText.length]);
+
+  const confirm = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      // Пустой ввод — сбрасываем выбор «свой вариант».
+      onChange("");
+      setEditing(false);
+      return;
+    }
+    onChange({ value: CUSTOM_VALUE, custom_text: trimmed });
+    setEditing(false);
+  };
 
   return (
     <>
@@ -102,8 +135,10 @@ function SelectField({ question, value, onChange }: ControlProps) {
           const v = e.target.value;
           if (v === CUSTOM_VALUE) {
             onChange({ value: CUSTOM_VALUE, custom_text: "" });
+            setEditing(true);
           } else {
             onChange(v);
+            setEditing(false);
           }
         }}
       >
@@ -118,51 +153,70 @@ function SelectField({ question, value, onChange }: ControlProps) {
         )}
       </select>
 
-      {custom && (
-        <CustomTextInput
+      {custom && editing && (
+        <CustomTextEditor
           label={question.label}
-          value={isCustomAnswer(value) ? value.custom_text : ""}
-          onChange={(text) =>
-            onChange({ value: CUSTOM_VALUE, custom_text: text })
-          }
+          initial={customText}
+          onConfirm={confirm}
+          onCancel={() => {
+            // Esc/клик-вне без текста → снять выбор «своего варианта».
+            if (!customText.trim()) onChange("");
+            setEditing(false);
+          }}
         />
+      )}
+
+      {custom && !editing && customText.trim() && (
+        <div className="custom-chips">
+          <span className="chip chip--active chip--tag">
+            <span className="chip__text">{customText}</span>
+            <button
+              type="button"
+              className="chip__edit"
+              aria-label={`Изменить свой вариант: ${customText}`}
+              onClick={() => setEditing(true)}
+            >
+              Изменить
+            </button>
+            <button
+              type="button"
+              className="chip__remove"
+              aria-label={`Удалить свой вариант: ${customText}`}
+              onClick={() => onChange("")}
+            >
+              ×
+            </button>
+          </span>
+        </div>
       )}
     </>
   );
 }
 
-// ─── multiselect (чипы + опц. свой вариант) ──────────────────────────────────
+// ─── multiselect (чипы + опц. несколько своих вариантов) ─────────────────────
 function MultiSelectField({ question, value, onChange }: ControlProps) {
-  const items: MultiAnswerItem[] = Array.isArray(value) ? value : [];
-  const codes = items.filter((i): i is string => typeof i === "string");
-  const customActive = hasCustomItem(value);
+  const codes = multiCodes(value);
+  const customTexts = multiCustomTexts(value);
+  const [adding, setAdding] = useState(false);
 
-  const setItems = (codeList: string[], custom?: CustomAnswer) => {
-    const next: MultiAnswerItem[] = [...codeList];
-    if (custom) next.push(custom);
+  const toggle = (optValue: string) => {
+    const items: MultiAnswerItem[] = Array.isArray(value) ? [...value] : [];
+    const next = codes.includes(optValue)
+      ? items.filter((i) => !(typeof i === "string" && i === optValue))
+      : [...items, optValue];
     onChange(next);
   };
 
-  const toggle = (optValue: string) => {
-    const nextCodes = codes.includes(optValue)
-      ? codes.filter((v) => v !== optValue)
-      : [...codes, optValue];
-    const existingCustom = items.find((i) => isCustomAnswer(i)) as
-      | CustomAnswer
-      | undefined;
-    setItems(nextCodes, existingCustom);
+  const addCustom = (text: string): boolean => {
+    const before = customTexts.length;
+    const next = addCustomItem(value, text);
+    onChange(next);
+    // Успех, если число кастомов выросло (не дубль/не пусто).
+    return multiCustomTexts(next).length > before;
   };
 
-  const toggleCustom = () => {
-    if (customActive) {
-      setItems(codes); // убрать кастом
-    } else {
-      setItems(codes, { value: CUSTOM_VALUE, custom_text: "" });
-    }
-  };
-
-  const updateCustomText = (text: string) => {
-    setItems(codes, { value: CUSTOM_VALUE, custom_text: text });
+  const removeCustom = (customIndex: number) => {
+    onChange(removeCustomItemAt(value, customIndex));
   };
 
   return (
@@ -182,50 +236,128 @@ function MultiSelectField({ question, value, onChange }: ControlProps) {
             </button>
           );
         })}
-        {question.allow_custom && (
+
+        {/* Подтверждённые кастом-варианты — такие же выбранные чипы с ×. */}
+        {customTexts.map((text, idx) => (
+          <span key={`custom-${idx}`} className="chip chip--active chip--tag">
+            <span className="chip__text">{text}</span>
+            <button
+              type="button"
+              className="chip__remove"
+              aria-label={`Удалить свой вариант: ${text}`}
+              onClick={() => removeCustom(idx)}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+
+        {question.allow_custom && !adding && (
           <button
             type="button"
-            className={`chip chip--custom${customActive ? " chip--active" : ""}`}
-            aria-pressed={customActive}
-            onClick={toggleCustom}
+            className="chip chip--custom"
+            onClick={() => setAdding(true)}
           >
             ＋ Свой вариант
           </button>
         )}
       </div>
 
-      {customActive && (
-        <CustomTextInput
+      {question.allow_custom && adding && (
+        <CustomTextEditor
           label={question.label}
-          value={customItemText(value)}
-          onChange={updateCustomText}
+          initial=""
+          keepOpenOnConfirm
+          onConfirm={(text) => addCustom(text)}
+          onCancel={() => setAdding(false)}
         />
       )}
     </>
   );
 }
 
-// ─── Инлайн-поле «свой вариант» (общее для select/multiselect) ───────────────
-function CustomTextInput({
+// ─── Инлайн-редактор «свой вариант» с явным подтверждением ───────────────────
+// Поддерживает Enter/кнопку «＋» для подтверждения и Esc/клик-вне для отмены.
+// При keepOpenOnConfirm (multiselect-серия) — после успешного добавления поле
+// очищается и фокус возвращается для следующего ввода.
+function CustomTextEditor({
   label,
-  value,
-  onChange,
+  initial,
+  onConfirm,
+  onCancel,
+  keepOpenOnConfirm = false,
 }: {
   label: string;
-  value: string;
-  onChange: (text: string) => void;
+  initial: string;
+  /** Возвращает true, если значение принято (для серии). */
+  onConfirm: (text: string) => boolean | void;
+  onCancel: () => void;
+  keepOpenOnConfirm?: boolean;
 }) {
+  const [text, setText] = useState(initial);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Автофокус при открытии.
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  // Клик вне поля — отмена (без добавления).
+  useEffect(() => {
+    const onDocPointer = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        onCancel();
+      }
+    };
+    document.addEventListener("mousedown", onDocPointer);
+    return () => document.removeEventListener("mousedown", onDocPointer);
+  }, [onCancel]);
+
+  const submit = () => {
+    const accepted = onConfirm(text);
+    if (keepOpenOnConfirm) {
+      // Серия: очищаем поле и возвращаем фокус (даже если дубль/пусто —
+      // просто остаёмся готовы к новому вводу).
+      if (accepted !== false) setText("");
+      inputRef.current?.focus();
+    }
+  };
+
   return (
-    <div className="field__custom">
-      <input
-        className="field__input"
-        type="text"
-        autoFocus
-        placeholder="Свой вариант (без персональных данных)"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label={`${label}: свой вариант`}
-      />
+    <div className="field__custom" ref={wrapRef}>
+      <div className="custom-input">
+        <input
+          ref={inputRef}
+          className="field__input custom-input__field"
+          type="text"
+          placeholder="Свой вариант (без персональных данных)"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              onCancel();
+            }
+          }}
+          aria-label={`${label}: свой вариант`}
+        />
+        <button
+          type="button"
+          className="custom-input__confirm"
+          aria-label="Добавить свой вариант"
+          disabled={!text.trim()}
+          onClick={submit}
+        >
+          ＋
+        </button>
+      </div>
+      <p className="field__help">
+        Подтвердите по Enter или кнопкой «＋». Без персональных данных.
+      </p>
     </div>
   );
 }

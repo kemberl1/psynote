@@ -92,7 +92,15 @@ function AnswersTable({ answers }: { answers: Answers }) {
 
 function renderValue(value: Answers[string]): string {
   if (value === null || value === undefined) return "—";
-  if (Array.isArray(value)) return value.join(", ");
+  if (Array.isArray(value)) {
+    // multiselect: коды-строки + «свои варианты» (объекты) — разворачиваем
+    // каждый кастом в его текст, чтобы не получить [object Object].
+    return value
+      .map((item) =>
+        isCustomAnswer(item) ? item.custom_text || "(свой вариант)" : String(item),
+      )
+      .join(", ");
+  }
   if (isCustomAnswer(value)) return value.custom_text || "(свой вариант)";
   if (typeof value === "boolean") return value ? "да" : "нет";
   return String(value);
