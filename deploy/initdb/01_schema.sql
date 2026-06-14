@@ -72,9 +72,14 @@ CREATE TABLE IF NOT EXISTS questionnaire_schema (
 -- Один запрос врача. answers_anonymized — ответы опросника ПОСЛЕ анонимизации.
 -- title_safe — безопасный заголовок для истории. ТОЛЬКО обезличенные данные.
 -- (docs/05 §2.2, статусы — docs/05 §2.4).
+-- doctor_id NULLABLE до Этапа 9 (аутентификация): на MVP запросы пишутся без
+-- привязки к врачу (NULL). Место под scoping заложено (FK сохранён, NULL
+-- допускается). После ввода auth поле станет обязательным (см. docs/05 §2,
+-- docs/10 Этап 9). ON DELETE SET NULL: удаление врача не теряет обезличенную
+-- историю (в ней нет ПДн, docs/05 §2.3).
 CREATE TABLE IF NOT EXISTS generation_request (
     id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    doctor_id                UUID NOT NULL REFERENCES doctor(id) ON DELETE CASCADE,
+    doctor_id                UUID REFERENCES doctor(id) ON DELETE SET NULL,
     document_type_code       TEXT NOT NULL REFERENCES document_type(code),
     answers_anonymized       JSONB NOT NULL DEFAULT '{}'::jsonb,
     title_safe               TEXT,

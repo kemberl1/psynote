@@ -34,6 +34,18 @@ type anonymizeData struct {
 type meta struct {
 	RequestID string `json:"request_id,omitempty"`
 	TS        string `json:"ts"`
+	// Optional generation metadata (docs/07 §5). Omitted for non-generate routes.
+	LLMModelUsed string `json:"llm_model_used,omitempty"`
+	TokensUsed   int    `json:"tokens_used,omitempty"`
+	// Optional list metadata (docs/07 §6 — total for pagination).
+	Total *int `json:"total,omitempty"`
+	// Optional schema version (docs/07 §3 — questionnaire meta.version).
+	Version *int `json:"version,omitempty"`
+}
+
+// nowRFC3339 is the canonical timestamp for envelope meta.ts (docs/07 §1).
+func nowRFC3339() string {
+	return time.Now().UTC().Format(time.RFC3339)
 }
 
 type envelope struct {

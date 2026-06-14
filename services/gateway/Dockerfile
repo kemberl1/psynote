@@ -8,8 +8,7 @@ FROM golang:1.23-alpine AS build
 WORKDIR /src
 
 # Кэшируем зависимости отдельно от исходников.
-COPY go.mod ./
-# go.sum появится, когда добавятся внешние зависимости (этапы 3+).
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .

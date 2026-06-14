@@ -23,6 +23,8 @@ import (
 	"github.com/aimed/gateway/internal/anonymizer"
 	"github.com/aimed/gateway/internal/config"
 	"github.com/aimed/gateway/internal/handlers"
+	"github.com/aimed/gateway/internal/ragclient"
+	"github.com/aimed/gateway/internal/store"
 )
 
 func main() {
@@ -42,7 +44,36 @@ func main() {
 		os.Exit(1)
 	}
 
-	mux := handlers.NewRouter(cfg, anon)
+	// RAG client (оркестрация генерации, docs/02 §3). URL из ENV RAG_URL.
+	rag := ragclient.New(ragclient.Options{
+		BaseURL:         cfg.RAGBaseURL,
+		GenerateTimeout: cfg.RAGGenerateTimeout,
+		HealthTimeout:   cfg.RAGHealthTimeout,
+	})
+
+	// PostgreSQL persistence (ОБЕЗЛИЧЕННАЯ история, docs/05). Деградация
+	// допустима: если БД недоступна на старте — /generate и /history вернут 503,
+	// но health/справочники работают (docs/02 §7).
+	var repo store.Repository
+	if cfg.PostgresDSN != "" {
+		dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		pgRepo, derr := store.NewPgxRepository(dbCtx, cfg.PostgresDSN)
+		dbCancel()
+		if derr != nil {
+			slog.Error("postgres connect failed; history/generate disabled", "error_type", "store")
+		} else {
+			repo = pgRepo
+			defer pgRepo.Close()
+		}
+	} else {
+		slog.Warn("POSTGRES_DSN empty; history/generate disabled")
+	}
+
+	mux := handlers.NewRouter(cfg, handlers.Deps{
+		Anonymizer: anon,
+		RAG:        rag,
+		Repo:       repo,
+	})
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

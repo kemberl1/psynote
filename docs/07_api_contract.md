@@ -122,7 +122,11 @@
   "data": {
     "request_id": "uuid",
     "content": "обезличенный текст дневника с плейсхолдерами [ДАТА], [ФИО_ВРАЧА]...",
-    "status": "done"
+    "status": "done",
+    // Сводка обезличивания СВОБОДНОГО ВВОДА врача (для UX-плашки «мы убрали X ПДн»).
+    // Обратно-совместимое ДОБАВЛЕНИЕ. ТОЛЬКО счётчики/категории — НИКОГДА значения.
+    // removed_by_type: человекочитаемые категории (ФИО/ДАТА/АДРЕС/...).
+    "anonymization": { "removed_count": 3, "removed_by_type": { "ФИО": 2, "ДАТА": 1 } }
   }}
 // Response 422 — PII-гейт
 { "meta": {...}, "error": { "code": "PII_DETECTED", "message": "Во входных данных обнаружены ПДн" } }
@@ -141,7 +145,7 @@
 ```jsonc
 // Response 200
 { "meta": { "total": 134 }, "data": [
-  { "request_id": "uuid", "document_type": "daily", "title_safe": "Ежедневный дневник · сниженное настроение · без динамики", "llm_model_used": "x5-airun-large", "created_at": "..." }
+  { "request_id": "uuid", "document_type": "daily", "title_safe": "Ежедневный дневник · сниженное настроение · без динамики", "llm_model_used": "x5-airun-large", "status": "done", "created_at": "..." }
 ]}
 ```
 
@@ -153,6 +157,10 @@
   "document_type": "daily",
   "answers_anonymized": { /* ... */ },
   "content": "обезличенный текст...",
+  "title_safe": "Ежедневный дневник · ...",
+  "llm_model_used": "x5-airun-large",
+  "status": "done",
+  "anonymizer_removed_count": 5,   // аудит, без значений ПДн (docs/05 §2.2)
   "created_at": "..."
 }}
 ```

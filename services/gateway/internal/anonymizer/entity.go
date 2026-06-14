@@ -62,6 +62,53 @@ func (e EntityType) Placeholder() string {
 	return "[УДАЛЕНО]"
 }
 
+// categoryLabels maps each internal entity type to a human-readable category
+// label for UX summaries (плашка «мы убрали X ПДн», docs/04 §7). Several
+// person-name types collapse into the single «ФИО» bucket so the doctor sees a
+// short, понятный список категорий — NOT the internal placeholder names.
+// ВАЖНО: это ТОЛЬКО ярлык категории; реальные значения ПДн здесь не участвуют.
+var categoryLabels = map[EntityType]string{
+	EntityPatient:     "ФИО",
+	EntityDoctor:      "ФИО",
+	EntityParent:      "ФИО",
+	EntityPerson:      "ФИО",
+	EntityDate:        "ДАТА",
+	EntityPeriod:      "ПЕРИОД",
+	EntityTime:        "ВРЕМЯ",
+	EntityAge:         "ВОЗРАСТ",
+	EntityAddress:     "АДРЕС",
+	EntityInstitution: "УЧРЕЖДЕНИЕ",
+	EntityDocNumber:   "НОМЕР ДОКУМЕНТА",
+	EntityPhone:       "ТЕЛЕФОН",
+	EntityIDDoc:       "ДОКУМЕНТ",
+}
+
+// Label returns a human-readable category name for the entity type, used by the
+// UX anonymization summary. Unknown types fall back to a generic «ПДн».
+func (e EntityType) Label() string {
+	if l, ok := categoryLabels[e]; ok {
+		return l
+	}
+	return "ПДн"
+}
+
+// LabelCounts aggregates a per-type counter into a human-readable per-category
+// counter (e.g. {ФИО:2, ДАТА:1}). It carries ONLY counts/categories — never the
+// removed values themselves (docs/04 §5, §7).
+func LabelCounts(byType map[EntityType]int) map[string]int {
+	if len(byType) == 0 {
+		return map[string]int{}
+	}
+	out := make(map[string]int, len(byType))
+	for t, c := range byType {
+		if c == 0 {
+			continue
+		}
+		out[t.Label()] += c
+	}
+	return out
+}
+
 // priority defines which entity wins when two candidate spans overlap.
 // Higher value = kept. Person/FIO categories rank highest because a missed
 // ФИО is the most dangerous leak (fail-closed bias, docs/04 §1).

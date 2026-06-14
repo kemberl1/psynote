@@ -1,56 +1,77 @@
 // Package handlers wires HTTP routes for the gateway.
 //
-// Этап 1 (каркас): здесь только health-эндпоинт. Будущие роуты
-// (auth, generate, attachments, export, document-types, questionnaire —
-// см. docs/07_api_contract.md) добавляются как отдельные обработчики,
-// что отражает принцип «каждый тип документа = отдельный роут» (docs/02 AD-8).
+// Этап 5 (оркестратор): помимо health и служебного /anonymize здесь
+// регистрируются публичные роуты контракта docs/07:
+//
+//	GET  /api/v1/document-types         (docs/07 §3)
+//	GET  /api/v1/questionnaire          (docs/07 §3)
+//	POST /api/v1/generate               (docs/07 §5) — анонимизация→RAG→store
+//	GET  /api/v1/requests               (docs/07 §6) — история (обезличенная)
+//	GET  /api/v1/requests/{id}          (docs/07 §6) — деталь (обезличенная)
+//	GET  /api/v1/history[, /{id}]       — алиасы под имена из задания Этапа 5
+//
+// Принцип «каждый тип документа = отдельный роут/конфиг» (docs/02 AD-8)
+// сохранён: тип передаётся в теле/квери, оркестрация едина.
 package handlers
 
 import (
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/aimed/gateway/internal/anonymizer"
 	"github.com/aimed/gateway/internal/config"
+	"github.com/aimed/gateway/internal/ragclient"
+	"github.com/aimed/gateway/internal/store"
 )
 
-// NewRouter builds the HTTP handler tree using the standard library
-// net/http router (Go 1.22+ pattern routing). chi can be introduced later
-// without changing this contract (см. docs/02 §5 — chi или net/http).
-//
-// anon is the PII gate (docs/04). It is injected so that future business
-// handlers (/generate, /attachments) reuse the SAME gate instance.
-func NewRouter(cfg config.Config, anon anonymizer.Anonymizer) http.Handler {
+// Deps holds the orchestration dependencies injected into the router.
+// rag/repo may be nil on a degraded boot (e.g. no DB) — affected routes then
+// return 503; health still works (graceful degradation, docs/02 §7).
+type Deps struct {
+	Anonymizer anonymizer.Anonymizer
+	RAG        ragclient.Client
+	Repo       store.Repository
+}
+
+// NewRouter builds the HTTP handler tree using the standard library net/http
+// router (Go 1.22+ pattern routing, method+path patterns). chi can be
+// introduced later without changing this contract (docs/02 §5).
+func NewRouter(cfg config.Config, deps Deps) http.Handler {
 	mux := http.NewServeMux()
 
-	// Health endpoint. Доступен и по корню, и под префиксом /api/v1
-	// (проверка из docs/10 Этап 0: `GET /api/v1/health`).
-	mux.HandleFunc("GET /health", healthHandler)
-	mux.HandleFunc("GET "+config.APIPrefix+"/health", healthHandler)
+	// ─── Health (docs/07 §8) — доступен и по корню, и под префиксом ─────────
+	healthH := newHealthHandler(deps.RAG)
+	mux.HandleFunc("GET /health", healthH)
+	mux.HandleFunc("GET "+config.APIPrefix+"/health", healthH)
 
-	// Служебный эндпоинт PII-гейта (docs/04). Прямой доступ к анонимизатору
-	// для проверки/демонстрации; бизнес-потоки (/generate, /attachments)
-	// вызывают тот же пайплайн внутри себя.
-	if anon != nil {
-		mux.HandleFunc("POST "+config.APIPrefix+"/anonymize", newAnonymizeHandler(anon))
+	// ─── Служебный PII-гейт (docs/04) ──────────────────────────────────────
+	if deps.Anonymizer != nil {
+		mux.HandleFunc("POST "+config.APIPrefix+"/anonymize", newAnonymizeHandler(deps.Anonymizer))
 	}
 
-	// TODO(этап 5): auth-роуты — POST /api/v1/auth/{register,login,refresh,logout}, GET /me.
-	// TODO(этап 4): GET /api/v1/document-types, GET /api/v1/questionnaire.
-	// TODO(этап 3): POST /api/v1/generate (анонимизация-гейт → RAG → LLM с fallback).
-	// TODO(этап 4): POST /api/v1/attachments (анонимизация + ingestion).
-	// TODO(этап 6): POST /api/v1/export (docx|pdf).
+	// ─── Справочники и схема опросника (docs/07 §3) ─────────────────────────
+	mux.HandleFunc("GET "+config.APIPrefix+"/document-types", newDocumentTypesHandler())
+	mux.HandleFunc("GET "+config.APIPrefix+"/questionnaire", newQuestionnaireHandler())
+
+	// ─── Генерация (docs/07 §5) ─────────────────────────────────────────────
+	if deps.RAG != nil && deps.Repo != nil {
+		mux.HandleFunc("POST "+config.APIPrefix+"/generate",
+			newGenerateHandler(cfg, deps.Anonymizer, deps.RAG, deps.Repo))
+	} else {
+		mux.HandleFunc("POST "+config.APIPrefix+"/generate", newUnavailableHandler())
+	}
+
+	// ─── История запросов (docs/07 §6) + алиасы /history (задание Этапа 5) ──
+	if deps.Repo != nil {
+		listH := newHistoryListHandler(deps.Repo)
+		detailH := newHistoryDetailHandler(deps.Repo)
+		mux.HandleFunc("GET "+config.APIPrefix+"/requests", listH)
+		mux.HandleFunc("GET "+config.APIPrefix+"/requests/{id}", detailH)
+		mux.HandleFunc("GET "+config.APIPrefix+"/history", listH)
+		mux.HandleFunc("GET "+config.APIPrefix+"/history/{id}", detailH)
+	}
 
 	return withCommonMiddleware(cfg, mux)
-}
-
-type healthResponse struct {
-	Status string `json:"status"`
-}
-
-func healthHandler(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, healthResponse{Status: "ok"})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -59,20 +80,37 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-// withCommonMiddleware applies cross-cutting concerns (CORS placeholder,
-// security headers). Полноценные middleware (rate-limit, JWT-проверка)
-// — на следующих этапах, см. docs/09_security_privacy.md §6.
+// newUnavailableHandler returns 503 for routes whose backends failed to init.
+func newUnavailableHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE",
+			"подсистема временно недоступна")
+	}
+}
+
+// withCommonMiddleware applies CORS (preflight + headers) and security headers
+// (docs/09 §6). CORS origin is the configured frontend (env CORS_ALLOWED_ORIGIN).
 func withCommonMiddleware(cfg config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Минимальные security-заголовки (docs/09 §6).
+		// Security headers (docs/09 §6).
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 
-		// CORS (белый список origin фронтенда). TODO(этап 4): preflight, методы, заголовки.
+		// CORS (white-listed frontend origin).
 		if cfg.CORSAllowedOrigin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", cfg.CORSAllowedOrigin)
+			h := w.Header()
+			h.Set("Access-Control-Allow-Origin", cfg.CORSAllowedOrigin)
+			h.Set("Vary", "Origin")
+			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			h.Set("Access-Control-Max-Age", "600")
 		}
 
-		_ = time.Now() // placeholder для будущего request-logging middleware
+		// Preflight: respond immediately without hitting business handlers.
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }
