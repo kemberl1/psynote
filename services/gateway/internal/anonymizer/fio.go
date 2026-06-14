@@ -36,9 +36,10 @@ type fioDetector struct {
 func newFIODetector(d *dictionaries) *fioDetector {
 	return &fioDetector{
 		dict: d,
-		// Отчества: -вич/-вича/-вичу/-вичем (м.р.) и -вна/-вны/-вне/-вной (ж.р.),
-		// а также -ьевич/-ьевна, -ич/-инична.
-		patronymicRe:      regexp.MustCompile(`(?:[А-ЯЁ][а-яё]+(?:ович|евич|ьевич|ич)(?:а|у|ем|е)?|[А-ЯЁ][а-яё]+(?:овна|евна|ьевна|инична)(?:ы|е|ой|у)?)`),
+		// Отчества во ВСЕХ падежах (ЭТАП 3.1). Источник паттерна — общий
+		// patronymicPattern, тот же, что использует валидатор-гейт (gate.go),
+		// чтобы детектор покрывал ВСЁ, на что реагирует гейт (residual_patronymic).
+		patronymicRe:      regexp.MustCompile(patronymicPattern),
 		surnameInitialsRe: regexp.MustCompile(`[А-ЯЁ][а-яё]+(?:ов|ев|ёв|ин|ын|ский|ская|цкий|цкая|ова|ева|ёва|ина|ына)?\s+[А-ЯЁ]\.\s?[А-ЯЁ]\.`),
 		initialsSurnameRe: regexp.MustCompile(`[А-ЯЁ]\.\s?[А-ЯЁ]\.\s+[А-ЯЁ][а-яё]+`),
 		doctorMarkerRe:    regexp.MustCompile(`(?i)(?:врач(?:-[а-яё]+)?|психиатр|педиатр|невролог|психолог|заведующ(?:ий|ая)|зав\.\s*отделением|председател[ья]|член\s+ВК|секретар[ья]|доктор|медсестра|медбрат)`),
@@ -66,7 +67,13 @@ func (f *fioDetector) detect(text string, set *spanSet) {
 
 	// 2. Patronymic-anchored blocks.
 	for i, tk := range toks {
-		if !f.patronymicRe.MatchString(tk.text) || !isFullToken(f.patronymicRe, tk.text) {
+		if !isWholePatronymic(f.patronymicRe, tk.text) {
+			continue
+		}
+		// Precision-guard (ЭТАП 3.1): нарицательные слова, совпадающие с
+		// отчественным паттерном (напр. «Паралич» в начале предложения, «-ична»
+		// прилагательные), не считаем ФИО — см. fio_skip_words.txt.
+		if f.isSkip(tk.text) {
 			continue
 		}
 		start, end := tk.start, tk.end
@@ -132,7 +139,7 @@ func (f *fioDetector) isNameLike(word string) bool {
 		return false
 	}
 	// явная подсказка: отчество / словарное имя или фамилия
-	if isFullToken(f.patronymicRe, word) {
+	if isWholePatronymic(f.patronymicRe, word) {
 		return true
 	}
 	if f.dict.firstNames.match(word) || f.dict.surnames.match(word) {
@@ -171,6 +178,17 @@ func (f *fioDetector) roleAt(text string, pos int) EntityType {
 func isFullToken(re *regexp.Regexp, tok string) bool {
 	loc := re.FindStringIndex(tok)
 	return loc != nil && loc[0] == 0 && loc[1] == len(tok)
+}
+
+// isWholePatronymic is the SINGLE shared definition of «целый токен — это
+// отчество», used identically by the L5 detector (fio.go) and the L7 gate
+// (gate.go). It strips a trailing initial dot (токенайзер прихватывает «.» для
+// инициалов) and requires the patronymic pattern to match the WHOLE token, not
+// a substring. Это и устраняет асимметрию Этапа 3.1: гейт больше не реагирует
+// на префиксы нарицательных слов («Наличие», «Различие»), потому что «ич» там —
+// середина слова, а не самостоятельный токен-отчество.
+func isWholePatronymic(re *regexp.Regexp, tok string) bool {
+	return isFullToken(re, strings.TrimRight(tok, "."))
 }
 
 // tokenize splits text into word tokens keeping byte offsets. A token is a run
