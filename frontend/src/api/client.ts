@@ -9,7 +9,7 @@ import type { ApiErrorCode, Envelope } from "./types";
  * путь, который vite-proxy (dev) или nginx (prod) проксирует на gateway
  * (docs/07 §1). Переопределяется через VITE_API_BASE.
  */
-const API_BASE = (import.meta.env.VITE_API_BASE ?? "/api/v1").replace(/\/$/, "");
+export const API_BASE = (import.meta.env.VITE_API_BASE ?? "/api/v1").replace(/\/$/, "");
 
 /** Допустимые методы. */
 type Method = "GET" | "POST" | "DELETE";

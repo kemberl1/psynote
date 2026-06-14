@@ -177,3 +177,18 @@ export interface HistoryListResult {
   items: HistoryItem[];
   total: number;
 }
+
+// ─── Экспорт (docs/07 §7) ──────────────────────────────────────────────────
+
+/** Формат экспорта документа (docs/07 §7). */
+export type ExportFormat = "docx" | "pdf" | "txt";
+
+/**
+ * Тело POST /requests/{id}/export (docs/07 §7). substitutions — локальная
+ * подстановка реальных значений плейсхолдеров (применяется gateway в памяти,
+ * не сохраняется). Может быть опущена.
+ */
+export interface ExportRequest {
+  format: ExportFormat;
+  substitutions?: Record<string, string>;
+}

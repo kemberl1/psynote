@@ -102,6 +102,7 @@ export function DiaryPage() {
     return (
       <>
         <GenerationResult
+          requestId={result.request_id}
           documentType={docType}
           documentTypes={docTypesQuery.data}
           content={result.content}

@@ -20,6 +20,7 @@ import (
 
 	"github.com/aimed/gateway/internal/anonymizer"
 	"github.com/aimed/gateway/internal/config"
+	"github.com/aimed/gateway/internal/export"
 	"github.com/aimed/gateway/internal/ragclient"
 	"github.com/aimed/gateway/internal/store"
 )
@@ -69,6 +70,10 @@ func NewRouter(cfg config.Config, deps Deps) http.Handler {
 		mux.HandleFunc("GET "+config.APIPrefix+"/requests/{id}", detailH)
 		mux.HandleFunc("GET "+config.APIPrefix+"/history", listH)
 		mux.HandleFunc("GET "+config.APIPrefix+"/history/{id}", detailH)
+
+		// ─── Экспорт документа (docs/07 §7) — сервис экспорта Go (docs/02 §4) ──
+		exportH := newExportHandler(deps.Repo, export.New())
+		mux.HandleFunc("POST "+config.APIPrefix+"/requests/{id}/export", exportH)
 	}
 
 	return withCommonMiddleware(cfg, mux)

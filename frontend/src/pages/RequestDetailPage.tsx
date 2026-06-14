@@ -46,6 +46,7 @@ export function RequestDetailPage() {
       {data && (
         <>
           <GenerationResult
+            requestId={data.request_id}
             title={data.title_safe}
             documentType={data.document_type}
             documentTypes={docTypesQuery.data}
