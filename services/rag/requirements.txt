@@ -12,6 +12,12 @@ qdrant-client==1.12.1
 # --- HTTP client (вызов анонимайзера gateway /api/v1/anonymize, docs/04 §1) ---
 httpx==0.28.1
 
+# --- LLM X5 CoPilot (OpenAI-совместимый) + ретраи (Этап 4, docs/03 §9–10) ---
+# openai SDK указывает на base_url X5; tenacity — экспоненциальный backoff
+# внутри одной модели перед фолбэком на следующую.
+openai==1.59.6
+tenacity==9.0.0
+
 # --- Парсеры форматов корпуса (docs/03 §5) ---
 python-docx==1.1.2     # извлечение текста из .docx
 odfpy==1.4.1           # извлечение текста из .odt

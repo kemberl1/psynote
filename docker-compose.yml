@@ -71,11 +71,29 @@ services:
       GATEWAY_URL: ${GATEWAY_URL:-http://gateway:8080}
       # Корпус монтируется volume'ом read-only (см. volumes ниже), docs/03 §5.
       CORPUS_DIR: ${CORPUS_DIR:-/data/corpus}
+      # Охват ingestion дневников (Этап 4.1): all=весь корпус-дневники | subdir=подпапка.
+      CORPUS_DIARIES_SCOPE: ${CORPUS_DIARIES_SCOPE:-all}
       CORPUS_DIARIES_SUBDIR: ${CORPUS_DIARIES_SUBDIR:-02_корпус/сборник_дневников_ИБ}
+      CORPUS_DIARY_NAME_RE: ${CORPUS_DIARY_NAME_RE:-дневник}
+      CORPUS_DIARY_DIRS: ${CORPUS_DIARY_DIRS:-сборник_дневников_ИБ,заготовки_дневников}
+      CORPUS_EXCLUDE_NAME_RE: ${CORPUS_EXCLUDE_NAME_RE:-первичк|первичн|эпикриз|выписк|лист[ _]*назнач|назначени|статкарт|статистическ}
       # Чанкинг (docs/03 §4).
       CHUNK_MAX_CHARS: ${CHUNK_MAX_CHARS:-1200}
       CHUNK_OVERLAP_CHARS: ${CHUNK_OVERLAP_CHARS:-150}
       RAG_PORT: "8000"
+      # LLM X5 CoPilot — генерация дневников (Этап 4, docs/03 §9–10).
+      # Клиент с автофолбэком моделей живёт в RAG-сервисе. Ключ только из ENV.
+      X5_BASE_URL: ${X5_BASE_URL:-https://api-copilot.x5.ru/aigw/v1/}
+      X5_API_KEY: ${X5_API_KEY:-}
+      LLM_CA_BUNDLE: ${LLM_CA_BUNDLE:-/app/certs/x5_root_ca.pem}
+      LLM_MODEL_LARGE: ${LLM_MODEL_LARGE:-x5-airun-large}
+      LLM_MODEL_MEDIUM: ${LLM_MODEL_MEDIUM:-x5-airun-medium}
+      LLM_MODEL_SMALL: ${LLM_MODEL_SMALL:-x5-airun-small}
+      LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-60}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.4}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-2048}
+      RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K:-5}
     ports:
       - "${RAG_HOST_PORT:-8001}:8000"
     volumes:
@@ -84,6 +102,9 @@ services:
       - ./Документы:/data/corpus:ro
       # Кэш HF-моделей e5 — чтобы не качать модель при каждом запуске ingestion.
       - rag_hf_cache:/app/.cache/huggingface
+      # Корпоративный CA-bundle X5 для реальной генерации (docs/03 §9.2).
+      # Положите PEM в ./deploy/certs/ (вне git) и раскомментируйте строку ниже:
+      - ./deploy/certs/x5_root_ca.pem:/app/certs/x5_root_ca.pem:ro
     depends_on:
       qdrant:
         condition: service_started

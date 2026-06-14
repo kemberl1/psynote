@@ -84,7 +84,8 @@ class QdrantStore:
             ),
         )
         # Индексы по метаданным для фильтрованного retrieval (docs/03 §6).
-        for field_name in ("doc_type", "section", "syndrome",
+        # doc_kind — задел под будущие типы документов (Этап 4.1, docs/03 §11).
+        for field_name in ("doc_type", "doc_kind", "section", "syndrome",
                            "diagnosis_class", "dynamics", "source"):
             try:
                 self._client.create_payload_index(
@@ -131,11 +132,20 @@ class QdrantStore:
 
 def build_payload(text: str, *, doc_type: str, section: str,
                   syndrome: str | None, diagnosis_class: str | None,
-                  dynamics: str | None, source: str = "corpus") -> dict:
-    """Сформировать payload точки (docs/05 §3.2). Только обезличенные данные."""
+                  dynamics: str | None, source: str = "corpus",
+                  doc_kind: str = "diary") -> dict:
+    """Сформировать payload точки (docs/05 §3.2). Только обезличенные данные.
+
+    `doc_kind` — КАТЕГОРИЯ источника (Этап 4.1, точка расширения под docs/03 §11):
+    сейчас индексируем только дневники → "diary". В будущем сюда добавятся
+    "primary_exam"/"epicrisis"/"clinical_guideline" (вероятно в ОТДЕЛЬНЫХ
+    коллекциях, см. docs/03 §11) — поле уже в payload, чтобы фильтровать/мигрировать
+    без переиндексации схемы. doc_type остаётся клиническим подтипом (daily|exam_10d).
+    """
     payload: dict = {
         "text": text,
         "doc_type": doc_type,
+        "doc_kind": doc_kind,
         "section": section,
         "source": source,
         "ingested_at": datetime.now(timezone.utc).isoformat(),

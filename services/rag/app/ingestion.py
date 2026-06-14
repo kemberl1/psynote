@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -82,7 +83,11 @@ def source_ref(path: Path, corpus_root: Path) -> str:
 
 
 def iter_corpus_files(root: Path, *, include_tables: bool) -> list[Path]:
-    """Собрать поддерживаемые файлы корпуса (рекурсивно)."""
+    """Собрать поддерживаемые файлы корпуса (рекурсивно), БЕЗ отбора по типу.
+
+    Низкоуровневый обход: только фильтр по расширению и временным файлам Office
+    (`~$...`). Отбор именно ДНЕВНИКОВ выполняет :func:`select_diary_files`.
+    """
     suffixes = set(SUPPORTED_SUFFIXES)
     if not include_tables:
         suffixes -= SUPPORTED_TABLE_SUFFIXES
@@ -91,6 +96,67 @@ def iter_corpus_files(root: Path, *, include_tables: bool) -> list[Path]:
         if p.is_file() and p.suffix.lower() in suffixes and not p.name.startswith("~$"):
             files.append(p)
     return files
+
+
+@dataclass(frozen=True)
+class DiarySelector:
+    """Конфигурируемый отбор файлов-ДНЕВНИКОВ из дерева корпуса (Этап 4.1).
+
+    Критерий «это дневник» (docs/03 §4–5):
+      • имя файла матчит ``name_re`` (по умолчанию «дневник», регистронезависимо), ИЛИ
+      • файл лежит в одной из «дневниковых» папок ``diary_dirs``
+        (``сборник_дневников_ИБ`` / ``заготовки_дневников``).
+
+    Отсев (НЕ индексируем на этом этапе — первички/эпикризы/выписки/листы
+    назначений/статкарты): если имя матчит ``exclude_re`` И при этом НЕ матчит
+    ``name_re`` (явный «дневник» в имени имеет приоритет и не отсеивается).
+
+    Отбор СОЗНАТЕЛЬНО расширяем: ``exclude_re``/``name_re``/``diary_dirs``
+    задаются через ENV — будущие типы документов (docs/03 §11) добавляются без
+    правки кода (отдельной коллекцией/настройкой).
+
+    ПРИВАТНОСТЬ: ни имена файлов, ни сегменты пути (папки `выписанные/<ФИО>/…`
+    содержат ПДн) НЕ логируются и НЕ попадают в payload — используется только
+    обезличенный source_ref (sha256 относительного пути).
+    """
+
+    name_re: re.Pattern[str]
+    exclude_re: re.Pattern[str] | None
+    diary_dirs: frozenset[str]
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "DiarySelector":
+        name_re = re.compile(settings.corpus_diary_name_re, re.IGNORECASE)
+        exclude_raw = (settings.corpus_exclude_name_re or "").strip()
+        exclude_re = re.compile(
+            exclude_raw, re.IGNORECASE) if exclude_raw else None
+        dirs = frozenset(
+            d.strip().casefold()
+            for d in settings.corpus_diary_dirs.split(",")
+            if d.strip()
+        )
+        return cls(name_re=name_re, exclude_re=exclude_re, diary_dirs=dirs)
+
+    def _in_diary_dir(self, path: Path) -> bool:
+        parts = {p.casefold() for p in path.parts}
+        return bool(self.diary_dirs & parts)
+
+    def is_diary(self, path: Path) -> bool:
+        """True, если файл следует индексировать как ДНЕВНИК на этом этапе."""
+        name = path.name
+        name_hit = bool(self.name_re.search(name))
+        dir_hit = self._in_diary_dir(path)
+        if not (name_hit or dir_hit):
+            return False
+        # Явный «дневник» в имени побеждает отсев; иначе применяем exclude.
+        if not name_hit and self.exclude_re is not None and self.exclude_re.search(name):
+            return False
+        return True
+
+
+def select_diary_files(files: list[Path], selector: DiarySelector) -> list[Path]:
+    """Отфильтровать список файлов до файлов-дневников (детерминированно)."""
+    return [p for p in files if selector.is_diary(p)]
 
 
 class IngestionPipeline:

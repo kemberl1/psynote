@@ -122,6 +122,147 @@ curl "http://localhost:8001/admin/audit-sample?sample=20"
 
 ---
 
+## Генерация дневника (Этап 4) — RAG + LLM X5 с автофолбэком
+
+Главный эндпоинт продукта: по ответам опросника + типу дневника собирается промпт
+из **шаблона** (жёсткий каркас разделов), **few-shot образцов** из Qdrant (стиль
+корпуса) и **ответов опросника** (содержание), затем вызывается корпоративный LLM
+X5 CoPilot с **автоматическим фолбэком** моделей `large → medium → small`
+(см. [`docs/03_rag_design.md`](docs/03_rag_design.md) §6–10,
+[`docs/07_api_contract.md`](docs/07_api_contract.md) §5).
+
+Конвейер: **анонимизация свободного ввода через gateway-гейт → retrieval из
+Qdrant → сборка промпта (daily/exam_10d) → LLM с фолбэком → обезличенный ответ**.
+Реализация в RAG-сервисе: [`llm_client.py`](services/rag/app/llm_client.py:1),
+[`generation.py`](services/rag/app/generation.py:1),
+[`questionnaire.py`](services/rag/app/questionnaire.py:1),
+[`templates.py`](services/rag/app/templates.py:1),
+[`pipeline.py`](services/rag/app/pipeline.py:1).
+
+### Запуск РЕАЛЬНОЙ генерации (нужен ключ X5 + корпоративный CA)
+
+```bash
+# 1. Прописать секреты в .env (НЕ коммитить!):
+#    X5_API_KEY=<ваш Bearer-ключ X5 CoPilot>
+#    X5_BASE_URL=https://api-copilot.x5.ru/aigw/v1/
+#    LLM_MODEL_LARGE=x5-airun-large   (порядок фолбэка large→medium→small)
+#    LLM_MODEL_MEDIUM=x5-airun-medium
+#    LLM_MODEL_SMALL=x5-airun-small
+
+# 2. Положить корпоративный CA X5 (PEM) и подключить его:
+#    cp <ваш x5_root_ca.pem> deploy/certs/x5_root_ca.pem      # папка вне git
+#    В docker-compose.yml (сервис rag) раскомментировать volume:
+#      - ./deploy/certs/x5_root_ca.pem:/app/certs/x5_root_ca.pem:ro
+#    В .env: LLM_CA_BUNDLE=/app/certs/x5_root_ca.pem
+#    (TLS-верификация ОСТАЁТСЯ включённой — указываем доверенный bundle)
+
+# 3. Поднять зависимости и сам RAG:
+docker compose up -d qdrant gateway rag
+
+# 4. (опц., для few-shot) проиндексировать корпус — см. раздел Ingestion выше:
+docker compose run --rm rag python -m app.ingest ingest
+
+# 5. Проверить, что LLM сконфигурирован:
+curl http://localhost:8001/health
+#   → {"status":"ok","llm":{"configured":true,"models":["x5-airun-large",...]}, ...}
+```
+
+### Пример запроса — ЕЖЕДНЕВНЫЙ дневник (`daily`)
+
+```bash
+curl -sS -X POST http://localhost:8001/generate \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "document_type": "daily",
+    "answers": {
+      "dynamics": "no_change",
+      "productive_symptoms": "not_detected",
+      "mood": "lowered",
+      "mood_detail": ["anxiety", "tearfulness"],
+      "behavior": "ordered",
+      "contact": ["productive", "polite_staff"],
+      "sleep": "hard_to_fall_asleep",
+      "appetite": "decreased",
+      "tolerance": "good",
+      "complaints": "none"
+    }
+  }'
+```
+
+### Пример запроса — ОСМОТР раз в 10 дней (`exam_10d`)
+
+```bash
+curl -sS -X POST http://localhost:8001/generate \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "document_type": "exam_10d",
+    "answers": {
+      "dynamics": "positive",
+      "mood": "even",
+      "behavior": "ordered",
+      "sleep": "not_disturbed",
+      "appetite": "preserved",
+      "physical_status": "unremarkable",
+      "neuro_status": "no_acute",
+      "criticism": "forming",
+      "suicidal": "not_detected",
+      "diagnosis": "F84.11 Атипичный аутизм",
+      "syndrome": "психопатоподобный",
+      "period_dynamics": "improvement",
+      "prescriptions": "см. лист назначений"
+    }
+  }'
+```
+
+Свободный текст (поля `*_detail`, `diagnosis`, кастомные «свой вариант»
+`{"value":"__custom__","custom_text":"..."}`) **автоматически прогоняется через
+анонимайзер-гейт** перед отправкой в LLM.
+
+### Ожидаемый ответ (конверт по [`docs/07`](docs/07_api_contract.md) §1, §5)
+
+```jsonc
+{
+  "meta": {
+    "request_id": "uuid",
+    "ts": "ISO8601",
+    "llm_model_used": "x5-airun-large",   // какая модель отработала (после фолбэка)
+    "tokens_used": 812,
+    "chunks_used": 5                       // сколько few-shot образцов использовано
+  },
+  "data": {
+    "document_type": "daily",
+    "content": "обезличенный текст дневника с плейсхолдерами [ДАТА], [ФИО_ВРАЧА]...",
+    "status": "done",
+    "title_safe": "Ежедневный дневник · ...",
+    "answers_anonymized": { /* ответы после гейта */ },
+    "anonymizer_removed_count": 0,
+    "retrieval": { "chunks_used": 5, "syndrome": null, "diagnosis_class": null, "dynamics": "без_динамики" }
+  }
+}
+```
+
+Коды ошибок: `400` неизвестный `document_type`; `422` `PII_DETECTED` (гейт
+заблокировал свободный ввод); `503` `LLM_UNAVAILABLE` (все модели фолбэка
+недоступны) / `LLM_NOT_CONFIGURED` (нет ключа) / `LLM_AUTH_ERROR` (401/403 —
+проверьте `X5_API_KEY`, без ретраев и без перебора моделей).
+
+### Тесты Этапа 4 (с моками LLM, без сети)
+
+```bash
+cd services/rag && python -m pytest tests/test_llm_client.py tests/test_pipeline.py -q
+# 19 passed — фолбэк large→medium→small, без ретраев на 401/403, «все модели
+# недоступны», анонимизация ввода перед промптом, сборка промптов daily/exam_10d.
+```
+
+> ОТКЛОНЕНИЕ от [`docs/02/03`](docs/03_rag_design.md): по исходному дизайну LLM-клиент
+> с фолбэком предполагался в Go-Gateway. По заданию Этапа 4 он реализован в
+> RAG-сервисе (Python — «План Б» из docs/03 §9), чтобы весь конвейер генерации был
+> в одном месте. Эндпоинт публикуется как `POST /generate` (gateway на следующих
+> этапах проксирует `POST /api/v1/generate` → `rag:8000/generate`). Конверт ответа
+> и коды ошибок сохранены по docs/07 §1.
+
+---
+
 ## Структура репозитория
 
 ```
@@ -165,6 +306,7 @@ curl "http://localhost:8001/admin/audit-sample?sample=20"
 
 ## Статус по этапам
 
-Реализован **Этап 0/1 — каркас** (роадмап: [`docs/10_roadmap_stepbystep.md`](docs/10_roadmap_stepbystep.md)).
-Следующие этапы: анонимизация → корпус/RAG → LLM+генерация → опросник → auth →
-экспорт → полировка UI. Все будущие точки помечены `TODO(этап N)` в коде.
+Реализованы **Этапы 0–4** (роадмап: [`docs/10_roadmap_stepbystep.md`](docs/10_roadmap_stepbystep.md)):
+каркас → анонимизация (gateway) → ingestion корпуса/RAG → **генерация дневников
+(RAG-retrieval + LLM X5 с автофолбэком, `POST /generate`)**.
+Следующие этапы: фронтенд → динамический опросник-UI → экспорт docx/pdf → auth.

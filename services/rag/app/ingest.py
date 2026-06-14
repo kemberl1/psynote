@@ -25,7 +25,12 @@ from pathlib import Path
 from app.anonymizer_client import AnonymizerClient
 from app.config import Settings, get_settings
 from app.embeddings import Embedder
-from app.ingestion import IngestionPipeline, iter_corpus_files
+from app.ingestion import (
+    DiarySelector,
+    IngestionPipeline,
+    iter_corpus_files,
+    select_diary_files,
+)
 from app.qdrant_store import QdrantStore
 
 logger = logging.getLogger("ingest")
@@ -39,30 +44,53 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
-def _resolve_corpus_root(settings: Settings) -> Path:
-    """Корень для обхода: CORPUS_DIR (+ опционально подпапка дневников)."""
+def _resolve_corpus_root(settings: Settings, scope: str) -> Path:
+    """Корень для обхода (Этап 4.1).
+
+    scope="all"     → весь корпус CORPUS_DIR (рекурсивно), отбор дневников по
+                      имени/папке выполняет DiarySelector.
+    scope="subdir"  → историческое сужение до CORPUS_DIARIES_SUBDIR (Этап 3).
+    """
     base = Path(settings.corpus_dir)
-    diaries = base / settings.corpus_diaries_subdir
-    if diaries.is_dir():
-        return diaries
+    if scope == "subdir":
+        diaries = base / settings.corpus_diaries_subdir
+        if diaries.is_dir():
+            return diaries
+        logger.warning(
+            "scope=subdir: подпапка дневников не найдена — обхожу весь CORPUS_DIR.")
     return base
 
 
 def cmd_ingest(settings: Settings, args: argparse.Namespace) -> int:
+    scope = (args.scope or settings.corpus_diaries_scope or "all").strip().lower()
     corpus_root = Path(
-        args.corpus_dir) if args.corpus_dir else _resolve_corpus_root(settings)
+        args.corpus_dir) if args.corpus_dir else _resolve_corpus_root(settings, scope)
     if not corpus_root.is_dir():
         logger.error(
             "CORPUS_DIR не найден или не смонтирован: %s", corpus_root)
         return 2
 
-    files = iter_corpus_files(corpus_root, include_tables=args.include_tables)
+    all_files = iter_corpus_files(
+        corpus_root, include_tables=args.include_tables)
+    selector = DiarySelector.from_settings(settings)
+    if args.no_filter:
+        # Аварийный режим: индексировать всё поддерживаемое без отбора по типу.
+        files = all_files
+        logger.info("Отбор дневников ОТКЛЮЧЁН (--no-filter): беру все файлы.")
+    else:
+        files = select_diary_files(all_files, selector)
+    # ПРИВАТНОСТЬ: логируем только счётчики, НЕ имена файлов/папок (могут быть ФИО).
+    logger.info(
+        "Сканирование: всего поддерживаемых=%d, отобрано дневников=%d, отсеяно=%d "
+        "(scope=%s, include_tables=%s)",
+        len(all_files), len(files), len(all_files) - len(files),
+        scope, args.include_tables)
     if args.limit:
         files = files[: args.limit]
-    logger.info("Найдено файлов для обработки: %d (корень: %s, include_tables=%s)",
-                len(files), corpus_root, args.include_tables)
+        logger.info("Применён --limit=%d → к обработке: %d файлов.",
+                    args.limit, len(files))
     if not files:
-        logger.warning("Нет поддерживаемых файлов — нечего индексировать.")
+        logger.warning("Нет файлов-дневников — нечего индексировать.")
         return 0
 
     anon = AnonymizerClient(settings)
@@ -129,6 +157,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest = sub.add_parser("ingest", help="прогнать пайплайн ingestion")
     p_ingest.add_argument("--corpus-dir", default=None,
                           help="переопределить корень корпуса (иначе из ENV CORPUS_DIR)")
+    p_ingest.add_argument("--scope", choices=["all", "subdir"], default=None,
+                          help="охват: all=весь корпус-дневники (дефолт), "
+                               "subdir=только CORPUS_DIARIES_SUBDIR. "
+                               "Иначе из ENV CORPUS_DIARIES_SCOPE.")
+    p_ingest.add_argument("--no-filter", action="store_true",
+                          help="отключить отбор по типу-дневник (аварийный режим): "
+                               "индексировать все поддерживаемые файлы в корне")
     p_ingest.add_argument("--limit", type=int, default=None,
                           help="обработать не более N файлов (smoke-прогон)")
     p_ingest.add_argument("--include-tables", action="store_true",
