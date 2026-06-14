@@ -1,0 +1,229 @@
+/* ============================================================================
+   UI-примитивы PsyNote (дизайн-система docs/08 §2). Чистый CSS на токенах.
+   ============================================================================ */
+
+/* ─── Button ──────────────────────────────────────────────────────────────
+   Акцент используется СКУПО (docs/08 §2.1): primary — единственная заметная
+   заливка; ghost/secondary — нейтральные, с тонким контуром. */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  line-height: 1;
+  padding: 0 var(--space-4);
+  height: 38px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    color var(--transition),
+    opacity var(--transition);
+  user-select: none;
+}
+.ui-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-btn--primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.ui-btn--primary:not(:disabled):hover {
+  background: var(--accent-hover);
+}
+
+.ui-btn--secondary {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+.ui-btn--secondary:not(:disabled):hover {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
+.ui-btn--ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.ui-btn--ghost:not(:disabled):hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.ui-btn--sm {
+  height: 32px;
+  font-size: var(--fs-sm);
+  padding: 0 var(--space-3);
+}
+.ui-btn--lg {
+  height: 44px;
+  font-size: var(--fs-md);
+  padding: 0 var(--space-6);
+}
+.ui-btn--block {
+  width: 100%;
+}
+
+/* ─── Badge ──────────────────────────────────────────────────────────────── */
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+.ui-badge--accent {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+}
+.ui-badge--success {
+  color: var(--success);
+  border-color: var(--success-soft);
+  background: var(--success-soft);
+}
+.ui-badge--mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+/* ─── Spinner ───────────────────────────────────────────────────────────── */
+.ui-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: ui-spin 0.7s linear infinite;
+}
+.ui-spinner--lg {
+  width: 26px;
+  height: 26px;
+  border-width: 3px;
+}
+@keyframes ui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ─── Skeleton (docs/08 §2.4 — скелетоны вместо спиннеров) ─────────────── */
+.ui-skeleton {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-3) 37%,
+    var(--surface-2) 63%
+  );
+  background-size: 400% 100%;
+  animation: ui-shimmer 1.4s ease infinite;
+}
+@keyframes ui-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+/* ─── EmptyState ────────────────────────────────────────────────────────── */
+.ui-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-3);
+  padding: var(--space-10) var(--space-6);
+  color: var(--text-secondary);
+}
+.ui-empty__icon {
+  font-size: 28px;
+  opacity: 0.7;
+  margin-bottom: var(--space-1);
+}
+.ui-empty__title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+}
+.ui-empty__text {
+  font-size: var(--fs-sm);
+  max-width: 320px;
+  line-height: var(--lh-snug);
+}
+
+/* ─── Banner (ошибки/приватность, docs/08 §7) ────────────────────────────── */
+.ui-banner {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  align-items: flex-start;
+}
+.ui-banner__icon {
+  flex-shrink: 0;
+  font-size: 18px;
+  line-height: 1.3;
+}
+.ui-banner__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ui-banner__title {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text);
+}
+.ui-banner__text {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+}
+.ui-banner--danger {
+  border-color: var(--danger-soft);
+  background: var(--danger-soft);
+}
+.ui-banner--danger .ui-banner__icon {
+  color: var(--danger);
+}
+.ui-banner--warning {
+  border-color: var(--warning-soft);
+  background: var(--warning-soft);
+}
+.ui-banner--warning .ui-banner__icon {
+  color: var(--warning);
+}
+.ui-banner--success {
+  border-color: var(--success-soft);
+  background: var(--success-soft);
+}
+.ui-banner--success .ui-banner__icon {
+  color: var(--success);
+}
+.ui-banner__action {
+  margin-top: var(--space-3);
+}

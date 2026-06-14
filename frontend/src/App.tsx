@@ -1,35 +1,36 @@
-// Стартовая страница-заглушка (Этап 1 каркаса).
-// Полноценный UI (опросник, рабочая область, история, экспорт) — Этапы 4–7,
-// дизайн в стиле cursor.com — см. docs/08_ui_ux.md.
+// PsyNote — корневой роутинг приложения врача (docs/08 §3).
+// Каждый тип документа — отдельный роут (масштабируемость, docs/08 §3, AD-8).
+// Этап 6 (MVP): / → /diary (генерация дневников) + /requests/:id (просмотр
+// истории). Auth-роуты (/login, /register) и будущие типы документов
+// (/primary-exam, /anamnesis, /discharge) — следующие этапы.
+import { Navigate, Route, Routes } from "react-router-dom";
+import { AppShell } from "./components/layout/AppShell";
+import { EmptyState } from "./components/ui";
+import { DiaryPage } from "./pages/DiaryPage";
+import { RequestDetailPage } from "./pages/RequestDetailPage";
 
 function App() {
   return (
-    <main className="app">
-      <div className="card">
-        <div className="badge">RAG · Психиатрические дневники</div>
-        <h1 className="title">
-          AI MED — <span className="accent">генерация дневников</span>
-        </h1>
-        <p className="subtitle">
-          Каркас проекта (Этап 1). Сервисы поднимаются через docker-compose:
-          frontend, gateway (Go), rag (Python), postgres, qdrant.
-        </p>
-        <ul className="status-list">
-          <li>
-            <span className="dot" /> Frontend — React 19 + Vite + TypeScript
-          </li>
-          <li>
-            <span className="dot" /> Gateway — Go (API · анонимизация · экспорт)
-          </li>
-          <li>
-            <span className="dot" /> RAG — Python · FastAPI · Qdrant
-          </li>
-        </ul>
-        <p className="footnote">
-          Бизнес-логика появится на следующих этапах (см. docs/10_roadmap_stepbystep.md).
-        </p>
-      </div>
-    </main>
+    <Routes>
+      <Route element={<AppShell />}>
+        {/* Главная → генерация дневников (ядро MVP). */}
+        <Route index element={<Navigate to="/diary" replace />} />
+        <Route path="diary" element={<DiaryPage />} />
+        {/* Просмотр прошлого результата из истории. */}
+        <Route path="requests/:id" element={<RequestDetailPage />} />
+        {/* Фолбэк. */}
+        <Route
+          path="*"
+          element={
+            <EmptyState
+              icon="🧭"
+              title="Страница не найдена"
+              text="Такого раздела пока нет. Вернитесь к созданию нового дневника."
+            />
+          }
+        />
+      </Route>
+    </Routes>
   );
 }
 

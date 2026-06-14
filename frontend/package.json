@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "AI MED — фронтенд (React 19 + Vite + TS, тёмная тема в стиле Cursor). См. docs/08_ui_ux.md.",
+  "description": "PsyNote — фронтенд врача (React 19 + Vite + TS, тёмная тема в стиле Cursor). См. docs/08_ui_ux.md.",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
@@ -11,8 +11,10 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.62.7",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.1.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

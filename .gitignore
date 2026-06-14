@@ -46,6 +46,8 @@ dist/
 frontend/dist/
 frontend/.vite/
 *.local
+# TypeScript incremental build cache (НЕ коммитить)
+*.tsbuildinfo
 
 # ─── Docker volume-данные (если монтируются локально) ───────────────────────
 deploy/volumes/

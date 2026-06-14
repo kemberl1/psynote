@@ -1,0 +1,163 @@
+/* ============================================================================
+   Страницы PsyNote (рабочая область). Общие блоки для /diary и /requests/:id.
+   ============================================================================ */
+
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-8);
+}
+.page-head__title {
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.page-head__subtitle {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+}
+
+/* Переключатель типа документа (docs/08 §4.3) — сегментированный контрол. */
+.doctype {
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.doctype__btn {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.doctype__btn:hover {
+  color: var(--text);
+}
+.doctype__btn--active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+/* Секции формы */
+.section {
+  margin-top: var(--space-8);
+}
+.section__label {
+  display: block;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-4);
+}
+
+/* Нижняя панель формы: прогресс + submit */
+.form-footer {
+  position: sticky;
+  bottom: 0;
+  margin-top: var(--space-10);
+  padding: var(--space-4) 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  background: linear-gradient(
+    to top,
+    var(--bg) 60%,
+    transparent
+  );
+}
+.form-footer__progress {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.form-footer__progress b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Оверлей генерации (docs/08 §7 — индикатор модели). */
+.generating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-16) var(--space-6);
+  text-align: center;
+}
+.generating__title {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.generating__hint {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  max-width: 360px;
+  line-height: var(--lh-snug);
+}
+
+/* Состояние загрузки/скелетоны страницы */
+.page-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* Назад-ссылка */
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-5);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  transition: color var(--transition);
+}
+.back-link:hover {
+  color: var(--text);
+}
+
+/* Список ответов в просмотре истории (обезличенные answers) */
+.answers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2);
+}
+.answers__row {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+}
+.answers__row:nth-child(odd) {
+  background: var(--surface-2);
+}
+.answers__key {
+  flex-shrink: 0;
+  min-width: 180px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+.answers__value {
+  color: var(--text);
+}

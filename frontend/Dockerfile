@@ -8,9 +8,9 @@ FROM node:22-alpine AS dev
 WORKDIR /app
 
 # Кэшируем установку зависимостей отдельно от исходников.
-COPY package.json ./
-# package-lock.json появится после первого `npm install` локально.
-RUN npm install
+# Lockfile уже зафиксирован (Этап 6) → npm ci для воспроизводимой установки.
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 
