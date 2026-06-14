@@ -20,7 +20,7 @@ from app.config import Settings
 from app.generation import build_messages, build_query_text
 from app.llm_client import AllModelsUnavailableError, LLMMessage, LLMResult
 from app.pipeline import DiaryGenerator, PiiBlockedError, UnsupportedDocTypeError
-from app.questionnaire import map_answers
+from app.questionnaire import iter_free_text, map_answers
 from app.templates import DOC_TYPE_DAILY, DOC_TYPE_EXAM_10D
 
 
@@ -126,13 +126,17 @@ def test_pii_blocked_raises() -> None:
 
 # ─── Тесты retrieval / фолбэка ──────────────────────────────────────────────
 def test_retrieval_filters_passed() -> None:
-    """В retrieve передаются doc_type и метаданные (syndrome/diagnosis_class)."""
+    """В retrieve передаются doc_type и метаданные (syndrome/diagnosis_class).
+
+    Этап 7: syndrome теперь coded select — врач выбирает код (anxiety_depressive),
+    который маппится в метку корпуса для фильтра retrieval (единые коды, docs/06).
+    """
     retrieve = _fake_retrieve(
         [{"text": "образец", "syndrome": "тревожно-депрессивный"}])
     gen = DiaryGenerator(_settings(), anonymizer=FakeAnonymizer(), llm=FakeLLM(),
                          retrieve_fn=retrieve)
     answers = {
-        "syndrome": "тревожно-депрессивный",
+        "syndrome": "anxiety_depressive",
         "diagnosis": "F41.2 смешанное тревожное расстройство",
     }
     res = gen.generate(DOC_TYPE_EXAM_10D, answers)
@@ -228,3 +232,95 @@ def test_build_query_text_includes_syndrome() -> None:
     q = build_query_text(mapped, DOC_TYPE_DAILY)
     assert "тревожно-депрессивный" in q
     assert "ежедневный" in q.lower()
+
+
+# ─── Этап 7: новые/изменённые вопросы дерева docs/06 ────────────────────────
+def test_map_daily_new_conditional_multiselects() -> None:
+    """Новые условные multiselect daily (sleep_detail, events, behavior_detail)."""
+    mapped = map_answers(DOC_TYPE_DAILY, {
+        "behavior": "violates",
+        "behavior_detail": ["conflict", "aggression"],
+        "sleep": "superficial",
+        "sleep_detail": ["frequent_awakenings", "no_rest"],
+        "events": ["consultation", "examination"],
+    })
+    joined = " ".join(mapped.prompt_lines)
+    assert "конфликтность" in joined and "агрессивные проявления" in joined
+    assert "частые пробуждения" in joined
+    assert "консультация специалиста" in joined
+    assert "выполнено обследование" in joined
+
+
+def test_map_multiselect_custom_item_in_prompt() -> None:
+    """«Свой вариант» внутри multiselect разворачивается в промпт-строку."""
+    mapped = map_answers(DOC_TYPE_DAILY, {
+        "mood": "lowered",
+        "mood_detail": [
+            "anxiety",
+            {"value": "__custom__", "custom_text": "чувство опустошённости"},
+        ],
+    })
+    joined = " ".join(mapped.prompt_lines)
+    assert "тревога" in joined
+    assert "чувство опустошённости" in joined
+
+
+def test_map_exam_psych_status_and_syndrome_select() -> None:
+    """Психический статус осмотра (мышление/внимание/интеллект) + syndrome-select.
+
+    syndrome теперь select: код → метаданное для retrieval-фильтра.
+    """
+    mapped = map_answers(DOC_TYPE_EXAM_10D, {
+        "thinking": "concrete",
+        "attention_memory": "reduced",
+        "intellect": "low_norm",
+        "criticism": "conciliatory",
+        "syndrome": "anxiety_depressive",
+        "comorbidities": ["r51"],
+        "interventions": ["psychologist", "eeg"],
+    })
+    joined = " ".join(mapped.prompt_lines)
+    assert "Мышление конкретное" in joined
+    assert "Внимание и память снижены" in joined
+    assert "низкой возрастной нормы" in joined
+    assert "соглашательская" in joined
+    assert "R51" in joined
+    assert "консультация психолога" in joined and "ЭЭГ" in joined
+    # syndrome-код смаппился в метку корпуса для фильтра.
+    assert mapped.syndrome == "тревожно-депрессивный"
+
+
+def test_map_exam_discharge_freetext() -> None:
+    """Boolean discharge + условный discharge_detail (свободный текст в промпт)."""
+    mapped = map_answers(DOC_TYPE_EXAM_10D, {
+        "period_dynamics": "improvement",
+        "discharge_detail": "Рекомендовано наблюдение по месту жительства",
+    })
+    joined = " ".join(mapped.prompt_lines)
+    assert "наблюдение по месту жительства" in joined
+
+
+def test_iter_free_text_covers_multiselect_custom() -> None:
+    """iter_free_text извлекает кастом-элементы multiselect и detail-поля."""
+    answers = {
+        "mood_detail": [
+            "anxiety",
+            {"value": "__custom__", "custom_text": "своя формулировка"},
+        ],
+        "complaints_detail": "болит голова",
+        "events": [{"value": "__custom__", "custom_text": "перевод в палату"}],
+    }
+    found = dict(iter_free_text(DOC_TYPE_DAILY, answers))
+    texts = set(found.values())
+    assert "своя формулировка" in texts
+    assert "болит голова" in texts
+    assert "перевод в палату" in texts
+
+
+def test_syndrome_custom_lowercased_metadata() -> None:
+    """«Свой вариант» синдрома идёт в метаданное retrieval как lowercase."""
+    mapped = map_answers(DOC_TYPE_EXAM_10D, {
+        "syndrome": {"value": "__custom__", "custom_text": "Смешанный Синдром"},
+    })
+    assert mapped.syndrome == "смешанный синдром"
+    assert any("Смешанный Синдром" in line for line in mapped.prompt_lines)

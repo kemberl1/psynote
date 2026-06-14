@@ -9,10 +9,17 @@
 // docs/05 §2.2 предусматривает таблицу questionnaire_schema (версионируемый
 // JSONB), а docs/06 §3 фиксирует САМ ФОРМАТ схемы. RAG-сервис
 // (services/rag/app/questionnaire.py) НЕ публикует схему для фронта — он лишь
-// маппит ответы в промпт. Поэтому на Этапе 5 gateway отдаёт КАНОНИЧЕСКУЮ
-// статическую схему из этого пакета (источник правды до наполнения таблицы
-// questionnaire_schema на следующих этапах). Это даёт фронту (Этап 6/7)
-// достаточно, чтобы строить динамический опросник, и согласуется с docs/06 §4–5.
+// маппит ответы в промпт. Поэтому gateway отдаёт КАНОНИЧЕСКУЮ статическую схему
+// из этого пакета (источник правды до наполнения таблицы questionnaire_schema
+// на следующих этапах). Это даёт фронту достаточно, чтобы строить полностью
+// динамический опросник, и согласуется с docs/06 §4–5.
+//
+// Этап 7: дерево вопросов доведено до docs/06 — добавлены каскадные условные
+// вопросы (dynamics→ухудшение, sleep→характер, events→детали), multiselect с
+// «своим вариантом» (allow_custom), расширенный психический статус осмотра,
+// сопутствующие/вмешательства/выписка. Контракт расширен обратносовместимо
+// полями group (логическая группировка, docs/08 §5.1) и help (подсказка).
+//
 // Данные здесь — чистый конфиг, без ПДн (docs/05 §1).
 package catalog
 
@@ -32,12 +39,19 @@ type Option struct {
 }
 
 // Conditional describes which questions to reveal for a given value (docs/06 §3).
+// Каскад поддержан: условный вопрос сам может иметь conditional. Множественные
+// триггеры одного дочернего вопроса задаются несколькими записями Conditional
+// (по одной на каждое if_value) — это обратносовместимо с форматом docs/06 §3.
 type Conditional struct {
 	IfValue string   `json:"if_value"`
 	Show    []string `json:"show"`
 }
 
 // Question is one questionnaire item (docs/06 §3).
+//
+// Group — логическая секция для группировки в UI (docs/08 §5.1); условные
+// дочерние вопросы наследуют группу родителя в рендере. Help — короткая
+// подсказка под вопросом. Оба поля опциональны и обратносовместимы.
 type Question struct {
 	ID          string        `json:"id"`
 	Label       string        `json:"label"`
@@ -45,6 +59,8 @@ type Question struct {
 	Required    bool          `json:"required"`
 	AllowCustom bool          `json:"allow_custom"`
 	Default     any           `json:"default,omitempty"`
+	Group       string        `json:"group,omitempty"`
+	Help        string        `json:"help,omitempty"`
 	Options     []Option      `json:"options,omitempty"`
 	Conditional []Conditional `json:"conditional,omitempty"`
 }
@@ -57,8 +73,24 @@ type Schema struct {
 }
 
 // schemaVersion is the canonical version of the static schema served here.
-// (docs/07 §3 returns meta.version = this.)
-const schemaVersion = 1
+// (docs/07 §3 returns meta.version = this.) Bumped to 2 on Stage 7 (полное
+// дерево условных вопросов + «свой вариант» для multiselect + группы).
+const schemaVersion = 2
+
+// Группы опросника (docs/08 §5.1 — «Состояние · Поведение · Сон/Аппетит · …»).
+const (
+	grpState     = "Состояние"
+	grpBehavior  = "Поведение и контакт"
+	grpSleep     = "Сон и аппетит"
+	grpTherapy   = "Терапия и жалобы"
+	grpEvents    = "События дня"
+	grpAnamnesis = "Жалобы и анамнез"
+	grpSomatic   = "Соматический и неврологический статус"
+	grpPsych     = "Психический статус"
+	grpDiagnosis = "Диагноз"
+	grpOrders    = "Назначения и вмешательства"
+	grpEpicrisis = "Динамика и эпикриз"
+)
 
 // DocumentTypes mirrors deploy/initdb/02_seed.sql (docs/05 §2.2, docs/07 §3).
 func DocumentTypes() []DocumentType {
@@ -96,9 +128,10 @@ func Questionnaire(docType string) (*Schema, bool) {
 // dailyQuestions builds the daily diary questionnaire (docs/06 §4).
 func dailyQuestions() []Question {
 	return []Question{
+		// ─── Группа «Состояние» ──────────────────────────────────────────────
 		{
 			ID: "dynamics", Label: "Динамика состояния", Type: "select",
-			Required: true, AllowCustom: true, Default: "no_change",
+			Required: true, AllowCustom: true, Default: "no_change", Group: grpState,
 			Options: []Option{
 				{Value: "no_change", Label: "без существенных изменений", Prompt: "Динамика состояния: без существенных изменений."},
 				{Value: "positive", Label: "с положительной динамикой", Prompt: "Состояние с положительной динамикой."},
@@ -106,10 +139,16 @@ func dailyQuestions() []Question {
 				{Value: "worsening", Label: "с ухудшением", Prompt: "Состояние с ухудшением."},
 				{Value: "stable_positive", Label: "со стойкой положительной динамикой", Prompt: "Состояние со стойкой положительной динамикой."},
 			},
+			Conditional: []Conditional{{IfValue: "worsening", Show: []string{"dynamics_detail"}}},
+		},
+		{
+			ID: "dynamics_detail", Label: "В чём проявляется ухудшение", Type: "text",
+			Required: false, AllowCustom: true, Group: grpState,
+			Help: "Кратко опишите признаки ухудшения (без персональных данных).",
 		},
 		{
 			ID: "productive_symptoms", Label: "Психопродуктивная симптоматика", Type: "select",
-			Required: true, AllowCustom: false, Default: "not_detected",
+			Required: true, AllowCustom: false, Default: "not_detected", Group: grpState,
 			Options: []Option{
 				{Value: "not_detected", Label: "не выявлена", Prompt: "Психопродуктивная симптоматика не выявлена."},
 				{Value: "detected", Label: "выявлена", Prompt: "Выявлена психопродуктивная симптоматика."},
@@ -117,12 +156,19 @@ func dailyQuestions() []Question {
 			Conditional: []Conditional{{IfValue: "detected", Show: []string{"productive_symptoms_detail"}}},
 		},
 		{
-			ID: "productive_symptoms_detail", Label: "Характер психопродуктивной симптоматики", Type: "text",
-			Required: false, AllowCustom: true,
+			ID: "productive_symptoms_detail", Label: "Характер психопродуктивной симптоматики", Type: "multiselect",
+			Required: false, AllowCustom: true, Group: grpState,
+			Help: "Выберите характер или укажите свой вариант (без персональных данных).",
+			Options: []Option{
+				{Value: "hallucinatory", Label: "галлюцинаторная", Prompt: "галлюцинаторная симптоматика"},
+				{Value: "delusional", Label: "бредовая", Prompt: "бредовая симптоматика"},
+				{Value: "illusory", Label: "иллюзорная", Prompt: "иллюзорные расстройства"},
+				{Value: "obsessive", Label: "навязчивости", Prompt: "навязчивые расстройства"},
+			},
 		},
 		{
 			ID: "mood", Label: "Фон настроения", Type: "select",
-			Required: true, AllowCustom: true, Default: "even",
+			Required: true, AllowCustom: true, Default: "even", Group: grpState,
 			Options: []Option{
 				{Value: "even", Label: "ровный, без снижения", Prompt: "Фон настроения ровный, без снижения."},
 				{Value: "lowered", Label: "снижен", Prompt: "Настроение снижено."},
@@ -133,11 +179,12 @@ func dailyQuestions() []Question {
 			Conditional: []Conditional{
 				{IfValue: "lowered", Show: []string{"mood_detail"}},
 				{IfValue: "unstable", Show: []string{"mood_detail"}},
+				{IfValue: "dysphoric", Show: []string{"mood_detail"}},
 			},
 		},
 		{
 			ID: "mood_detail", Label: "Детали настроения", Type: "multiselect",
-			Required: false, AllowCustom: true,
+			Required: false, AllowCustom: true, Group: grpState,
 			Options: []Option{
 				{Value: "tearfulness", Label: "плаксивость", Prompt: "плаксивость"},
 				{Value: "anxiety", Label: "тревога", Prompt: "тревога"},
@@ -146,9 +193,11 @@ func dailyQuestions() []Question {
 				{Value: "lability", Label: "эмоциональная лабильность", Prompt: "эмоциональная лабильность"},
 			},
 		},
+
+		// ─── Группа «Поведение и контакт» ────────────────────────────────────
 		{
 			ID: "behavior", Label: "Поведение и режим", Type: "select",
-			Required: true, AllowCustom: true, Default: "ordered",
+			Required: true, AllowCustom: true, Default: "ordered", Group: grpBehavior,
 			Options: []Option{
 				{Value: "ordered", Label: "упорядочен, режим соблюдает", Prompt: "Поведение упорядоченное, режим соблюдает."},
 				{Value: "minor_remarks", Label: "режим на негрубых замечаниях", Prompt: "Режим соблюдает на негрубых замечаниях."},
@@ -158,12 +207,18 @@ func dailyQuestions() []Question {
 			Conditional: []Conditional{{IfValue: "violates", Show: []string{"behavior_detail"}}},
 		},
 		{
-			ID: "behavior_detail", Label: "Характер нарушений режима", Type: "text",
-			Required: false, AllowCustom: true,
+			ID: "behavior_detail", Label: "Характер нарушений режима", Type: "multiselect",
+			Required: false, AllowCustom: true, Group: grpBehavior,
+			Options: []Option{
+				{Value: "conflict", Label: "конфликтность", Prompt: "конфликтность"},
+				{Value: "protest", Label: "протестные реакции", Prompt: "протестные реакции"},
+				{Value: "refusal", Label: "отказ от режима", Prompt: "отказ от соблюдения режима"},
+				{Value: "aggression", Label: "агрессия", Prompt: "агрессивные проявления"},
+			},
 		},
 		{
 			ID: "contact", Label: "Общение и контакт", Type: "multiselect",
-			Required: false, AllowCustom: true,
+			Required: false, AllowCustom: true, Group: grpBehavior,
 			Options: []Option{
 				{Value: "productive", Label: "доступен продуктивному контакту", Prompt: "доступен продуктивному контакту"},
 				{Value: "selective_children", Label: "общается с детьми избирательно", Prompt: "общается с детьми избирательно"},
@@ -172,19 +227,35 @@ func dailyQuestions() []Question {
 				{Value: "negativistic", Label: "негативистичен", Prompt: "негативистичен"},
 			},
 		},
+
+		// ─── Группа «Сон и аппетит» ──────────────────────────────────────────
 		{
 			ID: "sleep", Label: "Сон", Type: "select",
-			Required: true, AllowCustom: true, Default: "not_disturbed",
+			Required: true, AllowCustom: true, Default: "not_disturbed", Group: grpSleep,
 			Options: []Option{
 				{Value: "not_disturbed", Label: "не нарушен", Prompt: "Сон не нарушен."},
 				{Value: "hard_to_fall_asleep", Label: "трудности засыпания", Prompt: "Сон с трудностями засыпания."},
 				{Value: "superficial", Label: "поверхностный", Prompt: "Сон поверхностный."},
 				{Value: "sufficient", Label: "достаточен", Prompt: "Сон достаточный."},
 			},
+			Conditional: []Conditional{
+				{IfValue: "hard_to_fall_asleep", Show: []string{"sleep_detail"}},
+				{IfValue: "superficial", Show: []string{"sleep_detail"}},
+			},
+		},
+		{
+			ID: "sleep_detail", Label: "Характер нарушения сна", Type: "multiselect",
+			Required: false, AllowCustom: true, Group: grpSleep,
+			Options: []Option{
+				{Value: "hard_to_fall_asleep", Label: "трудности засыпания", Prompt: "трудности засыпания"},
+				{Value: "frequent_awakenings", Label: "частые пробуждения", Prompt: "частые пробуждения"},
+				{Value: "superficial", Label: "поверхностный сон", Prompt: "поверхностный сон"},
+				{Value: "no_rest", Label: "отсутствие чувства отдыха", Prompt: "отсутствие чувства отдыха после сна"},
+			},
 		},
 		{
 			ID: "appetite", Label: "Аппетит", Type: "select",
-			Required: true, AllowCustom: true, Default: "preserved",
+			Required: true, AllowCustom: true, Default: "preserved", Group: grpSleep,
 			Options: []Option{
 				{Value: "preserved", Label: "сохранён", Prompt: "Аппетит сохранён."},
 				{Value: "decreased", Label: "снижен", Prompt: "Аппетит снижен."},
@@ -192,9 +263,11 @@ func dailyQuestions() []Question {
 				{Value: "increased", Label: "повышен", Prompt: "Аппетит повышен."},
 			},
 		},
+
+		// ─── Группа «Терапия и жалобы» ───────────────────────────────────────
 		{
 			ID: "tolerance", Label: "Переносимость терапии", Type: "select",
-			Required: true, AllowCustom: true, Default: "good",
+			Required: true, AllowCustom: true, Default: "good", Group: grpTherapy,
 			Options: []Option{
 				{Value: "good", Label: "переносит хорошо", Prompt: "Терапию переносит хорошо."},
 				{Value: "satisfactory", Label: "удовлетворительно", Prompt: "Терапию переносит удовлетворительно."},
@@ -205,11 +278,12 @@ func dailyQuestions() []Question {
 		},
 		{
 			ID: "adverse_detail", Label: "Нежелательные явления", Type: "text",
-			Required: false, AllowCustom: true,
+			Required: false, AllowCustom: true, Group: grpTherapy,
+			Help: "Опишите нежелательные явления (без персональных данных).",
 		},
 		{
 			ID: "complaints", Label: "Жалобы", Type: "select",
-			Required: true, AllowCustom: true, Default: "none",
+			Required: true, AllowCustom: true, Default: "none", Group: grpTherapy,
 			Options: []Option{
 				{Value: "none", Label: "не предъявляет", Prompt: "Жалоб активно не предъявляет."},
 				{Value: "cannot_formulate", Label: "самостоятельно не формирует", Prompt: "Жалобы самостоятельно не формирует."},
@@ -219,11 +293,32 @@ func dailyQuestions() []Question {
 		},
 		{
 			ID: "complaints_detail", Label: "Какие жалобы", Type: "text",
-			Required: false, AllowCustom: true,
+			Required: false, AllowCustom: true, Group: grpTherapy,
+			Help: "Опишите жалобы (без персональных данных).",
+		},
+
+		// ─── Группа «События дня» ────────────────────────────────────────────
+		{
+			ID: "events", Label: "События дня", Type: "multiselect",
+			Required: false, AllowCustom: true, Group: grpEvents,
+			Help: "Отметьте, если были консультации, коррекция терапии, обследования.",
+			Options: []Option{
+				{Value: "consultation", Label: "консультация специалиста", Prompt: "проведена консультация специалиста"},
+				{Value: "therapy_correction", Label: "коррекция терапии", Prompt: "проведена коррекция терапии"},
+				{Value: "somatic", Label: "соматическое заболевание", Prompt: "отмечается сопутствующее соматическое заболевание"},
+				{Value: "examination", Label: "обследование (ЭКГ/ЭЭГ/УЗИ/лаб.)", Prompt: "выполнено обследование"},
+			},
+			Conditional: []Conditional{
+				{IfValue: "consultation", Show: []string{"events_detail"}},
+				{IfValue: "therapy_correction", Show: []string{"events_detail"}},
+				{IfValue: "somatic", Show: []string{"events_detail"}},
+				{IfValue: "examination", Show: []string{"events_detail"}},
+			},
 		},
 		{
-			ID: "events_detail", Label: "События дня", Type: "text",
-			Required: false, AllowCustom: true,
+			ID: "events_detail", Label: "Детали событий дня", Type: "text",
+			Required: false, AllowCustom: true, Group: grpEvents,
+			Help: "Специалист, заключение, изменение дозы и т.п. (без персональных данных).",
 		},
 	}
 }
@@ -231,29 +326,40 @@ func dailyQuestions() []Question {
 // examQuestions builds the extra sections of the 10-day exam (docs/06 §5).
 func examQuestions() []Question {
 	return []Question{
+		// ─── Жалобы и анамнез ────────────────────────────────────────────────
 		{
 			ID: "anamnesis_disease", Label: "Анамнез заболевания (дополнения)", Type: "select",
-			Required: false, AllowCustom: true, Default: "no_additions",
+			Required: false, AllowCustom: true, Default: "no_additions", Group: grpAnamnesis,
 			Options: []Option{
 				{Value: "no_additions", Label: "без дополнений", Prompt: "Анамнез заболевания: без дополнений."},
 				{Value: "present", Label: "есть дополнения", Prompt: "Имеются дополнения к анамнезу заболевания."},
 			},
 			Conditional: []Conditional{{IfValue: "present", Show: []string{"anamnesis_detail"}}},
 		},
-		{ID: "anamnesis_detail", Label: "Дополнения к анамнезу", Type: "text", Required: false, AllowCustom: true},
+		{
+			ID: "anamnesis_detail", Label: "Дополнения к анамнезу", Type: "text",
+			Required: false, AllowCustom: true, Group: grpAnamnesis,
+			Help: "Опишите дополнения к анамнезу (без персональных данных).",
+		},
+
+		// ─── Соматический и неврологический статус ───────────────────────────
 		{
 			ID: "physical_status", Label: "Физикальный статус", Type: "select",
-			Required: false, AllowCustom: true, Default: "unremarkable",
+			Required: false, AllowCustom: true, Default: "unremarkable", Group: grpSomatic,
 			Options: []Option{
 				{Value: "unremarkable", Label: "без особенностей", Prompt: "Физикальное исследование: состояние удовлетворительное, без особенностей."},
 				{Value: "changes", Label: "есть изменения", Prompt: "В физикальном статусе отмечаются изменения."},
 			},
 			Conditional: []Conditional{{IfValue: "changes", Show: []string{"physical_detail"}}},
 		},
-		{ID: "physical_detail", Label: "Физикальный статус (изменения)", Type: "text", Required: false, AllowCustom: true},
+		{
+			ID: "physical_detail", Label: "Физикальный статус (изменения)", Type: "text",
+			Required: false, AllowCustom: true, Group: grpSomatic,
+			Help: "Опишите изменения, при необходимости укажите витальные показатели (без персональных данных).",
+		},
 		{
 			ID: "neuro_status", Label: "Неврологический статус", Type: "select",
-			Required: false, AllowCustom: true, Default: "no_acute",
+			Required: false, AllowCustom: true, Default: "no_acute", Group: grpSomatic,
 			Options: []Option{
 				{Value: "no_acute", Label: "без острой неврологической симптоматики", Prompt: "Неврологический статус: без острой неврологической симптоматики."},
 				{Value: "detailed_normal", Label: "развёрнутый нормальный блок", Prompt: "Неврологический статус: очаговой и менингеальной симптоматики не выявлено."},
@@ -261,29 +367,76 @@ func examQuestions() []Question {
 			},
 			Conditional: []Conditional{{IfValue: "changes", Show: []string{"neuro_detail"}}},
 		},
-		{ID: "neuro_detail", Label: "Неврологический статус (изменения)", Type: "text", Required: false, AllowCustom: true},
+		{
+			ID: "neuro_detail", Label: "Неврологический статус (изменения)", Type: "text",
+			Required: false, AllowCustom: true, Group: grpSomatic,
+			Help: "Опишите неврологические изменения (без персональных данных).",
+		},
+
+		// ─── Психический статус (E5, docs/06 §5.2) ───────────────────────────
 		{
 			ID: "criticism", Label: "Критика к состоянию", Type: "select",
-			Required: false, AllowCustom: true, Default: "formal",
+			Required: false, AllowCustom: true, Default: "formal", Group: grpPsych,
 			Options: []Option{
 				{Value: "absent", Label: "отсутствует", Prompt: "Критика к своему состоянию отсутствует."},
 				{Value: "formal", Label: "формальная", Prompt: "Критика к состоянию формальная."},
+				{Value: "conciliatory", Label: "соглашательская", Prompt: "Критика к состоянию соглашательская."},
 				{Value: "forming", Label: "формируется", Prompt: "Критика к состоянию формируется."},
 				{Value: "preserved", Label: "сохранна", Prompt: "Критика к состоянию сохранна."},
 			},
 		},
 		{
+			ID: "thinking", Label: "Мышление", Type: "select",
+			Required: false, AllowCustom: true, Default: "no_gross", Group: grpPsych,
+			Options: []Option{
+				{Value: "no_gross", Label: "без грубых нарушений", Prompt: "Мышление без грубых нарушений."},
+				{Value: "concrete", Label: "конкретное", Prompt: "Мышление конкретное."},
+				{Value: "detailed", Label: "обстоятельное", Prompt: "Мышление обстоятельное."},
+				{Value: "slowed", Label: "замедленное", Prompt: "Мышление замедленное."},
+			},
+		},
+		{
+			ID: "attention_memory", Label: "Внимание и память", Type: "select",
+			Required: false, AllowCustom: true, Default: "no_gross", Group: grpPsych,
+			Options: []Option{
+				{Value: "no_gross", Label: "без грубых нарушений", Prompt: "Внимание и память без грубых нарушений."},
+				{Value: "reduced", Label: "снижены", Prompt: "Внимание и память снижены."},
+				{Value: "exhausted", Label: "истощаемы", Prompt: "Внимание истощаемо."},
+			},
+		},
+		{
+			ID: "intellect", Label: "Интеллект", Type: "select",
+			Required: false, AllowCustom: true, Default: "age_norm", Group: grpPsych,
+			Options: []Option{
+				{Value: "age_norm", Label: "на уровне возрастной нормы", Prompt: "Интеллект на уровне возрастной нормы."},
+				{Value: "low_norm", Label: "на уровне низкой возрастной нормы", Prompt: "Интеллект на уровне низкой возрастной нормы."},
+				{Value: "reduced", Label: "снижен", Prompt: "Интеллект снижен."},
+			},
+		},
+		{
 			ID: "suicidal", Label: "Суицидальные тенденции", Type: "select",
-			Required: false, AllowCustom: false, Default: "not_detected",
+			Required: false, AllowCustom: false, Default: "not_detected", Group: grpPsych,
 			Options: []Option{
 				{Value: "not_detected", Label: "не выявлены", Prompt: "Суицидальных тенденций не выявлено."},
 				{Value: "detected", Label: "выявлены", Prompt: "Выявлены суицидальные тенденции."},
 			},
+			Conditional: []Conditional{{IfValue: "detected", Show: []string{"suicidal_detail"}}},
 		},
-		{ID: "diagnosis", Label: "Основное заболевание (МКБ-10)", Type: "text", Required: false, AllowCustom: true},
+		{
+			ID: "suicidal_detail", Label: "Уточнение суицидальных тенденций", Type: "text",
+			Required: false, AllowCustom: true, Group: grpPsych,
+			Help: "Опишите характер тенденций (без персональных данных).",
+		},
+
+		// ─── Диагноз ─────────────────────────────────────────────────────────
+		{
+			ID: "diagnosis", Label: "Основное заболевание (МКБ-10)", Type: "text",
+			Required: false, AllowCustom: true, Group: grpDiagnosis,
+			Help: "Код и название по МКБ-10 (напр. F84.0). Без персональных данных.",
+		},
 		{
 			ID: "syndrome", Label: "Синдром", Type: "select",
-			Required: false, AllowCustom: true,
+			Required: false, AllowCustom: true, Group: grpDiagnosis,
 			Options: []Option{
 				{Value: "anxiety_depressive", Label: "тревожно-депрессивный", Prompt: "тревожно-депрессивный синдром"},
 				{Value: "psychopathic", Label: "психопатоподобный", Prompt: "психопатоподобный синдром"},
@@ -292,18 +445,83 @@ func examQuestions() []Question {
 				{Value: "asthenic", Label: "астенический", Prompt: "астенический синдром"},
 			},
 		},
-		{ID: "comorbidities", Label: "Сопутствующие заболевания", Type: "text", Required: false, AllowCustom: true},
-		{ID: "prescriptions", Label: "Назначения", Type: "text", Required: false, AllowCustom: true},
-		{ID: "interventions_detail", Label: "Выполненные вмешательства", Type: "text", Required: false, AllowCustom: true},
+		{
+			ID: "comorbidities", Label: "Сопутствующие заболевания", Type: "multiselect",
+			Required: false, AllowCustom: true, Group: grpDiagnosis,
+			Help: "Выберите из списка или добавьте свой вариант (код/название МКБ).",
+			Options: []Option{
+				{Value: "j00", Label: "J00 — ОРВИ/острый назофарингит", Prompt: "J00 — острый назофарингит"},
+				{Value: "r51", Label: "R51 — головная боль", Prompt: "R51 — головная боль"},
+				{Value: "e66_9", Label: "E66.9 — ожирение", Prompt: "E66.9 — ожирение"},
+				{Value: "none", Label: "не выявлены", Prompt: "Сопутствующих заболеваний не выявлено"},
+			},
+		},
+
+		// ─── Назначения и вмешательства ──────────────────────────────────────
+		{
+			ID: "prescriptions", Label: "Назначения", Type: "select",
+			Required: false, AllowCustom: true, Default: "see_list", Group: grpOrders,
+			Help: "Выберите «см. лист назначений» или укажите конкретную схему через «свой вариант».",
+			Options: []Option{
+				{Value: "see_list", Label: "см. лист назначений", Prompt: "Назначения — согласно листу назначений."},
+				{Value: "no_change", Label: "без изменений", Prompt: "Назначения без изменений."},
+			},
+		},
+		{
+			ID: "interventions", Label: "Выполненные вмешательства", Type: "multiselect",
+			Required: false, AllowCustom: true, Group: grpOrders,
+			Options: []Option{
+				{Value: "pediatrician", Label: "педиатр", Prompt: "осмотр педиатра"},
+				{Value: "neurologist", Label: "невролог", Prompt: "осмотр невролога"},
+				{Value: "psychologist", Label: "психолог", Prompt: "консультация психолога"},
+				{Value: "psychotherapist", Label: "психотерапевт", Prompt: "консультация психотерапевта"},
+				{Value: "speech_therapist", Label: "логопед", Prompt: "занятие с логопедом"},
+				{Value: "physiotherapist", Label: "физиотерапевт", Prompt: "физиотерапия"},
+				{Value: "ecg", Label: "ЭКГ", Prompt: "ЭКГ"},
+				{Value: "eeg", Label: "ЭЭГ", Prompt: "ЭЭГ"},
+				{Value: "ultrasound", Label: "УЗИ", Prompt: "УЗИ"},
+				{Value: "lab", Label: "лаборатория", Prompt: "лабораторное обследование"},
+			},
+			Conditional: []Conditional{
+				{IfValue: "pediatrician", Show: []string{"interventions_detail"}},
+				{IfValue: "neurologist", Show: []string{"interventions_detail"}},
+				{IfValue: "psychologist", Show: []string{"interventions_detail"}},
+				{IfValue: "psychotherapist", Show: []string{"interventions_detail"}},
+				{IfValue: "speech_therapist", Show: []string{"interventions_detail"}},
+				{IfValue: "physiotherapist", Show: []string{"interventions_detail"}},
+				{IfValue: "ecg", Show: []string{"interventions_detail"}},
+				{IfValue: "eeg", Show: []string{"interventions_detail"}},
+				{IfValue: "ultrasound", Show: []string{"interventions_detail"}},
+				{IfValue: "lab", Show: []string{"interventions_detail"}},
+			},
+		},
+		{
+			ID: "interventions_detail", Label: "Заключения по вмешательствам", Type: "text",
+			Required: false, AllowCustom: true, Group: grpOrders,
+			Help: "Краткие заключения/результаты (без персональных данных).",
+		},
+
+		// ─── Динамика и эпикриз ──────────────────────────────────────────────
 		{
 			ID: "period_dynamics", Label: "Динамика за период (эпикриз)", Type: "select",
-			Required: false, AllowCustom: true, Default: "improvement",
+			Required: false, AllowCustom: true, Default: "improvement", Group: grpEpicrisis,
 			Options: []Option{
 				{Value: "improvement", Label: "с улучшением в условиях отделения", Prompt: "Психическое состояние с улучшением в условиях отделения."},
 				{Value: "slight_improvement", Label: "с незначительным улучшением", Prompt: "Психическое состояние с незначительным улучшением."},
 				{Value: "no_improvement", Label: "без заметного улучшения", Prompt: "Психическое состояние без заметного улучшения."},
 				{Value: "no_change", Label: "без существенных изменений", Prompt: "Психическое состояние без существенных изменений."},
 			},
+		},
+		{
+			ID: "discharge", Label: "Выписка?", Type: "boolean",
+			Required: false, AllowCustom: false, Group: grpEpicrisis,
+			Help:        "Отметьте «Да», если оформляется выписка — откроется блок заключения.",
+			Conditional: []Conditional{{IfValue: "true", Show: []string{"discharge_detail"}}},
+		},
+		{
+			ID: "discharge_detail", Label: "Заключение и рекомендации при выписке", Type: "text",
+			Required: false, AllowCustom: true, Group: grpEpicrisis,
+			Help: "Рекомендации, что выдано на руки и т.п. (без персональных данных).",
 		},
 	}
 }

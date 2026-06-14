@@ -5,19 +5,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { friendlyError } from "../api/errors";
 import {
-    useDocumentTypes,
-    useGenerate,
-    useQuestionnaire,
+  useDocumentTypes,
+  useGenerate,
+  useQuestionnaire,
 } from "../api/queries";
 import type { AnswerValue, Answers, GenerateResult } from "../api/types";
 import { QuestionnaireRenderer } from "../components/questionnaire/QuestionnaireRenderer";
 import { GenerationResult } from "../components/result/GenerationResult";
 import { Banner, Button, EmptyState, Skeleton, Spinner } from "../components/ui";
 import {
-    buildDefaults,
-    computeProgress,
-    computeVisibleIds,
-    prepareAnswers,
+  buildDefaults,
+  clearHiddenAnswers,
+  computeProgress,
+  computeVisibleIds,
+  prepareAnswers,
 } from "../lib/questionnaire";
 import "./pages.css";
 
@@ -28,6 +29,8 @@ export function DiaryPage() {
   const [docType, setDocType] = useState<string>(DEFAULT_DOC_TYPE);
   const [answers, setAnswers] = useState<Answers>({});
   const [result, setResult] = useState<GenerateResult | null>(null);
+  // Подсветка незаполненных обязательных после попытки отправки (docs/08 §5.1).
+  const [showInvalid, setShowInvalid] = useState(false);
 
   const schemaQuery = useQuestionnaire(docType);
   const generateMutation = useGenerate();
@@ -51,7 +54,14 @@ export function DiaryPage() {
   }, [schema, answers]);
 
   const handleChange = (id: string, value: AnswerValue) => {
-    setAnswers((prev) => ({ ...prev, [id]: value }));
+    setAnswers((prev) => {
+      if (!schema) return { ...prev, [id]: value };
+      // Меняем ответ и сразу чистим вопросы, ставшие невидимыми (docs/06 §3):
+      // скрытые ответы не должны влиять на генерацию.
+      const updated = { ...prev, [id]: value };
+      const vis = computeVisibleIds(schema, updated);
+      return clearHiddenAnswers(schema, updated, vis);
+    });
   };
 
   const handleSelectType = (code: string) => {
@@ -59,11 +69,16 @@ export function DiaryPage() {
     setDocType(code);
     setAnswers({});
     setResult(null);
+    setShowInvalid(false);
     generateMutation.reset();
   };
 
   const handleGenerate = () => {
-    if (!schema) return;
+    if (!schema || progress === null) return;
+    if (progress.missingRequired.length > 0) {
+      setShowInvalid(true);
+      return;
+    }
     const payload = prepareAnswers(schema, answers, visible);
     generateMutation.mutate(
       { document_type: docType, answers: payload },
@@ -71,11 +86,16 @@ export function DiaryPage() {
     );
   };
 
+  const invalidIds = useMemo(
+    () =>
+      showInvalid && progress
+        ? new Set(progress.missingRequired)
+        : new Set<string>(),
+    [showInvalid, progress],
+  );
+
   const canGenerate =
-    Boolean(schema) &&
-    progress !== null &&
-    progress.missingRequired.length === 0 &&
-    !generateMutation.isPending;
+    Boolean(schema) && progress !== null && !generateMutation.isPending;
 
   // ─── Результат ───────────────────────────────────────────────────────────
   if (result) {
@@ -172,6 +192,7 @@ export function DiaryPage() {
             schema={schema}
             answers={answers}
             onChange={handleChange}
+            invalidIds={invalidIds}
           />
         )}
       </div>

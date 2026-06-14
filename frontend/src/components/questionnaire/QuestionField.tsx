@@ -1,13 +1,23 @@
 // QuestionField — рендер одного вопроса опросника (docs/06 §3, docs/08 §5.1).
-// Поддерживает select / multiselect / text / number / boolean и опцию
-// «свой вариант» (allow_custom). Контролируемый компонент: значение и onChange
-// приходят сверху (QuestionnaireRenderer держит общий стейт answers).
+// Поддерживает select / multiselect / text / number / boolean и опцию «свой
+// вариант» (allow_custom) — в т.ч. внутри multiselect (Этап 7). Контролируемый
+// компонент: значение и onChange приходят сверху.
 //
-// Задел под Этап 7: компонент уже принимает `conditional`-флаг для смещённого
-// рендера дочерних вопросов; более сложные кастом-виджеты (МКБ-поиск и т.п.)
-// добавятся как новые ветки `type` без изменения контракта пропсов.
-import type { AnswerValue, Question } from "../../api/types";
-import { CUSTOM_VALUE, isCustomAnswer } from "../../lib/questionnaire";
+// Приватность (docs/06 §1.4, docs/09): свободный ввод анонимизируется на
+// gateway — на фронте только подсказка «без персональных данных», ничего не
+// хранится локально сверх стейта формы.
+import type {
+  AnswerValue,
+  CustomAnswer,
+  MultiAnswerItem,
+  Question,
+} from "../../api/types";
+import {
+  CUSTOM_VALUE,
+  customItemText,
+  hasCustomItem,
+  isCustomAnswer,
+} from "../../lib/questionnaire";
 
 interface QuestionFieldProps {
   question: Question;
@@ -15,6 +25,8 @@ interface QuestionFieldProps {
   onChange: (value: AnswerValue) => void;
   /** true → дочерний условный вопрос (смещённый рендер). */
   conditional?: boolean;
+  /** true → подсветить как обязательный незаполненный (валидация перед отправкой). */
+  invalid?: boolean;
 }
 
 export function QuestionField({
@@ -22,9 +34,18 @@ export function QuestionField({
   value,
   onChange,
   conditional = false,
+  invalid = false,
 }: QuestionFieldProps) {
+  const cls = [
+    "field",
+    conditional ? "field--conditional" : "",
+    invalid ? "field--invalid" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className={`field${conditional ? " field--conditional" : ""}`}>
+    <div className={cls}>
       <label className="field__label" htmlFor={`q-${question.id}`}>
         {question.label}
         {question.required ? (
@@ -36,15 +57,19 @@ export function QuestionField({
         )}
       </label>
       <FieldControl question={question} value={value} onChange={onChange} />
+      {question.help && <p className="field__help">{question.help}</p>}
+      {invalid && (
+        <p className="field__error" role="alert">
+          Обязательный вопрос — выберите или укажите значение.
+        </p>
+      )}
     </div>
   );
 }
 
-function FieldControl({
-  question,
-  value,
-  onChange,
-}: Omit<QuestionFieldProps, "conditional">) {
+type ControlProps = Pick<QuestionFieldProps, "question" | "value" | "onChange">;
+
+function FieldControl({ question, value, onChange }: ControlProps) {
   switch (question.type) {
     case "select":
       return <SelectField question={question} value={value} onChange={onChange} />;
@@ -63,11 +88,7 @@ function FieldControl({
 }
 
 // ─── select (+ свой вариант) ─────────────────────────────────────────────────
-function SelectField({
-  question,
-  value,
-  onChange,
-}: Omit<QuestionFieldProps, "conditional">) {
+function SelectField({ question, value, onChange }: ControlProps) {
   const custom = isCustomAnswer(value);
   const selected = custom ? CUSTOM_VALUE : typeof value === "string" ? value : "";
 
@@ -98,65 +119,119 @@ function SelectField({
       </select>
 
       {custom && (
-        <div className="field__custom">
-          <input
-            className="field__input"
-            type="text"
-            autoFocus
-            placeholder="Введите свой вариант"
-            value={isCustomAnswer(value) ? value.custom_text : ""}
-            onChange={(e) =>
-              onChange({ value: CUSTOM_VALUE, custom_text: e.target.value })
-            }
-            aria-label={`${question.label}: свой вариант`}
-          />
-        </div>
+        <CustomTextInput
+          label={question.label}
+          value={isCustomAnswer(value) ? value.custom_text : ""}
+          onChange={(text) =>
+            onChange({ value: CUSTOM_VALUE, custom_text: text })
+          }
+        />
       )}
     </>
   );
 }
 
 // ─── multiselect (чипы + опц. свой вариант) ──────────────────────────────────
-function MultiSelectField({
-  question,
-  value,
-  onChange,
-}: Omit<QuestionFieldProps, "conditional">) {
-  const selected = Array.isArray(value) ? value : [];
+function MultiSelectField({ question, value, onChange }: ControlProps) {
+  const items: MultiAnswerItem[] = Array.isArray(value) ? value : [];
+  const codes = items.filter((i): i is string => typeof i === "string");
+  const customActive = hasCustomItem(value);
 
-  const toggle = (optValue: string) => {
-    const next = selected.includes(optValue)
-      ? selected.filter((v) => v !== optValue)
-      : [...selected, optValue];
+  const setItems = (codeList: string[], custom?: CustomAnswer) => {
+    const next: MultiAnswerItem[] = [...codeList];
+    if (custom) next.push(custom);
     onChange(next);
   };
 
+  const toggle = (optValue: string) => {
+    const nextCodes = codes.includes(optValue)
+      ? codes.filter((v) => v !== optValue)
+      : [...codes, optValue];
+    const existingCustom = items.find((i) => isCustomAnswer(i)) as
+      | CustomAnswer
+      | undefined;
+    setItems(nextCodes, existingCustom);
+  };
+
+  const toggleCustom = () => {
+    if (customActive) {
+      setItems(codes); // убрать кастом
+    } else {
+      setItems(codes, { value: CUSTOM_VALUE, custom_text: "" });
+    }
+  };
+
+  const updateCustomText = (text: string) => {
+    setItems(codes, { value: CUSTOM_VALUE, custom_text: text });
+  };
+
   return (
-    <div className="chips" role="group" aria-label={question.label}>
-      {question.options?.map((opt) => {
-        const active = selected.includes(opt.value);
-        return (
+    <>
+      <div className="chips" role="group" aria-label={question.label}>
+        {question.options?.map((opt) => {
+          const active = codes.includes(opt.value);
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              className={`chip${active ? " chip--active" : ""}`}
+              aria-pressed={active}
+              onClick={() => toggle(opt.value)}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+        {question.allow_custom && (
           <button
-            key={opt.value}
             type="button"
-            className={`chip${active ? " chip--active" : ""}`}
-            aria-pressed={active}
-            onClick={() => toggle(opt.value)}
+            className={`chip chip--custom${customActive ? " chip--active" : ""}`}
+            aria-pressed={customActive}
+            onClick={toggleCustom}
           >
-            {opt.label}
+            ＋ Свой вариант
           </button>
-        );
-      })}
+        )}
+      </div>
+
+      {customActive && (
+        <CustomTextInput
+          label={question.label}
+          value={customItemText(value)}
+          onChange={updateCustomText}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── Инлайн-поле «свой вариант» (общее для select/multiselect) ───────────────
+function CustomTextInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (text: string) => void;
+}) {
+  return (
+    <div className="field__custom">
+      <input
+        className="field__input"
+        type="text"
+        autoFocus
+        placeholder="Свой вариант (без персональных данных)"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={`${label}: свой вариант`}
+      />
     </div>
   );
 }
 
 // ─── text ─────────────────────────────────────────────────────────────────
-function TextField({
-  question,
-  value,
-  onChange,
-}: Omit<QuestionFieldProps, "conditional">) {
+function TextField({ question, value, onChange }: ControlProps) {
   const text =
     typeof value === "string"
       ? value
@@ -175,11 +250,7 @@ function TextField({
 }
 
 // ─── number ─────────────────────────────────────────────────────────────────
-function NumberField({
-  question,
-  value,
-  onChange,
-}: Omit<QuestionFieldProps, "conditional">) {
+function NumberField({ question, value, onChange }: ControlProps) {
   return (
     <input
       id={`q-${question.id}`}
@@ -195,19 +266,11 @@ function NumberField({
 }
 
 // ─── boolean (да/нет) ─────────────────────────────────────────────────────────
-function BooleanField({
-  question,
-  value,
-  onChange,
-}: Omit<QuestionFieldProps, "conditional">) {
+function BooleanField({ question, value, onChange }: ControlProps) {
   const bool = value === true;
   const isSet = typeof value === "boolean";
   return (
-    <div
-      className="toggle-group"
-      role="group"
-      aria-label={question.label}
-    >
+    <div className="toggle-group" role="group" aria-label={question.label}>
       <button
         type="button"
         className={`toggle-group__btn${isSet && bool ? " toggle-group__btn--active" : ""}`}

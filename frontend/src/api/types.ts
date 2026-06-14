@@ -78,6 +78,10 @@ export interface Question {
   required: boolean;
   allow_custom: boolean;
   default?: unknown;
+  /** Логическая секция для группировки в UI (docs/08 §5.1). Опционально. */
+  group?: string;
+  /** Короткая подсказка под вопросом. Опционально. */
+  help?: string;
   options?: QuestionOption[];
   conditional?: Conditional[];
 }
@@ -95,12 +99,17 @@ export interface QuestionnaireSchema {
  * Значение одного ответа опросника. Скаляр (select/text/number/boolean),
  * массив (multiselect) или объект «свой вариант» (docs/06 §1.4):
  * { value: "__custom__", custom_text: "..." }.
+ *
+ * Multiselect может содержать как коды опций (string), так и «свои варианты»
+ * (CustomAnswer) — оба обрабатываются маппингом RAG (iter_free_text/_normalize).
  */
+export type MultiAnswerItem = string | CustomAnswer;
+
 export type AnswerValue =
   | string
   | number
   | boolean
-  | string[]
+  | MultiAnswerItem[]
   | CustomAnswer
   | null;
 

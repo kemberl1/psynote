@@ -6,6 +6,28 @@
 .qn {
   display: flex;
   flex-direction: column;
+  gap: var(--space-8);
+}
+
+/* ─── Логическая секция (группа вопросов, docs/08 §5.1) ──────────────────── */
+.qn-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.qn-group__title {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+.qn-group__fields {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-5);
 }
 
@@ -31,6 +53,28 @@
   font-size: var(--fs-xs);
   color: var(--text-tertiary);
   font-weight: 400;
+}
+
+/* Подсказка под вопросом (help). */
+.field__help {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  line-height: var(--lh-snug);
+}
+
+/* Сообщение валидации обязательного вопроса. */
+.field__error {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--danger, #f87171);
+}
+
+/* Подсветка незаполненного обязательного вопроса. */
+.field--invalid .field__control,
+.field--invalid .field__input,
+.field--invalid .field__textarea {
+  border-color: var(--danger, #f87171);
 }
 
 /* Условный (дочерний) вопрос — со смещением и левой направляющей. */
@@ -137,6 +181,9 @@
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 500;
+}
+.chip--custom {
+  border-style: dashed;
 }
 
 /* ─── Boolean — переключатель да/нет ────────────────────────────────────── */
