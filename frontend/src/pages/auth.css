@@ -1,0 +1,159 @@
+/* ============================================================================
+   Экраны входа/регистрации (Этап 9, docs/08 §4.3). Тёмная тема в стиле Cursor
+   на дизайн-токенах index.css: центрированная карточка, «воздух», скупой акцент.
+   ============================================================================ */
+
+.auth {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--space-4);
+  background:
+    radial-gradient(
+      1200px 600px at 50% -10%,
+      rgba(124, 156, 255, 0.06),
+      transparent 60%
+    ),
+    var(--bg);
+}
+
+.auth__card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: var(--space-8);
+  box-shadow: var(--shadow-md);
+}
+
+.auth__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+}
+.auth__logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  font-size: var(--fs-md);
+}
+.auth__brand-name {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.auth__title {
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 var(--space-2);
+}
+.auth__subtitle {
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  margin: 0 0 var(--space-6);
+  line-height: var(--lh-snug);
+}
+
+.auth__banner {
+  margin-bottom: var(--space-4);
+}
+
+.auth__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.auth__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.auth__label {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.auth__input {
+  height: 42px;
+  padding: 0 var(--space-4);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-family: var(--font-sans);
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition);
+}
+.auth__input::placeholder {
+  color: var(--text-tertiary);
+}
+.auth__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.auth__input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.auth__hint-error {
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  margin-top: calc(-1 * var(--space-1));
+}
+
+.auth__switch {
+  margin-top: var(--space-6);
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+.auth__link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+.auth__link:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.auth__privacy {
+  max-width: 400px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+  margin: 0;
+}
+
+/* Спиннер первичного восстановления сессии (ProtectedRoute). */
+.auth-bootstrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}

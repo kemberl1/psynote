@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/aimed/gateway/internal/anonymizer"
+	"github.com/aimed/gateway/internal/auth"
 	"github.com/aimed/gateway/internal/config"
 	"github.com/aimed/gateway/internal/handlers"
 	"github.com/aimed/gateway/internal/ragclient"
@@ -69,10 +70,27 @@ func main() {
 		slog.Warn("POSTGRES_DSN empty; history/generate disabled")
 	}
 
+	// Auth (Этап 9, docs/09): сервис JWT/refresh. Секрет — ТОЛЬКО из ENV
+	// JWT_SECRET (docs/09 §6). Пустой секрет ⇒ auth выключен (auth-роуты не
+	// поднимаются, приватные роуты отдают 503) — fail-safe для каркасных
+	// запусков без секрета. На рабочем стенде JWT_SECRET обязателен.
+	var tokens *auth.TokenService
+	if cfg.JWTSecret != "" {
+		ts, terr := auth.NewTokenService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
+		if terr != nil {
+			slog.Error("auth disabled: token service init failed", "error_type", "auth")
+		} else {
+			tokens = ts
+		}
+	} else {
+		slog.Warn("JWT_SECRET empty; auth disabled (protected routes return 503)")
+	}
+
 	mux := handlers.NewRouter(cfg, handlers.Deps{
 		Anonymizer: anon,
 		RAG:        rag,
 		Repo:       repo,
+		Tokens:     tokens,
 	})
 
 	srv := &http.Server{

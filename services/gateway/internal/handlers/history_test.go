@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/aimed/gateway/internal/auth"
 	"github.com/aimed/gateway/internal/config"
 	"github.com/aimed/gateway/internal/ragclient"
 	"github.com/aimed/gateway/internal/store"
@@ -21,7 +23,7 @@ func TestHistoryListHandler(t *testing.T) {
 		},
 	}
 	h := newHistoryListHandler(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/requests?limit=20&offset=0", nil)
+	req := withDoctor(httptest.NewRequest(http.MethodGet, "/api/v1/requests?limit=20&offset=0", nil), "doc-1")
 	rec := httptest.NewRecorder()
 	h(rec, req)
 
@@ -64,11 +66,16 @@ func TestHistoryDetailHandler_OK(t *testing.T) {
 	h := newHistoryDetailHandler(repo)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/requests/r1", nil)
 	req.SetPathValue("id", "r1")
+	req = withDoctor(req, "doc-1")
 	rec := httptest.NewRecorder()
 	h(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	// Изоляция: деталь читается со scoping по doctor_id из context.
+	if repo.gotGetDoctorID == nil || *repo.gotGetDoctorID != "doc-1" {
+		t.Errorf("detail not scoped by doctor_id, got %v", repo.gotGetDoctorID)
 	}
 	// Decode into a raw shape to assert keys are present and non-null
 	// (the приёмка bug: anonymizer_removed_count came back null in /requests/{id}).
@@ -92,10 +99,42 @@ func TestHistoryDetailHandler_NotFound(t *testing.T) {
 	h := newHistoryDetailHandler(repo)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/requests/missing", nil)
 	req.SetPathValue("id", "missing")
+	req = withDoctor(req, "doc-1")
 	rec := httptest.NewRecorder()
 	h(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status=%d, want 404", rec.Code)
+	}
+}
+
+// TestHistoryDetailHandler_ForeignDoctor verifies cross-doctor isolation: a
+// record owned by another doctor is scoped out at the store layer (ErrNotFound)
+// and surfaces as 404 — мы НЕ раскрываем существование чужой записи (docs/09 §3).
+func TestHistoryDetailHandler_ForeignDoctor(t *testing.T) {
+	repo := &fakeRepo{getErr: store.ErrNotFound} // store scoping returns not-found for foreign id
+	h := newHistoryDetailHandler(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/requests/owned-by-someone-else", nil)
+	req.SetPathValue("id", "owned-by-someone-else")
+	req = withDoctor(req, "doc-attacker")
+	rec := httptest.NewRecorder()
+	h(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("foreign record: status=%d, want 404", rec.Code)
+	}
+	if repo.gotGetDoctorID == nil || *repo.gotGetDoctorID != "doc-attacker" {
+		t.Errorf("store must be queried scoped by requester doctor_id, got %v", repo.gotGetDoctorID)
+	}
+}
+
+// TestHistoryDetailHandler_NoAuth: без doctor_id в context → 401.
+func TestHistoryDetailHandler_NoAuth(t *testing.T) {
+	h := newHistoryDetailHandler(&fakeRepo{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/requests/r1", nil)
+	req.SetPathValue("id", "r1")
+	rec := httptest.NewRecorder()
+	h(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d, want 401", rec.Code)
 	}
 }
 
@@ -151,27 +190,53 @@ func TestQuestionnaireHandler(t *testing.T) {
 	}
 }
 
-// TestRouter_Wiring checks routes are registered and CORS preflight works.
+// TestRouter_Wiring checks routes are registered, auth-protection works and
+// CORS preflight passes (Этап 9: приватные роуты под access-токеном).
 func TestRouter_Wiring(t *testing.T) {
 	cfg := config.Config{CORSAllowedOrigin: "http://localhost:5174"}
+	ts, err := auth.NewTokenService("test-secret-rotor", 15*time.Minute, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("token service: %v", err)
+	}
 	mux := NewRouter(cfg, Deps{
 		Anonymizer: &cleanAnon{},
 		RAG:        &fakeRAG{res: &ragclient.GenerateResult{Content: "ok", Status: "done"}},
 		Repo:       &fakeRepo{},
+		Tokens:     ts,
 	})
+	access, _ := ts.IssueAccessToken("doc-1", "doctor")
+	authHdr := func(r *http.Request) *http.Request {
+		r.Header.Set("Authorization", "Bearer "+access)
+		return r
+	}
 
-	// health
+	// health (public)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
 	if rec.Code != http.StatusOK {
 		t.Errorf("health status=%d", rec.Code)
 	}
 
-	// document-types
+	// document-types WITHOUT token → 401 (protected, docs/07 §9).
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/document-types", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("document-types (no token) status=%d, want 401", rec.Code)
+	}
+
+	// document-types WITH token → 200.
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, authHdr(httptest.NewRequest(http.MethodGet, "/api/v1/document-types", nil)))
 	if rec.Code != http.StatusOK {
-		t.Errorf("document-types status=%d", rec.Code)
+		t.Errorf("document-types (with token) status=%d", rec.Code)
+	}
+
+	// auth/register is public: a malformed/empty body yields 400, never 401
+	// (route is reachable without a token).
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", strings.NewReader(`{}`)))
+	if rec.Code == http.StatusUnauthorized {
+		t.Errorf("register route must be public, got 401")
 	}
 
 	// CORS preflight

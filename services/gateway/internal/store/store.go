@@ -14,6 +14,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -78,6 +79,33 @@ type ListFilter struct {
 	Offset   int
 }
 
+// Doctor is a registered doctor account (docs/05 §2.2 «doctor»). password_hash
+// is ALWAYS an Argon2id PHC string (docs/09 §2) — никогда не плейнтекст.
+type Doctor struct {
+	ID           string
+	Email        string
+	PasswordHash string
+	DisplayName  string
+	Role         string
+	IsActive     bool
+	CreatedAt    time.Time
+	LastLoginAt  *time.Time
+}
+
+// Session is a refresh-token record (docs/05 §2.2 «session», docs/09 §1.3).
+// RefreshTokenHash хранит ХЭШ opaque-токена (SHA-256 hex), не сам токен.
+type Session struct {
+	ID               string
+	DoctorID         string
+	RefreshTokenHash string
+	IssuedAt         time.Time
+	ExpiresAt        time.Time
+	Revoked          bool
+}
+
+// ErrEmailTaken is returned by CreateDoctor on a duplicate email (→ 409, docs/07).
+var ErrEmailTaken = errors.New("store: email already registered")
+
 // Repository abstracts persistence so handlers can be unit-tested with a fake
 // (no real DB in unit tests, см. задание). docs/05 §2.
 type Repository interface {
@@ -89,4 +117,24 @@ type Repository interface {
 	// GetGeneration returns one full anonymized record by id (scoped by doctor
 	// when filter.DoctorID set). Returns ErrNotFound when absent.
 	GetGeneration(ctx context.Context, id string, doctorID *string) (*HistoryDetail, error)
+
+	// ─── Auth (Этап 9, docs/09) ──────────────────────────────────────────────
+
+	// CreateDoctor inserts a new doctor and returns the new id. Returns
+	// ErrEmailTaken when email уже существует (unique violation → 409).
+	CreateDoctor(ctx context.Context, email, passwordHash, displayName, role string) (string, error)
+	// GetDoctorByEmail looks a doctor up by email (login). ErrNotFound if absent.
+	GetDoctorByEmail(ctx context.Context, email string) (*Doctor, error)
+	// GetDoctorByID looks a doctor up by id (/me). ErrNotFound if absent.
+	GetDoctorByID(ctx context.Context, id string) (*Doctor, error)
+	// TouchLastLogin updates doctor.last_login_at to now (best-effort on login).
+	TouchLastLogin(ctx context.Context, id string) error
+
+	// CreateSession persists a refresh-token session (hash only) and returns id.
+	CreateSession(ctx context.Context, doctorID, refreshTokenHash string, expiresAt time.Time) (string, error)
+	// GetSessionByHash finds an active (non-revoked, non-expired enforced by
+	// caller) session by refresh-token hash. ErrNotFound if absent.
+	GetSessionByHash(ctx context.Context, refreshTokenHash string) (*Session, error)
+	// RevokeSession marks a session revoked by id (logout / rotation). Idempotent.
+	RevokeSession(ctx context.Context, id string) error
 }

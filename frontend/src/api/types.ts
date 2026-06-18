@@ -38,7 +38,47 @@ export type ApiErrorCode =
   | "SERVICE_UNAVAILABLE"
   | "INTERNAL"
   | "NETWORK"
+  // Аутентификация (Этап 9, docs/07 §2, docs/09).
+  | "UNAUTHORIZED"
+  | "EMAIL_TAKEN"
   | "UNKNOWN";
+
+// ─── Аутентификация (docs/07 §2, docs/09) ──────────────────────────────────
+
+/** Тело POST /auth/register. */
+export interface RegisterRequest {
+  email: string;
+  password: string;
+  display_name?: string;
+}
+
+/** Данные ответа POST /auth/register. */
+export interface RegisterResult {
+  doctor_id: string;
+  email: string;
+}
+
+/** Тело POST /auth/login. */
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+/** Пара токенов (login/refresh). access — короткоживущий JWT, refresh — opaque. */
+export interface TokenPair {
+  access_token: string;
+  refresh_token: string;
+  /** Время жизни access-токена в секундах (docs/07 §2). */
+  expires_in: number;
+}
+
+/** Профиль текущего врача (GET /auth/me). Данные врача, не ПДн пациента. */
+export interface DoctorProfile {
+  doctor_id: string;
+  email: string;
+  display_name: string;
+  role: string;
+}
 
 // ─── Справочники и схема опросника (docs/07 §3, docs/06) ───────────────────
 

@@ -115,8 +115,15 @@ func newGenerateHandler(cfg config.Config, anon anonymizer.Anonymizer, rag ragcl
 		// relevant to the doctor's «мы убрали X ПДн» plate.
 		removedTotal := removed + res.AnonymizerRemovedCount
 		requestID := res.RequestID
+		// doctor_id из проверенного access-токена (middleware → context). Изоляция
+		// по врачу (docs/09 §3): запись принадлежит автору запроса. Старые записи
+		// (до Этапа 9) остаются с NULL — поле nullable для совместимости.
+		var ownerID *string
+		if did, ok := doctorIDFromContext(r.Context()); ok {
+			ownerID = &did
+		}
 		newID, perr := repo.SaveGeneration(ctx, store.GenerationRecord{
-			DoctorID:               nil,
+			DoctorID:               ownerID,
 			DocumentType:           req.DocumentType,
 			AnswersAnonymized:      res.AnswersAnonymized,
 			TitleSafe:              res.TitleSafe,

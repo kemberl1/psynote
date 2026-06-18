@@ -126,7 +126,10 @@ services:
       RAG_URL: http://rag:8000
       RAG_GENERATE_TIMEOUT_S: ${RAG_GENERATE_TIMEOUT_S:-120}
       RAG_HEALTH_TIMEOUT_S: ${RAG_HEALTH_TIMEOUT_S:-5}
+      # Аутентификация (Этап 9, docs/09 §1). JWT_SECRET ОБЯЗАТЕЛЕН на проде.
       JWT_SECRET: ${JWT_SECRET:-change_me_dev_secret}
+      ACCESS_TOKEN_TTL_S: ${ACCESS_TOKEN_TTL_S:-900}
+      REFRESH_TOKEN_TTL_S: ${REFRESH_TOKEN_TTL_S:-2592000}
       CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-http://localhost:5174}
       # LLM (X5 CoPilot) — docs/03 §9. На каркасе вызовы не выполняются.
       X5_BASE_URL: ${X5_BASE_URL:-https://api-copilot.x5.ru/aigw/v1/}

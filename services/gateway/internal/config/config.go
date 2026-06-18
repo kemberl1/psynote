@@ -39,6 +39,10 @@ type Config struct {
 
 	// JWT auth (см. docs/09_security_privacy.md §1).
 	JWTSecret string
+	// AccessTokenTTL — время жизни access-JWT (короткое, ~15 мин, docs/09 §1.3).
+	AccessTokenTTL time.Duration
+	// RefreshTokenTTL — время жизни refresh-токена (длинное, ~7–30 дней).
+	RefreshTokenTTL time.Duration
 
 	// LLM (X5 CoPilot, OpenAI-совместимый) — см. docs/03_rag_design.md §9.
 	// TODO(этап 3): использовать при реализации LLM-клиента с fallback.
@@ -75,6 +79,8 @@ func Load() Config {
 		RAGGenerateTimeout: getEnvDuration("RAG_GENERATE_TIMEOUT_S", 120*time.Second),
 		RAGHealthTimeout:   getEnvDuration("RAG_HEALTH_TIMEOUT_S", 5*time.Second),
 		JWTSecret:          getEnv("JWT_SECRET", ""),
+		AccessTokenTTL:     getEnvDuration("ACCESS_TOKEN_TTL_S", 15*time.Minute),
+		RefreshTokenTTL:    getEnvDuration("REFRESH_TOKEN_TTL_S", 30*24*time.Hour),
 
 		LLMBaseURL:     getEnv("X5_BASE_URL", "https://api-copilot.x5.ru/aigw/v1/"),
 		LLMAPIKey:      getEnv("X5_API_KEY", ""),

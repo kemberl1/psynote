@@ -78,6 +78,18 @@ export function friendlyError(err: unknown): FriendlyError {
         detail: "Запрашиваемая запись истории не существует или была удалена.",
         tone: "warning",
       };
+    case "UNAUTHORIZED":
+      return {
+        title: "Требуется вход",
+        detail: "Сессия истекла или вы не авторизованы. Войдите снова.",
+        tone: "warning",
+      };
+    case "EMAIL_TAKEN":
+      return {
+        title: "Email уже занят",
+        detail: "Аккаунт с таким email уже существует. Попробуйте войти.",
+        tone: "warning",
+      };
     case "NETWORK":
       return {
         title: "Нет соединения",

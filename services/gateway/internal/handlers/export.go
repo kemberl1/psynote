@@ -57,8 +57,14 @@ func newExportHandler(repo store.Repository, exporter export.Exporter) http.Hand
 			return
 		}
 
-		// Fetch the ANONYMIZED record (docs/05). doctor scoping — Этап 9 (nil).
-		detail, err := repo.GetGeneration(r.Context(), id, nil)
+		// Изоляция по врачу (docs/09 §3): экспортировать можно ТОЛЬКО свою
+		// запись. Чужой id → ErrNotFound → 404.
+		doctorID, ok := doctorIDFromContext(r.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "требуется авторизация")
+			return
+		}
+		detail, err := repo.GetGeneration(r.Context(), id, &doctorID)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "NOT_FOUND", "запись не найдена")

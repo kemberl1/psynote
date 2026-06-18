@@ -31,11 +31,16 @@ func TestExportHandler_DOCX(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/requests/r1/export",
 		strings.NewReader(`{"format":"docx"}`))
 	req.SetPathValue("id", "r1")
+	req = withDoctor(req, "doc-1")
 	rec := httptest.NewRecorder()
 	h(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	// Изоляция: экспорт читает запись со scoping по doctor_id (docs/09 §3).
+	if repo.gotGetDoctorID == nil || *repo.gotGetDoctorID != "doc-1" {
+		t.Errorf("export not scoped by doctor_id, got %v", repo.gotGetDoctorID)
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
 		t.Errorf("Content-Type=%q", ct)
@@ -59,6 +64,7 @@ func TestExportHandler_PDF_Substitutions(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/requests/r1/export",
 		strings.NewReader(`{"format":"pdf","substitutions":{"[ДАТА]":"19.09.2025"}}`))
 	req.SetPathValue("id", "r1")
+	req = withDoctor(req, "doc-1")
 	rec := httptest.NewRecorder()
 	h(rec, req)
 
@@ -79,6 +85,7 @@ func TestExportHandler_NotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/requests/missing/export",
 		strings.NewReader(`{"format":"docx"}`))
 	req.SetPathValue("id", "missing")
+	req = withDoctor(req, "doc-1")
 	rec := httptest.NewRecorder()
 	h(rec, req)
 	if rec.Code != http.StatusNotFound {

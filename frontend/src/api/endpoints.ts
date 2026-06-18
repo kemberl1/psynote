@@ -2,14 +2,53 @@
 // Каждая функция возвращает уже развёрнутые data (и, где нужно, meta-поля).
 import { request } from "./client";
 import type {
-    DocumentType,
-    GenerateRequest,
-    GenerateResult,
-    HistoryDetail,
-    HistoryItem,
-    HistoryListResult,
-    QuestionnaireSchema,
+  DoctorProfile,
+  DocumentType,
+  GenerateRequest,
+  GenerateResult,
+  HistoryDetail,
+  HistoryItem,
+  HistoryListResult,
+  LoginRequest,
+  QuestionnaireSchema,
+  RegisterRequest,
+  RegisterResult,
+  TokenPair
 } from "./types";
+
+// ─── Аутентификация (docs/07 §2, docs/09) ──────────────────────────────────
+
+/** POST /auth/register — публичный (без токена). 409 при занятом email. */
+export function register(body: RegisterRequest): Promise<RegisterResult> {
+  return request<RegisterResult>("/auth/register", {
+    method: "POST",
+    body,
+    skipAuth: true,
+  });
+}
+
+/** POST /auth/login — публичный. Возвращает пару токенов. */
+export function login(body: LoginRequest): Promise<TokenPair> {
+  return request<TokenPair>("/auth/login", {
+    method: "POST",
+    body,
+    skipAuth: true,
+  });
+}
+
+/** POST /auth/logout — отзыв refresh-сессии на бэке (→ 204). */
+export function logout(refreshToken: string): Promise<void> {
+  return request<void>("/auth/logout", {
+    method: "POST",
+    body: { refresh_token: refreshToken },
+    skipAuth: true,
+  });
+}
+
+/** GET /auth/me — профиль текущего врача (по access-токену). */
+export function fetchMe(signal?: AbortSignal): Promise<DoctorProfile> {
+  return request<DoctorProfile>("/auth/me", { signal });
+}
 
 /** GET /document-types (docs/07 §3). */
 export function fetchDocumentTypes(signal?: AbortSignal): Promise<DocumentType[]> {

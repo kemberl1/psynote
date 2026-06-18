@@ -28,8 +28,15 @@ func newHistoryListHandler(repo store.Repository) http.HandlerFunc {
 		limit := parseIntQuery(r, "limit", 20)
 		offset := parseIntQuery(r, "offset", 0)
 
+		// Изоляция по врачу (docs/09 §3): список фильтруется по doctor_id из
+		// проверенного access-токена — врач видит ТОЛЬКО свою историю.
+		doctorID, ok := doctorIDFromContext(r.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "требуется авторизация")
+			return
+		}
 		items, total, err := repo.ListGenerations(r.Context(), store.ListFilter{
-			DoctorID: nil, // TODO(этап 9): scope by authenticated doctor.
+			DoctorID: &doctorID,
 			Limit:    limit,
 			Offset:   offset,
 		})
@@ -55,7 +62,15 @@ func newHistoryDetailHandler(repo store.Repository) http.HandlerFunc {
 			return
 		}
 
-		detail, err := repo.GetGeneration(r.Context(), id, nil)
+		// Изоляция по врачу (docs/09 §3): деталь читается ТОЛЬКО если запись
+		// принадлежит текущему врачу. Чужой id → store.ErrNotFound → 404 (не
+		// раскрываем существование чужих записей).
+		doctorID, ok := doctorIDFromContext(r.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "требуется авторизация")
+			return
+		}
+		detail, err := repo.GetGeneration(r.Context(), id, &doctorID)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "NOT_FOUND", "запись не найдена")

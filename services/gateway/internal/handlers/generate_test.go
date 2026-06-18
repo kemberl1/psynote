@@ -7,12 +7,24 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aimed/gateway/internal/anonymizer"
 	"github.com/aimed/gateway/internal/config"
 	"github.com/aimed/gateway/internal/ragclient"
 	"github.com/aimed/gateway/internal/store"
 )
+
+// ─── test helpers ─────────────────────────────────────────────────────────────
+
+// withDoctor returns a copy of req carrying an authenticated doctor_id in
+// context (as requireAuth would inject). Scoped handlers read it via
+// doctorIDFromContext (Этап 9 изоляция).
+func withDoctor(req *http.Request, doctorID string) *http.Request {
+	ctx := context.WithValue(req.Context(), ctxKeyDoctorID, doctorID)
+	ctx = context.WithValue(ctx, ctxKeyRole, "doctor")
+	return req.WithContext(ctx)
+}
 
 // ─── fakes ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +86,19 @@ type fakeRepo struct {
 	detail  *store.HistoryDetail
 	getErr  error
 	listErr error
+
+	// Doctor scoping capture (Этап 9): what doctor_id reached the store layer.
+	gotListDoctorID *string
+	gotGetDoctorID  *string
+
+	// Auth fixtures (Этап 9). Maps let auth-handler tests drive register/login/
+	// refresh/logout against an in-memory doctor/session store.
+	doctorsByID     map[string]*store.Doctor
+	doctorsByEmail  map[string]*store.Doctor
+	sessionsByHash  map[string]*store.Session
+	createDoctorErr error
+	nextDoctorID    string
+	nextSessionID   string
 }
 
 func (r *fakeRepo) SaveGeneration(_ context.Context, rec store.GenerationRecord) (string, error) {
@@ -84,17 +109,87 @@ func (r *fakeRepo) SaveGeneration(_ context.Context, rec store.GenerationRecord)
 	}
 	return r.id, nil
 }
-func (r *fakeRepo) ListGenerations(_ context.Context, _ store.ListFilter) ([]store.HistoryItem, int, error) {
+func (r *fakeRepo) ListGenerations(_ context.Context, f store.ListFilter) ([]store.HistoryItem, int, error) {
+	r.gotListDoctorID = f.DoctorID
 	if r.listErr != nil {
 		return nil, 0, r.listErr
 	}
 	return r.list, r.total, nil
 }
-func (r *fakeRepo) GetGeneration(_ context.Context, _ string, _ *string) (*store.HistoryDetail, error) {
+func (r *fakeRepo) GetGeneration(_ context.Context, _ string, doctorID *string) (*store.HistoryDetail, error) {
+	r.gotGetDoctorID = doctorID
 	if r.getErr != nil {
 		return nil, r.getErr
 	}
 	return r.detail, nil
+}
+
+// ─── auth Repository methods (in-memory) ──────────────────────────────────────
+
+func (r *fakeRepo) CreateDoctor(_ context.Context, email, passwordHash, displayName, role string) (string, error) {
+	if r.createDoctorErr != nil {
+		return "", r.createDoctorErr
+	}
+	if r.doctorsByEmail == nil {
+		r.doctorsByEmail = map[string]*store.Doctor{}
+		r.doctorsByID = map[string]*store.Doctor{}
+	}
+	if _, ok := r.doctorsByEmail[email]; ok {
+		return "", store.ErrEmailTaken
+	}
+	id := r.nextDoctorID
+	if id == "" {
+		id = "doc-" + email
+	}
+	d := &store.Doctor{
+		ID: id, Email: email, PasswordHash: passwordHash,
+		DisplayName: displayName, Role: role, IsActive: true,
+	}
+	r.doctorsByEmail[email] = d
+	r.doctorsByID[id] = d
+	return id, nil
+}
+func (r *fakeRepo) GetDoctorByEmail(_ context.Context, email string) (*store.Doctor, error) {
+	if d, ok := r.doctorsByEmail[email]; ok {
+		return d, nil
+	}
+	return nil, store.ErrNotFound
+}
+func (r *fakeRepo) GetDoctorByID(_ context.Context, id string) (*store.Doctor, error) {
+	if d, ok := r.doctorsByID[id]; ok {
+		return d, nil
+	}
+	return nil, store.ErrNotFound
+}
+func (r *fakeRepo) TouchLastLogin(_ context.Context, _ string) error { return nil }
+
+func (r *fakeRepo) CreateSession(_ context.Context, doctorID, refreshTokenHash string, expiresAt time.Time) (string, error) {
+	if r.sessionsByHash == nil {
+		r.sessionsByHash = map[string]*store.Session{}
+	}
+	id := r.nextSessionID
+	if id == "" {
+		id = "sess-" + refreshTokenHash[:8]
+	}
+	r.sessionsByHash[refreshTokenHash] = &store.Session{
+		ID: id, DoctorID: doctorID, RefreshTokenHash: refreshTokenHash,
+		ExpiresAt: expiresAt, Revoked: false,
+	}
+	return id, nil
+}
+func (r *fakeRepo) GetSessionByHash(_ context.Context, refreshTokenHash string) (*store.Session, error) {
+	if s, ok := r.sessionsByHash[refreshTokenHash]; ok {
+		return s, nil
+	}
+	return nil, store.ErrNotFound
+}
+func (r *fakeRepo) RevokeSession(_ context.Context, id string) error {
+	for _, s := range r.sessionsByHash {
+		if s.ID == id {
+			s.Revoked = true
+		}
+	}
+	return nil
 }
 
 // ─── generate ─────────────────────────────────────────────────────────────────
@@ -110,7 +205,7 @@ func TestGenerateHandler_Success(t *testing.T) {
 
 	h := newGenerateHandler(config.Config{}, anon, rag, repo)
 	body := `{"document_type":"daily","answers":{"complaints_detail":"жалобы","mood":"lowered"}}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/generate", strings.NewReader(body))
+	req := withDoctor(httptest.NewRequest(http.MethodPost, "/api/v1/generate", strings.NewReader(body)), "doc-42")
 	rec := httptest.NewRecorder()
 	h(rec, req)
 
@@ -135,8 +230,9 @@ func TestGenerateHandler_Success(t *testing.T) {
 	if repo.saved.ContentAnonymized != "дневник [ДАТА]" || repo.saved.TitleSafe != "Ежедневный дневник" {
 		t.Errorf("persisted wrong fields: %+v", repo.saved)
 	}
-	if repo.saved.DoctorID != nil {
-		t.Errorf("doctor_id must be nil pre-auth, got %v", *repo.saved.DoctorID)
+	// Изоляция (Этап 9): doctor_id из context должен попасть в запись.
+	if repo.saved.DoctorID == nil || *repo.saved.DoctorID != "doc-42" {
+		t.Errorf("doctor_id must be scoped to authenticated doctor, got %v", repo.saved.DoctorID)
 	}
 
 	var env envelope
