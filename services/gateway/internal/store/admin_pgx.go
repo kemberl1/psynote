@@ -19,6 +19,10 @@ func (r *PgxRepository) SaveAdminDocument(ctx context.Context, rec AdminDocument
 	if len(rec.RemovedByType) == 0 {
 		removedJSON = []byte("{}")
 	}
+	// Guard against pgx nil → SQL NULL vs NOT NULL DEFAULT '{}'
+	if rec.QdrantIDs == nil {
+		rec.QdrantIDs = []string{}
+	}
 
 	var id string
 	err = r.pool.QueryRow(ctx, `
@@ -46,6 +50,9 @@ func (r *PgxRepository) UpdateAdminDocumentResult(
 	removedJSON, err := json.Marshal(removedByType)
 	if err != nil {
 		removedJSON = []byte("{}")
+	}
+	if qdrantIDs == nil {
+		qdrantIDs = []string{}
 	}
 	_, err = r.pool.Exec(ctx, `
 		UPDATE admin_document

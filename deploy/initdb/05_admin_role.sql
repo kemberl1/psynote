@@ -48,13 +48,14 @@ CREATE INDEX IF NOT EXISTS idx_admin_doc_created_at ON admin_document(created_at
 -- ─── Seed admin-пользователя ────────────────────────────────────────────
 -- Логин: admin@aimed.local / admin123456 (Argon2id, сменить!).
 -- id стараемся стабильным (ON CONFLICT DO NOTHING — безопасно).
+-- Argon2id PHC hash for 'admin123456' (OWASP defaults: m=64MB, t=3, p=2);
+-- generated via gateway's HashPassword() function.
 INSERT INTO doctor (id, email, password_hash, display_name, role)
 VALUES (
     '00000000-0000-0000-0000-000000000001',
     'admin@aimed.local',
-    -- Argon2id PHC-строка для 'admin123456' (params: m=64MB, t=3, p=1)
-    '$argon2id$v=19$m=65536,t=3,p=1$c29tZXNhbHQ$C6pRsh6s+bfyl4MuY7Z4NsJQX6FuZ2ThqyiHxiEKfPw',
+    '$argon2id$v=19$m=65536,t=3,p=2$HtzuQ/mZ85WI7HD3JjZ1zw$BwJemnrP0lVhTkNAQ09JPfJ40N40MIkg5zajaZaq24I',
     'Администратор',
     'admin'
 )
-ON CONFLICT (email) DO NOTHING;
+ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash;

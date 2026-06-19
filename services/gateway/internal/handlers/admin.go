@@ -85,10 +85,11 @@ func newAdminUploadHandler(d adminDeps) http.HandlerFunc {
 			UploadedBy:       &doctorID,
 			OriginalFilename: fname,
 			Status:           "processing",
+			QdrantIDs:        []string{}, // avoid pgx NULL vs NOT NULL DEFAULT '{}'
 		}
 		docID, err := d.repo.SaveAdminDocument(r.Context(), docRec)
 		if err != nil {
-			slog.Error("admin: save metadata failed", "error_type", "store")
+			slog.Error("admin: save metadata failed", "error_type", "store", "error", err)
 			writeError(w, http.StatusInternalServerError, "INTERNAL", "не удалось сохранить метаданные")
 			return
 		}
