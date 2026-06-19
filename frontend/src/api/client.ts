@@ -1,8 +1,5 @@
 // Тонкий типобезопасный слой над fetch для API gateway (docs/07).
-// Отвечает за: базовый URL, разбор конверта {meta, data|error}, нормализацию
-// ошибок в ApiError (код контракта + HTTP-статус), а также АУТЕНТИФИКАЦИЮ
-// (Этап 9): подстановку Authorization: Bearer <access>, авто-refresh при 401
-// и единичный повтор запроса. Без хранения секретов в коде.
+// Этап 10: добавлен uploadRequest для multipart/form-data (admin upload).
 import { ApiError } from "./errors";
 import {
   clearTokens,
@@ -13,30 +10,19 @@ import {
 } from "./session";
 import type { ApiErrorCode, Envelope, TokenPair } from "./types";
 
-/**
- * Базовый префикс API. По умолчанию "/api/v1" — фронт ходит на относительный
- * путь, который vite-proxy (dev) или nginx (prod) проксирует на gateway
- * (docs/07 §1). Переопределяется через VITE_API_BASE.
- */
 export const API_BASE = (import.meta.env.VITE_API_BASE ?? "/api/v1").replace(/\/$/, "");
 
-/** Допустимые методы. */
 type Method = "GET" | "POST" | "DELETE";
 
 interface RequestOptions {
   method?: Method;
-  /** JSON-тело (будет сериализовано). */
   body?: unknown;
-  /** Query-параметры (undefined-значения отбрасываются). */
   query?: Record<string, string | number | undefined>;
   signal?: AbortSignal;
-  /** Внутреннее: пропустить аутентификацию (для самих auth-эндпоинтов). */
   skipAuth?: boolean;
-  /** Внутреннее: не пытаться refresh при 401 (предотвращает рекурсию). */
   _isRetry?: boolean;
 }
 
-/** Собирает URL с query-строкой. */
 function buildUrl(path: string, query?: RequestOptions["query"]): string {
   const url = `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
   if (!query) return url;
@@ -50,7 +36,6 @@ function buildUrl(path: string, query?: RequestOptions["query"]): string {
   return qs ? `${url}?${qs}` : url;
 }
 
-/** Сужает произвольную строку к известному коду ошибки контракта. */
 function normalizeCode(code: string | undefined, status: number): ApiErrorCode {
   const known: ApiErrorCode[] = [
     "BAD_REQUEST",
@@ -62,9 +47,11 @@ function normalizeCode(code: string | undefined, status: number): ApiErrorCode {
     "INTERNAL",
     "UNAUTHORIZED",
     "EMAIL_TAKEN",
+    "FORBIDDEN",
   ];
   if (code && (known as string[]).includes(code)) return code as ApiErrorCode;
   if (status === 401) return "UNAUTHORIZED";
+  if (status === 403) return "FORBIDDEN";
   if (status === 409) return "EMAIL_TAKEN";
   if (status === 404) return "NOT_FOUND";
   if (status === 422) return "PII_DETECTED";
@@ -73,12 +60,9 @@ function normalizeCode(code: string | undefined, status: number): ApiErrorCode {
   return "UNKNOWN";
 }
 
-// ─── Авто-refresh (Этап 9, docs/09 §1.3) ────────────────────────────────────
-// Один общий промис refresh на все параллельные 401, чтобы не отправлять
-// несколько /auth/refresh одновременно (ротация инвалидировала бы друг друга).
+// ─── Авто-refresh (Этап 9) ──────────────────────────────────────────────────
 let refreshInFlight: Promise<boolean> | null = null;
 
-/** Пытается обновить access по refresh-токену. true при успехе. */
 async function tryRefresh(): Promise<boolean> {
   const refresh = getRefreshToken();
   if (!refresh) return false;
@@ -99,7 +83,6 @@ async function tryRefresh(): Promise<boolean> {
       } catch {
         return false;
       } finally {
-        // Сбрасываем после завершения, чтобы следующий 401 мог запустить новый.
         const done = refreshInFlight;
         void done;
         refreshInFlight = null;
@@ -109,13 +92,7 @@ async function tryRefresh(): Promise<boolean> {
   return refreshInFlight;
 }
 
-/**
- * Выполняет запрос и возвращает РАЗВЁРНУТЫЙ конверт.
- * onEnvelope получает meta, чтобы вытащить total/version/llm-метаданные.
- *
- * При 401 на защищённом запросе: один раз пробуем refresh и повторяем запрос;
- * если refresh не удался — чистим сессию и уведомляем (AuthContext → /login).
- */
+/** Выполняет JSON-запрос и возвращает data из конверта. */
 export async function request<TData>(
   path: string,
   opts: RequestOptions = {},
@@ -141,24 +118,20 @@ export async function request<TData>(
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (e) {
-    // Сетевой сбой / abort / CORS — нормализуем в ApiError.
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     throw new ApiError("NETWORK", "сетевая ошибка", 0);
   }
 
-  // 401 на защищённом запросе → попытка refresh + единичный повтор.
   if (res.status === 401 && !skipAuth && !_isRetry) {
     const refreshed = await tryRefresh();
     if (refreshed) {
       return request<TData>(path, { ...opts, _isRetry: true }, onEnvelope);
     }
-    // refresh не помог — сессия мертва.
     clearTokens();
     notifySessionEnded();
     throw new ApiError("UNAUTHORIZED", "сессия истекла", 401);
   }
 
-  // 204 No Content — тела нет (DELETE/logout).
   if (res.status === 204) {
     return undefined as TData;
   }
@@ -167,7 +140,6 @@ export async function request<TData>(
   try {
     env = (await res.json()) as Envelope<TData>;
   } catch {
-    // Не-JSON ответ от прокси/инфраструктуры.
     if (!res.ok) {
       throw new ApiError(
         normalizeCode(undefined, res.status),
@@ -185,5 +157,67 @@ export async function request<TData>(
   }
 
   onEnvelope?.(env);
+  return env.data as TData;
+}
+
+// ─── Multipart upload (Этап 10) ─────────────────────────────────────────────
+
+/**
+ * Загрузка multipart/form-data на защищённый эндпоинт (admin upload).
+ * НЕ сериализует body в JSON, ставит правильный Content-Type (boundary).
+ * При 401 — авто-refresh + повтор (как request).
+ */
+export async function uploadRequest<TData>(
+  path: string,
+  formData: FormData,
+  signal?: AbortSignal,
+): Promise<TData> {
+  const headers: Record<string, string> = {};
+  const access = getAccessToken();
+  if (access) headers["Authorization"] = `Bearer ${access}`;
+
+  let res: Response;
+  try {
+    res = await fetch(buildUrl(path), {
+      method: "POST",
+      headers,
+      body: formData,
+      signal,
+    });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
+    throw new ApiError("NETWORK", "сетевая ошибка", 0);
+  }
+
+  if (res.status === 401) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      return uploadRequest<TData>(path, formData, signal);
+    }
+    clearTokens();
+    notifySessionEnded();
+    throw new ApiError("UNAUTHORIZED", "сессия истекла", 401);
+  }
+
+  let env: Envelope<TData> | null = null;
+  try {
+    env = (await res.json()) as Envelope<TData>;
+  } catch {
+    if (!res.ok) {
+      throw new ApiError(
+        normalizeCode(undefined, res.status),
+        `HTTP ${res.status}`,
+        res.status,
+      );
+    }
+    throw new ApiError("UNKNOWN", "не удалось разобрать ответ", res.status);
+  }
+
+  if (!res.ok || env.error) {
+    const code = normalizeCode(env.error?.code, res.status);
+    const message = env.error?.message ?? `HTTP ${res.status}`;
+    throw new ApiError(code, message, res.status, env.meta?.request_id);
+  }
+
   return env.data as TData;
 }

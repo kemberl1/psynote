@@ -6,8 +6,7 @@
 //   - Export service: builds Word/PDF documents.
 //   - Orchestration: coordinates RAG (Python) and the X5 CoPilot LLM with fallback.
 //
-// Этап 1 (каркас): здесь поднимается только HTTP-сервер с health-эндпоинтом.
-// Бизнес-логика (auth, анонимизация, экспорт, оркестрация) — заглушки в internal/.
+// Этап 10: wiring admin deps (AdminRepository, AdminRAG) for document upload.
 package main
 
 import (
@@ -35,7 +34,6 @@ func main() {
 	cfg := config.Load()
 
 	// PII-гейт (docs/04). Словари — встроенные (go:embed) или из ANONYMIZER_DICT_DIR.
-	// NER-сайдкар на Этапе 2 не подключаем — работает Go-only MVP (docs/04 §6).
 	anon, err := anonymizer.New(anonymizer.Options{
 		DictionaryDir: cfg.AnonymizerDictDir,
 		FailClosed:    cfg.AnonymizerFailClosed,
@@ -52,28 +50,25 @@ func main() {
 		HealthTimeout:   cfg.RAGHealthTimeout,
 	})
 
-	// PostgreSQL persistence (ОБЕЗЛИЧЕННАЯ история, docs/05). Деградация
-	// допустима: если БД недоступна на старте — /generate и /history вернут 503,
-	// но health/справочники работают (docs/02 §7).
+	// PostgreSQL persistence (ОБЕЗЛИЧЕННАЯ история, docs/05).
 	var repo store.Repository
+	var pgRepo *store.PgxRepository
 	if cfg.PostgresDSN != "" {
 		dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		pgRepo, derr := store.NewPgxRepository(dbCtx, cfg.PostgresDSN)
+		pr, derr := store.NewPgxRepository(dbCtx, cfg.PostgresDSN)
 		dbCancel()
 		if derr != nil {
 			slog.Error("postgres connect failed; history/generate disabled", "error_type", "store")
 		} else {
-			repo = pgRepo
-			defer pgRepo.Close()
+			pgRepo = pr
+			repo = pr
+			defer pr.Close()
 		}
 	} else {
 		slog.Warn("POSTGRES_DSN empty; history/generate disabled")
 	}
 
-	// Auth (Этап 9, docs/09): сервис JWT/refresh. Секрет — ТОЛЬКО из ENV
-	// JWT_SECRET (docs/09 §6). Пустой секрет ⇒ auth выключен (auth-роуты не
-	// поднимаются, приватные роуты отдают 503) — fail-safe для каркасных
-	// запусков без секрета. На рабочем стенде JWT_SECRET обязателен.
+	// Auth (Этап 9, docs/09): сервис JWT/refresh.
 	var tokens *auth.TokenService
 	if cfg.JWTSecret != "" {
 		ts, terr := auth.NewTokenService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
@@ -86,10 +81,21 @@ func main() {
 		slog.Warn("JWT_SECRET empty; auth disabled (protected routes return 503)")
 	}
 
+	// Admin deps (Этап 10): reuse PgxRepository for admin_document table,
+	// reuse the same RAG HTTP client (satisfies AdminIngestClient via IngestFile).
+	var adminRepo store.AdminRepository
+	var adminRAG ragclient.AdminIngestClient
+	if pgRepo != nil {
+		adminRepo = pgRepo
+	}
+	adminRAG = rag
+
 	mux := handlers.NewRouter(cfg, handlers.Deps{
 		Anonymizer: anon,
 		RAG:        rag,
+		AdminRAG:   adminRAG,
 		Repo:       repo,
+		AdminRepo:  adminRepo,
 		Tokens:     tokens,
 	})
 
@@ -98,7 +104,7 @@ func main() {
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		WriteTimeout:      120 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 

@@ -1,27 +1,19 @@
 """FastAPI application entrypoint for the RAG service.
 
-Этап 3 (ingestion): /health + /admin/audit-sample (выгрузка выборки обезличенных
-чанков для ручного аудита приватности, docs/04 §7). Сам ingestion запускается
-CLI-командой `python -m app.ingest ingest` (one-shot, docs/03 §5).
-
-Этап 4 (генерация): POST /generate — главный эндпоинт генерации дневника
-(анонимизация-гейт → RAG-retrieval → промпт → LLM X5 с фолбэком), docs/03,
-docs/07 §5.
-
-ОТКЛОНЕНИЕ ОТ docs/07: в контракте /api/v1/generate висит на Go-Gateway, который
-проксирует на RAG. По заданию Этапа 4 конвейер генерации (LLM+fallback+промпты)
-реализован в RAG-сервисе и публикуется как POST /generate. Gateway на следующих
-этапах будет проксировать /api/v1/generate → rag:8000/generate. Конверт ответа
-`{meta, data}` / `{meta, error}` и коды (422 PII, 503 LLM) сохранены по docs/07 §1.
+Этап 3 (ingestion): /health + /admin/audit-sample.
+Этап 4 (генерация): POST /generate — главный эндпоинт генерации дневника.
+Этап 10: POST /ingest — загрузка файла через admin UI (multipart/form-data).
 """
 
 from __future__ import annotations
 
 import logging
+import tempfile
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, File, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -45,10 +37,11 @@ settings = get_settings()
 
 app = FastAPI(
     title="AI MED — RAG service",
-    version="0.4.0",
+    version="0.5.0",
     description=(
         "RAG-сервис: ingestion корпуса (CLI), retrieval из Qdrant, генерация "
-        "психиатрических дневников (LLM X5 с фолбэком). См. docs/03_rag_design.md."
+        "психиатрических дневников (LLM X5 с фолбэком), загрузка документов "
+        "через admin UI (Этап 10). См. docs/03_rag_design.md."
     ),
 )
 
@@ -73,18 +66,13 @@ def _error_response(status: int, code: str, message: str) -> JSONResponse:
 
 # ─── Схемы запроса/ответа (docs/07 §5) ───────────────────────────────────────
 class GenerateRequest(BaseModel):
-    """Тело запроса генерации (docs/07 §5)."""
-
     document_type: str = Field(..., description="daily | exam_10d")
-    answers: dict = Field(default_factory=dict,
-                          description="Ответы опросника (docs/06 §3)")
-    options: dict | None = Field(
-        default=None, description="опции (stream и пр.)")
+    answers: dict = Field(default_factory=dict)
+    options: dict | None = Field(default=None)
 
 
 @app.get("/health", tags=["health"])
 def health() -> dict:
-    """Liveness probe + доступность LLM-конфига (docs/07 §8)."""
     models = settings.llm_models()
     return {
         "status": "ok",
@@ -98,14 +86,6 @@ def health() -> dict:
 
 @app.post("/generate", tags=["generation"])
 def generate(req: GenerateRequest) -> JSONResponse:
-    """Сгенерировать дневник: гейт → retrieval → промпт → LLM (docs/03, docs/07 §5).
-
-    Коды (docs/07 §1):
-      • 200 — успех, data.content — обезличенный дневник;
-      • 400 — неизвестный document_type;
-      • 422 — PII-гейт заблокировал свободный ввод (PII_DETECTED);
-      • 503 — все модели LLM недоступны / LLM не сконфигурирован.
-    """
     generator = DiaryGenerator(settings)
     try:
         result = generator.generate(req.document_type, req.answers)
@@ -117,7 +97,6 @@ def generate(req: GenerateRequest) -> JSONResponse:
         logger.error("generate: LLM не сконфигурирован")
         return _error_response(503, "LLM_NOT_CONFIGURED", str(exc))
     except (AllModelsUnavailableError, LLMAuthError, LLMError) as exc:
-        # Auth (401/403) — конфиг-проблема ключа; все модели недоступны — 503.
         if isinstance(exc, LLMAuthError):
             logger.error("generate: ошибка авторизации LLM")
             return _error_response(
@@ -126,7 +105,7 @@ def generate(req: GenerateRequest) -> JSONResponse:
         logger.error("generate: LLM недоступен (%s)", type(exc).__name__)
         return _error_response(503, "LLM_UNAVAILABLE",
                                "Сервис генерации временно недоступен")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error("generate: внутренняя ошибка: %s", type(exc).__name__)
         return _error_response(500, "INTERNAL_ERROR", "Внутренняя ошибка сервиса")
     finally:
@@ -160,16 +139,10 @@ def generate(req: GenerateRequest) -> JSONResponse:
 
 @app.get("/admin/audit-sample", tags=["audit"])
 def audit_sample(sample: int = Query(default=20, ge=1, le=200)) -> dict:
-    """Выгрузить выборку ОБЕЗЛИЧЕННЫХ чанков для ручного аудита приватности.
-
-    docs/04 §7: позволяет на приёмке проверить отсутствие ПДн в проиндексированных
-    данных. Возвращает payload (text + метаданные) — все данные уже обезличены
-    гейтом на этапе ingestion.
-    """
     store = QdrantStore(settings)
     try:
         payloads = store.sample_payloads(limit=sample)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error("audit-sample: ошибка чтения Qdrant: %s",
                      type(exc).__name__)
         raise HTTPException(status_code=503,
@@ -179,3 +152,121 @@ def audit_sample(sample: int = Query(default=20, ge=1, le=200)) -> dict:
         "count": len(payloads),
         "chunks": payloads,
     }
+
+
+# ─── POST /ingest — загрузка документа через admin (Этап 10) ────────────────
+
+@app.post("/ingest", tags=["ingest"])
+async def ingest(file: UploadFile = File(...)) -> JSONResponse:
+    """Принять файл (.docx/.odt/.doc) и загрузить в RAG.
+
+    Пайплайн: extract → anonymize(gateway) → chunk → embed → upsert.
+    Оригинал НЕ хранится (приватность, docs/09).
+    """
+    from app.anonymizer_client import AnonymizerClient
+    from app.chunking import chunk_document
+    from app.embeddings import Embedder
+    from app.extractors import SUPPORTED_TEXT_SUFFIXES, ExtractionError, extract_text
+    from app.qdrant_store import PointRecord, build_payload, make_point_id
+
+    # Валидация расширения.
+    if not file.filename:
+        return _error_response(400, "BAD_REQUEST", "имя файла отсутствует")
+
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in SUPPORTED_TEXT_SUFFIXES:
+        return _error_response(400, "BAD_REQUEST",
+                               f"неподдерживаемый формат {suffix} "
+                               f"(допустимы: {', '.join(sorted(SUPPORTED_TEXT_SUFFIXES))})")
+
+    # Прочитать содержимое (максимум ~20 МБ).
+    contents = await file.read()
+    if len(contents) > 20 * 1024 * 1024:
+        return _error_response(400, "BAD_REQUEST", "файл слишком большой (макс. 20 МБ)")
+    if len(contents) == 0:
+        return _error_response(400, "BAD_REQUEST", "пустой файл")
+
+    # Сохранить во временный файл для extractors.
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
+        tmp.write(contents)
+        tmp.flush()
+        tmp_path = Path(tmp.name)
+
+        # 1. Извлечение текста.
+        try:
+            raw_text = extract_text(tmp_path)
+        except ExtractionError as exc:
+            logger.warning("ingest: extraction failed: %s", exc)
+            return _error_response(422, "EXTRACTION_ERROR",
+                                   f"не удалось извлечь текст: {exc}")
+        except Exception as exc:
+            logger.error("ingest: unexpected extraction error: %s",
+                         type(exc).__name__)
+            return _error_response(500, "INTERNAL_ERROR", "ошибка извлечения текста")
+
+    if not raw_text or not raw_text.strip():
+        return _error_response(422, "EMPTY_DOCUMENT", "документ пуст после извлечения текста")
+
+    # 2. Анонимизация через gateway (fail-closed).
+    anon = AnonymizerClient(settings)
+    try:
+        result = anon.anonymize(raw_text)
+    finally:
+        anon.close()
+
+    del raw_text  # сырой текст больше не нужен
+
+    if not result.passed:
+        return _error_response(422, "PII_DETECTED",
+                               "документ не удалось безопасно обезличить")
+
+    # 3. Чанкинг обезличенного текста.
+    chunks = chunk_document(result.content, settings)
+    if not chunks:
+        return _error_response(422, "NO_CHUNKS",
+                               "нет валидных чанков после обезличивания")
+
+    # 4. Эмбеддинги.
+    embedder = Embedder(settings)
+    store = QdrantStore(settings)
+    dim = embedder.dimension
+    store.ensure_collection(dim)
+    vectors = embedder.embed_passages([c.text for c in chunks])
+
+    # 5. Upsert в Qdrant (source="user_upload" для отличия от корпуса).
+    points: list[PointRecord] = []
+    qdrant_ids: list[str] = []
+    for chunk, vector in zip(chunks, vectors):
+        payload = build_payload(
+            chunk.text,
+            doc_type=chunk.doc_type,
+            section=chunk.section,
+            syndrome=chunk.syndrome,
+            diagnosis_class=chunk.diagnosis_class,
+            dynamics=chunk.dynamics,
+            source="user_upload",
+        )
+        pid = make_point_id(chunk.text, payload)
+        points.append(PointRecord(
+            point_id=pid, vector=vector, payload=payload))
+        qdrant_ids.append(pid)
+
+    written = store.upsert(points)
+
+    removed_by_type = {}
+    for k, v in result.removed_by_type.items():
+        removed_by_type[k] = v
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "meta": _meta(),
+            "data": {
+                "status": "ingested",
+                "chunks_count": written,
+                "qdrant_ids": qdrant_ids,
+                "anonymizer_removed_count": result.removed_count,
+                "removed_by_type": removed_by_type,
+            },
+        },
+    )

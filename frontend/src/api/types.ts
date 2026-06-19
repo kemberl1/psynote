@@ -13,12 +13,9 @@ export interface Envelope<TData> {
 export interface Meta {
   request_id?: string;
   ts?: string;
-  /** Метаданные генерации (docs/07 §5). */
   llm_model_used?: string;
   tokens_used?: number;
-  /** Пагинация истории (docs/07 §6). */
   total?: number;
-  /** Версия схемы опросника (docs/07 §3). */
   version?: number;
 }
 
@@ -38,41 +35,35 @@ export type ApiErrorCode =
   | "SERVICE_UNAVAILABLE"
   | "INTERNAL"
   | "NETWORK"
-  // Аутентификация (Этап 9, docs/07 §2, docs/09).
   | "UNAUTHORIZED"
   | "EMAIL_TAKEN"
+  | "FORBIDDEN"
   | "UNKNOWN";
 
 // ─── Аутентификация (docs/07 §2, docs/09) ──────────────────────────────────
 
-/** Тело POST /auth/register. */
 export interface RegisterRequest {
   email: string;
   password: string;
   display_name?: string;
 }
 
-/** Данные ответа POST /auth/register. */
 export interface RegisterResult {
   doctor_id: string;
   email: string;
 }
 
-/** Тело POST /auth/login. */
 export interface LoginRequest {
   email: string;
   password: string;
 }
 
-/** Пара токенов (login/refresh). access — короткоживущий JWT, refresh — opaque. */
 export interface TokenPair {
   access_token: string;
   refresh_token: string;
-  /** Время жизни access-токена в секундах (docs/07 §2). */
   expires_in: number;
 }
 
-/** Профиль текущего врача (GET /auth/me). Данные врача, не ПДн пациента. */
 export interface DoctorProfile {
   doctor_id: string;
   email: string;
@@ -82,14 +73,12 @@ export interface DoctorProfile {
 
 // ─── Справочники и схема опросника (docs/07 §3, docs/06) ───────────────────
 
-/** Тип документа (GET /document-types). */
 export interface DocumentType {
   code: string;
   title: string;
   is_active: boolean;
 }
 
-/** Тип поля вопроса (docs/06 §3). */
 export type QuestionType =
   | "select"
   | "multiselect"
@@ -97,20 +86,17 @@ export type QuestionType =
   | "number"
   | "boolean";
 
-/** Опция select/multiselect (docs/06 §3). `prompt` фронтом не используется. */
 export interface QuestionOption {
   value: string;
   label: string;
   prompt?: string;
 }
 
-/** Условная логика: какие вопросы открыть при значении (docs/06 §3). */
 export interface Conditional {
   if_value: string;
   show: string[];
 }
 
-/** Один вопрос опросника (docs/06 §3). */
 export interface Question {
   id: string;
   label: string;
@@ -118,15 +104,12 @@ export interface Question {
   required: boolean;
   allow_custom: boolean;
   default?: unknown;
-  /** Логическая секция для группировки в UI (docs/08 §5.1). Опционально. */
   group?: string;
-  /** Короткая подсказка под вопросом. Опционально. */
   help?: string;
   options?: QuestionOption[];
   conditional?: Conditional[];
 }
 
-/** Схема опросника для типа документа (GET /questionnaire). */
 export interface QuestionnaireSchema {
   document_type: string;
   version: number;
@@ -135,16 +118,7 @@ export interface QuestionnaireSchema {
 
 // ─── Генерация (docs/07 §5) ────────────────────────────────────────────────
 
-/**
- * Значение одного ответа опросника. Скаляр (select/text/number/boolean),
- * массив (multiselect) или объект «свой вариант» (docs/06 §1.4):
- * { value: "__custom__", custom_text: "..." }.
- *
- * Multiselect может содержать как коды опций (string), так и «свои варианты»
- * (CustomAnswer) — оба обрабатываются маппингом RAG (iter_free_text/_normalize).
- */
 export type MultiAnswerItem = string | CustomAnswer;
-
 export type AnswerValue =
   | string
   | number
@@ -153,16 +127,13 @@ export type AnswerValue =
   | CustomAnswer
   | null;
 
-/** «Свой вариант» — свободный ввод (анонимизируется на gateway). */
 export interface CustomAnswer {
   value: "__custom__";
   custom_text: string;
 }
 
-/** Карта ответов опросника (id вопроса → значение). */
 export type Answers = Record<string, AnswerValue>;
 
-/** Тело POST /generate (docs/07 §5). */
 export interface GenerateRequest {
   document_type: string;
   answers: Answers;
@@ -170,16 +141,11 @@ export interface GenerateRequest {
   options?: { stream?: boolean };
 }
 
-/**
- * Сводка обезличивания свободного ввода врача (docs/07 §5, docs/04 §7).
- * ТОЛЬКО счётчики/категории — НИКОГДА значения ПДн.
- */
 export interface AnonymizationSummary {
   removed_count: number;
   removed_by_type: Record<string, number>;
 }
 
-/** Данные успешной генерации (docs/07 §5). */
 export interface GenerateResult {
   request_id: string;
   content: string;
@@ -189,7 +155,6 @@ export interface GenerateResult {
 
 // ─── История запросов (docs/07 §6) ─────────────────────────────────────────
 
-/** Элемент списка истории (GET /requests). */
 export interface HistoryItem {
   request_id: string;
   document_type: string;
@@ -199,7 +164,6 @@ export interface HistoryItem {
   created_at: string;
 }
 
-/** Полная запись истории (GET /requests/{id}). Только обезличенные данные. */
 export interface HistoryDetail {
   request_id: string;
   document_type: string;
@@ -212,7 +176,6 @@ export interface HistoryDetail {
   created_at: string;
 }
 
-/** Список истории + total из meta (для пагинации). */
 export interface HistoryListResult {
   items: HistoryItem[];
   total: number;
@@ -220,15 +183,44 @@ export interface HistoryListResult {
 
 // ─── Экспорт (docs/07 §7) ──────────────────────────────────────────────────
 
-/** Формат экспорта документа (docs/07 §7). */
 export type ExportFormat = "docx" | "pdf" | "txt";
 
-/**
- * Тело POST /requests/{id}/export (docs/07 §7). substitutions — локальная
- * подстановка реальных значений плейсхолдеров (применяется gateway в памяти,
- * не сохраняется). Может быть опущена.
- */
 export interface ExportRequest {
   format: ExportFormat;
   substitutions?: Record<string, string>;
+}
+
+// ─── Админка: загрузка документов (Этап 10, docs/07 §8) ─────────────────────
+
+/** Результат загрузки документа через admin UI (POST /admin/documents). */
+export interface AdminUploadResult {
+  doc_id: string;
+  status: string;
+  original_filename: string;
+  anonymizer_removed_count: number;
+  removed_by_type: Record<string, number>;
+  chunks_count: number;
+  qdrant_ids: string[];
+  error_message?: string;
+}
+
+/** Метаданные загруженного документа (GET /admin/documents). */
+export interface AdminDocument {
+  id: string;
+  uploaded_by?: string;
+  original_filename: string;
+  status: string;
+  anonymizer_removed_count: number;
+  removed_by_type: Record<string, number>;
+  chunks_count: number;
+  qdrant_ids: string[];
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Результат GET /admin/documents (список). */
+export interface AdminDocumentListResult {
+  items: AdminDocument[];
+  total: number;
 }

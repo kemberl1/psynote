@@ -1,0 +1,179 @@
+/* Стили админ-страницы (Этап 10, docs/08 §2 — тёмная тема Cursor). */
+
+.admin-page {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.admin-page__title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text, #ededed);
+  margin: 0 0 8px;
+}
+
+.admin-page__subtitle {
+  font-size: 0.875rem;
+  color: var(--text-secondary, #a1a1aa);
+  margin: 0 0 24px;
+  line-height: 1.5;
+}
+
+/* Dropzone */
+
+.admin-dropzone {
+  border: 2px dashed var(--border, #26262a);
+  border-radius: 12px;
+  padding: 48px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 150ms, background 150ms;
+  user-select: none;
+}
+
+.admin-dropzone:hover,
+.admin-dropzone--active {
+  border-color: var(--accent, #7c9cff);
+  background: rgba(124, 156, 255, 0.04);
+}
+
+.admin-dropzone:focus-visible {
+  outline: 2px solid var(--accent, #7c9cff);
+  outline-offset: 2px;
+}
+
+.admin-dropzone__icon {
+  font-size: 2.5rem;
+  margin-bottom: 8px;
+}
+
+.admin-dropzone__text {
+  font-size: 0.9375rem;
+  color: var(--text, #ededed);
+}
+
+.admin-dropzone__hint {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #a1a1aa);
+  margin-top: 8px;
+}
+
+.accent {
+  color: var(--accent, #7c9cff);
+}
+
+/* Upload status */
+
+.admin-upload-status {
+  margin-top: 20px;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #26262a);
+  background: var(--surface, #141416);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-upload-status--success {
+  border-color: #22c55e33;
+}
+
+.admin-upload-status--error {
+  border-color: #ef444433;
+}
+
+.admin-upload-status__title {
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.admin-upload-status__details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary, #a1a1aa);
+}
+
+.admin-upload-status__details strong {
+  color: var(--text, #ededed);
+}
+
+.admin-mono {
+  font-family: "JetBrains Mono", "Geist Mono", monospace;
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  background: var(--surface, #17171a);
+  border-radius: 4px;
+}
+
+.admin-error {
+  color: #ef4444;
+}
+
+/* History */
+
+.admin-history {
+  margin-top: 32px;
+}
+
+.admin-history__title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text, #ededed);
+  margin: 0 0 16px;
+}
+
+.admin-history__loading,
+.admin-history__empty {
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 0.875rem;
+  padding: 16px 0;
+}
+
+.admin-history__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-history__item {
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #26262a);
+  background: var(--surface, #141416);
+}
+
+.admin-history__name {
+  font-weight: 500;
+  font-size: 0.875rem;
+  color: var(--text, #ededed);
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+
+.admin-history__meta {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  color: var(--text-secondary, #a1a1aa);
+}
+
+.admin-history__date {
+  opacity: 0.7;
+}
+
+.admin-history__chunks,
+.admin-history__anon {
+  font-family: "JetBrains Mono", "Geist Mono", monospace;
+}
+
+.admin-history__error {
+  font-size: 0.75rem;
+  color: #ef4444;
+  margin-top: 4px;
+}

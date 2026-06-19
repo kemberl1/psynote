@@ -1,12 +1,11 @@
 // PsyNote — корневой роутинг приложения врача (docs/08 §3).
-// Каждый тип документа — отдельный роут (масштабируемость, docs/08 §3, AD-8).
-// Этап 9 (аутентификация): публичные /login и /register; всё приложение
-// (AppShell + /diary + /requests/:id) — под ProtectedRoute (неавторизованный →
-// /login). Изоляция истории по врачу обеспечивается бэкендом (docs/09 §3).
+// Этап 10: добавлен /admin для загрузки документов (admin-роль).
 import { Navigate, Route, Routes } from "react-router-dom";
+import { AdminRoute } from "./auth/AdminRoute";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { AppShell } from "./components/layout/AppShell";
 import { EmptyState } from "./components/ui";
+import { AdminPage } from "./pages/AdminPage";
 import { AuthPage } from "./pages/AuthPage";
 import { DiaryPage } from "./pages/DiaryPage";
 import { RequestDetailPage } from "./pages/RequestDetailPage";
@@ -37,6 +36,15 @@ function App() {
               />
             }
           />
+        </Route>
+      </Route>
+
+      {/* Админка: защищена admin-ролей (Этап 10). */}
+      <Route element={<ProtectedRoute />}>
+        <Route element={<AppShell />}>
+          <Route element={<AdminRoute />}>
+            <Route path="admin" element={<AdminPage />} />
+          </Route>
         </Route>
       </Route>
     </Routes>

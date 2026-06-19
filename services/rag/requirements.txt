@@ -5,6 +5,7 @@
 # --- Web framework (каркас) ---
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
+python-multipart==0.0.18  # FastAPI file upload support (Этап 10, POST /ingest)
 
 # --- Vector DB client (docs/05 §3) ---
 qdrant-client==1.12.1
