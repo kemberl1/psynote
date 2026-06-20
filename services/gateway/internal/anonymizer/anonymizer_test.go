@@ -410,3 +410,63 @@ func TestTimeOfDayOptIn(t *testing.T) {
 		t.Errorf("при RedactClockTime=true чч:мм должно вырезаться; got: %q", res.Text)
 	}
 }
+
+// TestPartialDatesIgnored — Техдолг §3: частичные даты (DD.MM. без года)
+// НЕ являются однозначными ПДн (год неизвестен), поэтому детектор дат
+// НЕ должен их матчить. Проверяем, что:
+//   - DD.MM. без года — не становится [ДАТА] (не false-positive);
+//   - gate не считает DD.MM. остаточными ПДн (не fail-closed);
+//   - DD.MM.YYYY — по-прежнему ловится корректно (regression).
+func TestPartialDatesIgnored(t *testing.T) {
+	p := newTestPipeline(t)
+
+	// Частичные даты (DD.MM.) — НЕ должны обезличиваться (не ПДн без года).
+	partialCases := []struct {
+		name string
+		in   string
+		keep string // что должно ОСТАТЬСЯ в тексте
+	}{
+		{"dd_mm_slash", "Дата выписки 19.09 без указания года.", "19.09"},
+		{"dd_mm_dot", "Приём назначен на 05.11.", "05.11"},
+		{"dd_mm_short", "Следующий визит 3.4 планируется.", "3.4"},
+	}
+	for _, tc := range partialCases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := run(t, p, tc.in)
+			if strings.Contains(res.Text, "[ДАТА]") {
+				t.Errorf("частичная дата (DD.MM.) не должна обезличиваться; got: %q", res.Text)
+			}
+			if !strings.Contains(res.Text, tc.keep) {
+				t.Errorf("частичная дата %q должна сохраниться; got: %q", tc.keep, res.Text)
+			}
+		})
+	}
+
+	// Gate тоже не должен считать DD.MM. остаточными ПДн.
+	for _, tc := range partialCases {
+		t.Run("gate_"+tc.name, func(t *testing.T) {
+			sus := p.gate.inspect(tc.in)
+			// DD.MM. без года может попасть в residual-паттерн \d{1,2}.\d{1,2}.\d{2,4}
+			// ТОЛЬКО если 2-4 цифры после второй точки — а их нет, значит sus=0.
+			for _, s := range sus {
+				if s.Type == EntityDate {
+					t.Errorf("gate ложно считает частичную дату остаточным ПДн: %v in %q", s, tc.in)
+				}
+			}
+		})
+	}
+
+	// Полные даты (DD.MM.YYYY) — ПО-ПРЕЖНЕМУ ловятся (regression).
+	fullCases := []string{
+		"Осмотр проведён 19.09.2025 в отделении.",
+		"Поступил 05.11.2024 в стационар.",
+	}
+	for _, in := range fullCases {
+		t.Run("full_date_reg_"+in[:20], func(t *testing.T) {
+			res := run(t, p, in)
+			if !strings.Contains(res.Text, "[ДАТА]") {
+				t.Errorf("полная дата (DD.MM.YYYY) должна обезличиваться; got: %q", res.Text)
+			}
+		})
+	}
+}

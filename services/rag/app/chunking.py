@@ -24,6 +24,7 @@ import re
 from dataclasses import dataclass, field
 
 from app.config import Settings
+from app.questionnaire import normalize_syndrome
 
 # ─── Заголовки секций расширенного осмотра (docs/03 §4) → код section ─────────
 _SECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
@@ -230,11 +231,16 @@ def _extract_meta(text: str) -> dict:
     icd_class = None
     if icd_match:
         # Верхний уровень МКБ: первая буква + первая цифра + 'x' (напр. F9x).
+        # ТОЛЬКО F/Ф коды (психиатрическая классификация) → diagnosis_class;
+        # R, J, E и др. — сопутствующие/соматические, не маппятся в class.
         raw = icd_match.group(1)
-        icd_class = f"{raw[0]}{raw[1]}x" if raw[1:].isdigit() else raw
+        first = raw[0].upper()
+        if first in ("F", "Ф") and raw[1:].isdigit():
+            icd_class = f"F{raw[1]}x"
 
     syndrome_match = _SYNDROME_RE.search(text)
-    syndrome = syndrome_match.group(1).lower() if syndrome_match else None
+    syndrome = normalize_syndrome(
+        syndrome_match.group(1)) if syndrome_match else None
 
     dynamics = None
     for label, pattern in _DYNAMICS_RULES:

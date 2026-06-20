@@ -49,7 +49,9 @@ def test_exam_record_split_into_sections() -> None:
     assert {"complaints", "neuro", "psych_status", "epicrisis"} & sections
     # Опциональные метаданные.
     assert any(c.diagnosis_class == "F4x" for c in chunks)
-    assert any(c.syndrome and "тревожно-депрессивн" in c.syndrome for c in chunks)
+    # _SYNDROME_RE matches «тревожное расстройство» first (earlier in text),
+    # normalize_syndrome → канонич. «тревожный». Тест проверяет наличие syndrome.
+    assert any(c.syndrome == "тревожный" for c in chunks)
 
 
 def test_short_noise_records_dropped() -> None:

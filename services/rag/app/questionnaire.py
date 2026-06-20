@@ -339,11 +339,18 @@ def _question_registry(doc_type: str) -> tuple[dict, dict]:
 
 
 # ─── Извлечение МКБ-класса верхнего уровня (docs/05 §3.2 — diagnosis_class) ──
-_ICD_RE = re.compile(r"\bF(\d)\d", re.IGNORECASE)
+# Техдолг §2: regex матчит И латинскую F, И кириллическую Ф — в корпусе
+# встречаются оба варианта; только F-коды (психиатрия) → diagnosis_class;
+# R, J, E и т.д. не маппятся (соматические/сопутствующие).
+_ICD_RE = re.compile(r"\b[ФF](\d)\d", re.IGNORECASE)
 
 
 def extract_diagnosis_class(diagnosis_text: str) -> str | None:
-    """Верхний уровень МКБ из текста диагноза, напр. 'F84.11' → 'F8x' (docs/05)."""
+    """Верхний уровень МКБ из текста диагноза, напр. 'F92.8' → 'F9x' (docs/05).
+
+    Техдолг §2: покрывает ВСЕ F-коды F0x–F9x (МКБ-10 глава V).
+    Обрабатывает лат. F и кир. Ф; R/J/E коды игнорируются (не класс психиатрии).
+    """
     m = _ICD_RE.search(diagnosis_text or "")
     if not m:
         return None
@@ -407,6 +414,57 @@ _SYNDROME_META = {
     "asthenic": "астенический",
 }
 
+# ─── Нормализация syndrome (падежи → каноническая форма, техдолг §1) ──────────
+# Корпус хранит синдромы в разных падежах (например «тревожно-депрессивный»,
+# «тревожно-депрессивного», «тревожно-депрессивным»). Для корректного
+# Qdrant-фильтра (exact match по keyword-payload) нужна единая каноническая
+# форма — именительный падеж, единственное число, мужской род.
+#
+# Стратегия: маппинг «стем → каноническая форма». Стем — это prefix до
+# склоняемого суффикса (совпадает с regex-ом chunking._SYNDROME_RE).
+# Итерация от длинных стемов к коротким исключает коллизии
+# («тревожно-депрессивн» побеждает «тревожн»).
+
+_SYNDROME_STEMS: list[tuple[str, str]] = sorted(
+    [
+        ("тревожно-депрессивн", "тревожно-депрессивный"),
+        ("психопатоподобн", "психопатоподобный"),
+        ("эмоционально-волев", "эмоционально-волевой"),
+        ("апато-абулическ", "апато-абулический"),
+        ("кататоническ", "кататонический"),
+        ("неврозоподобн", "неврозоподобный"),
+        ("маниакальн", "маниакальный"),
+        ("астеническ", "астенический"),
+        ("тревожн", "тревожный"),
+        ("депрессивн", "депрессивный"),
+    ],
+    key=lambda pair: -len(pair[0]),  # longest stems first
+)
+
+
+def normalize_syndrome(raw: str | None) -> str | None:
+    """Привести синдром в любом падеже к канонической форме (им. п.).
+
+    Используется и при индексации (chunking → payload), и при retrieval
+    (questionnaire → фильтр). Совпадает stem-подход chunking._SYNDROME_RE —
+    поэтому любое значение, извлечённое экстрактором, нормализуется.
+
+    >>> normalize_syndrome("тревожно-депрессивного")
+    'тревожно-депрессивный'
+    >>> normalize_syndrome("астеническим")
+    'астенический'
+    >>> normalize_syndrome(None) is None
+    True
+    """
+    if not raw:
+        return None
+    lower = raw.strip().lower()
+    for stem, canonical in _SYNDROME_STEMS:
+        if lower.startswith(stem):
+            return canonical
+    # Неизвестный синдром (кастомный текст врача) — возвращаем lowercased.
+    return lower
+
 
 def map_answers(doc_type: str, answers: dict) -> MappedAnswers:
     """Смаппить ответы опросника в промпт-строки + метаданные (docs/06 §6).
@@ -446,10 +504,9 @@ def map_answers(doc_type: str, answers: dict) -> MappedAnswers:
             line = f"{spec['label']}: {ctext}."
             result.prompt_lines.append(line)
             query_parts.append(ctext)
-            # «Свой вариант» синдрома: свободный текст идёт в метаданное как есть
-            # (lowercase) — частичное совпадение с корпусом всё ещё возможно.
+            # «Свой вариант» синдрома: свободный текст → каноническая форма (падежи).
             if qid == "syndrome":
-                result.syndrome = ctext.lower()
+                result.syndrome = normalize_syndrome(ctext)
         elif sval and sval in options:
             line = options[sval]
             result.prompt_lines.append(line)
@@ -457,9 +514,9 @@ def map_answers(doc_type: str, answers: dict) -> MappedAnswers:
             # Извлекаем метаданное динамики (для retrieval-фильтра).
             if qid in ("dynamics", "period_dynamics") and sval in _DYNAMICS_META:
                 result.dynamics = _DYNAMICS_META[sval]
-            # Извлекаем метаданное синдрома (select-код → метка корпуса).
+            # Извлекаем метаданное синдрома (select-код → каноническая форма).
             if qid == "syndrome" and sval in _SYNDROME_META:
-                result.syndrome = _SYNDROME_META[sval]
+                result.syndrome = normalize_syndrome(_SYNDROME_META[sval])
 
     # Свободнотекстовые/уточняющие поля (уже обезличены).
     for qid, label in freetext_q.items():

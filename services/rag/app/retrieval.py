@@ -31,6 +31,7 @@ from qdrant_client.http import models as qmodels
 
 from app.config import get_settings
 from app.embeddings import Embedder
+from app.questionnaire import normalize_syndrome
 from app.qdrant_store import QdrantStore
 
 logger = logging.getLogger(__name__)
@@ -130,7 +131,11 @@ def retrieve(query: str, doc_type: str | None = None, top_k: int = 5,
     embedder = Embedder(settings)
     store = QdrantStore(settings)
 
+    # Техдолг §1: нормализуем syndrome в канонич. форму перед фильтрацией
+    # (payload в Qdrant тоже хранит канонич. форму — совпадение гарантировано).
+    canon_syndrome = normalize_syndrome(syndrome)
     query_vector = embedder.embed_query(query)
-    levels = _fallback_levels(doc_type, syndrome, diagnosis_class, section)
+    levels = _fallback_levels(doc_type, canon_syndrome,
+                              diagnosis_class, section)
     return search_with_fallback(
         store.client, store.collection, query_vector, top_k, levels)
