@@ -190,6 +190,12 @@ export interface ExportRequest {
   substitutions?: Record<string, string>;
 }
 
+export interface BatchExportRequest {
+  format: ExportFormat;
+  request_ids: string[];
+  substitutions?: Record<string, string>;
+}
+
 // ─── Админка: загрузка документов (Этап 10, docs/07 §8) ─────────────────────
 
 /** Результат загрузки документа через admin UI (POST /admin/documents). */

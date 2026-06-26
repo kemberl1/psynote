@@ -38,6 +38,14 @@ export function HistorySidebar() {
         >
           ＋ Новый дневник
         </Button>
+        <Button
+          variant="secondary"
+          block
+          onClick={() => navigate("/diary/batch")}
+          aria-label="Пакетная генерация за период"
+        >
+          Пакет за период
+        </Button>
         <input
           className="sidebar__search"
           type="search"

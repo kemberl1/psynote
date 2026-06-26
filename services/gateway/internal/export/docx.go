@@ -1,22 +1,10 @@
 // DOCX rendering via raw OOXML (archive/zip + encoding/xml), Go stdlib only.
 //
-// Зачем без сторонней библиотеки: .docx — это ZIP-контейнер с несколькими
-// XML-частями (WordprocessingML). Минимально-валидный документ требует частей
-// ([Content_Types].xml, _rels/.rels, word/document.xml; добавляем word/styles.xml
-// для дефолтного шрифта Times New Roman). Формирование напрямую полностью
-// свободно от лицензионных рисков (unioffice требует платную лицензию для ряда
-// функций) и даёт полный контроль над разметкой. Результат открывается в MS
-// Word / LibreOffice / Google Docs.
-//
-// ЭТАП 8.1 — форматирование под реальные шаблоны врача:
-//   - НЕТ justify: тело по ЛЕВОМУ краю (фикс «растянутых строк» приёмки Этапа 8);
-//   - шрифт Times New Roman 11pt (24 half-points в шапке) через rFonts + styles;
-//   - «ИБ №…» — по правому краю мелким кеглем; заголовок «ОСМОТР …» — по центру
-//     жирным прописными; строка даты/времени — по центру;
-//   - секции «Метка: значение» — метка ЖИРНЫМ run'ом, значение обычным, в одном
-//     абзаце; неизвестные строки — обычный абзац слева; подпись внизу.
-//
-// Структуру строк даёт общий парсер (format.go).
+// ЭТАП 8.1 — форматирование под корпусный сборник (`Документы/02_корпус/сборник_дневников_ИБ/`, локально):
+//   - Times New Roman 11pt; поля ~2,5 см;
+//   - тело по ширине (justify); секции «Метка: значение» — жирная метка + текст;
+//   - ежедневные записи — DD.MM.YYYY + narrative; осмотр 10д — центр «ОСМОТР»;
+//   - консультации («Педиатр от …») — слева; подпись врача — мелким кеглем.
 package export
 
 import (
@@ -41,7 +29,6 @@ const (
 		`<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>` +
 		`</Relationships>`
 
-	// docRels links document.xml → styles.xml.
 	docDocumentRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
 		`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
 		`<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>` +
@@ -49,16 +36,13 @@ const (
 
 	wNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
-	// docxFont is the body/heading font of the real templates.
 	docxFont = "Times New Roman"
 
-	// Font sizes in half-points (OOXML w:sz unit): 22 == 11pt, 18 == 9pt.
-	szBody   = 22
-	szCaseNo = 18
-	szTitle  = 24
+	szBody      = 22 // 11pt
+	szCaseNo    = 18 // 9pt
+	szTitle     = 22
+	szSignature = 21 // 10.5pt
 
-	// styles.xml sets Times New Roman 11pt as the document default so that any
-	// run without explicit rFonts still renders in the right font.
 	docxStyles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
 		`<w:styles xmlns:w="` + wNS + `">` +
 		`<w:docDefaults><w:rPrDefault><w:rPr>` +
@@ -68,30 +52,36 @@ const (
 		`</w:rPr></w:rPrDefault></w:docDefaults>` +
 		`<w:style w:type="paragraph" w:default="1" w:styleId="Normal">` +
 		`<w:name w:val="Normal"/>` +
-		`<w:pPr><w:jc w:val="left"/></w:pPr>` +
+		`<w:pPr><w:jc w:val="both"/><w:spacing w:after="160" w:line="256" w:lineRule="auto"/></w:pPr>` +
 		`<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>` +
 		`<w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr>` +
 		`</w:style>` +
 		`</w:styles>`
 )
 
-// renderDOCX builds a valid .docx from the anonymized Document, formatted to
-// resemble the real doctor templates (см. format.go).
 func renderDOCX(doc Document) ([]byte, error) {
+	return renderDOCXBatch([]Document{doc})
+}
+
+func renderDOCXBatch(docs []Document) ([]byte, error) {
 	var body bytes.Buffer
 
-	for _, l := range buildDocLines(doc) {
-		body.WriteString(docxParagraph(l))
+	for i, doc := range docs {
+		if i > 0 {
+			body.WriteString(paragraphXML("", paraOpts{spaceAfter: 80}))
+		}
+		for _, l := range buildDocLines(doc) {
+			body.WriteString(docxParagraph(l))
+		}
 	}
 
 	document := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
 		`<w:document xmlns:w="` + wNS + `">` +
 		`<w:body>` +
 		body.String() +
-		// Section properties (A4 portrait, ~1-inch margins).
 		`<w:sectPr>` +
 		`<w:pgSz w:w="11906" w:h="16838"/>` +
-		`<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/>` +
+		`<w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="720" w:footer="720" w:gutter="0"/>` +
 		`</w:sectPr>` +
 		`</w:body></w:document>`
 
@@ -121,45 +111,46 @@ func renderDOCX(doc Document) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// docxParagraph renders one classified line as a <w:p>. Alignment, weight and
-// size follow the real templates; body is LEFT-aligned (never justified).
 func docxParagraph(l docLine) string {
 	switch l.kind {
 	case kindCaseNo:
-		// «ИБ №…» — справа, мелким кеглем.
 		return paragraphXML(l.text, paraOpts{align: "right", sizeHalfPt: szCaseNo, spaceAfter: 60})
+	case kindExamTitle:
+		return paragraphXML(strings.ToUpper(l.text), paraOpts{align: "center", bold: true, sizeHalfPt: szTitle, spaceAfter: 40})
+	case kindExamSubtitle:
+		return paragraphXML(l.text, paraOpts{align: "center", sizeHalfPt: szBody, spaceAfter: 60})
 	case kindTitle:
-		// Заголовок — по центру, жирным, прописными.
 		return paragraphXML(strings.ToUpper(l.text), paraOpts{align: "center", bold: true, sizeHalfPt: szTitle, spaceAfter: 60})
 	case kindDateTime:
-		// Дата/время — по центру.
 		return paragraphXML(l.text, paraOpts{align: "center", sizeHalfPt: szBody, spaceAfter: 200})
 	case kindSignatureCaption:
 		return paragraphXML(l.text, paraOpts{align: "left", sizeHalfPt: szCaseNo, spaceBefore: 200, spaceAfter: 40})
-	case kindLabelValue:
-		// Метка ЖИРНАЯ + значение обычным, в одном абзаце, по левому краю.
-		return labelValueParagraph(l.label, l.value)
-	default:
+	case kindConsultNote:
 		return paragraphXML(l.text, paraOpts{align: "left", sizeHalfPt: szBody, spaceAfter: 80})
+	case kindDoctorSignature:
+		return paragraphXML(l.text, paraOpts{align: "both", sizeHalfPt: szSignature, spaceBefore: 120, spaceAfter: 80})
+	case kindDailyNarrative:
+		return paragraphXML(l.text, paraOpts{align: "both", bold: true, sizeHalfPt: szBody, spaceAfter: 80})
+	case kindLabelValue:
+		return paragraphLabelValue(l.label, l.value, paraOpts{align: "both", sizeHalfPt: szBody, spaceAfter: 80})
+	default:
+		return paragraphXML(l.text, paraOpts{align: "both", sizeHalfPt: szBody, spaceAfter: 80})
 	}
 }
 
-// paraOpts controls one paragraph's run/paragraph properties.
 type paraOpts struct {
 	bold        bool
-	align       string // "left" | "center" | "right" | "" (defaults to left)
-	sizeHalfPt  int    // font size in half-points (OOXML w:sz unit); 22 == 11pt
-	spaceBefore int    // w:spacing w:before in twips
-	spaceAfter  int    // w:spacing w:after in twips
+	align       string
+	sizeHalfPt  int
+	spaceBefore int
+	spaceAfter  int
 }
 
-// runOpts controls a single run's formatting inside a paragraph.
 type runOpts struct {
 	bold       bool
 	sizeHalfPt int
 }
 
-// paragraphPr renders the <w:pPr> block for the given paragraph options.
 func paragraphPr(o paraOpts) string {
 	var b strings.Builder
 	b.WriteString("<w:pPr>")
@@ -177,10 +168,9 @@ func paragraphPr(o paraOpts) string {
 		}
 		b.WriteString(` w:line="264" w:lineRule="auto"/>`)
 	}
-	// Alignment: explicit left when empty; never "both" (no justify).
 	align := o.align
 	if align == "" {
-		align = "left"
+		align = "both"
 	}
 	b.WriteString(`<w:jc w:val="`)
 	b.WriteString(align)
@@ -189,8 +179,6 @@ func paragraphPr(o paraOpts) string {
 	return b.String()
 }
 
-// runXML renders one <w:r> with the given text and run formatting. Soft line
-// breaks (\n) become <w:br/>. Text is XML-escaped; Times New Roman is forced.
 func runXML(text string, o runOpts) string {
 	var b strings.Builder
 	b.WriteString("<w:r><w:rPr>")
@@ -222,7 +210,6 @@ func runXML(text string, o runOpts) string {
 	return b.String()
 }
 
-// paragraphXML renders one <w:p> with a single run.
 func paragraphXML(text string, o paraOpts) string {
 	var b strings.Builder
 	b.WriteString("<w:p>")
@@ -232,31 +219,28 @@ func paragraphXML(text string, o paraOpts) string {
 	return b.String()
 }
 
-// labelValueParagraph renders «Метка: значение» as ONE left-aligned paragraph
-// with a bold run for the label (incl. the colon) and a regular run for the
-// value — exactly like the real templates (bold T12 span + regular T4 span).
-func labelValueParagraph(label, value string) string {
+// paragraphLabelValue renders «Метка: значение» with a bold label and normal value.
+func paragraphLabelValue(label, value string, o paraOpts) string {
 	var b strings.Builder
 	b.WriteString("<w:p>")
-	b.WriteString(paragraphPr(paraOpts{align: "left", spaceAfter: 80}))
-	// Bold label including the colon.
-	b.WriteString(runXML(label+":", runOpts{bold: true, sizeHalfPt: szBody}))
-	if value != "" {
-		// Leading space separates label and value within the line.
-		b.WriteString(runXML(" "+value, runOpts{bold: false, sizeHalfPt: szBody}))
+	b.WriteString(paragraphPr(o))
+	labelText := label + ":"
+	if value == "" {
+		b.WriteString(runXML(labelText, runOpts{bold: true, sizeHalfPt: o.sizeHalfPt}))
+	} else {
+		b.WriteString(runXML(labelText, runOpts{bold: true, sizeHalfPt: o.sizeHalfPt}))
+		b.WriteString(runXML(" "+value, runOpts{bold: false, sizeHalfPt: o.sizeHalfPt}))
 	}
 	b.WriteString("</w:p>")
 	return b.String()
 }
 
-// xmlEscape escapes a string for XML text content.
 func xmlEscape(s string) string {
 	var b bytes.Buffer
 	_ = xml.EscapeText(&b, []byte(s))
 	return b.String()
 }
 
-// itoa is a tiny integer formatter (avoids importing strconv just here).
 func itoa(n int) string {
 	if n == 0 {
 		return "0"

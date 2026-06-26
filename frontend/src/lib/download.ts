@@ -1,13 +1,11 @@
 // Скачивание бинарных файлов экспорта (docs/07 §7, docs/08 §5.3).
 //
-// Эндпоинт POST /requests/{id}/export отдаёт НЕ JSON, а бинарный файл, поэтому
-// общий JSON-клиент (api/client.ts) тут не подходит — используем прямой fetch,
-// читаем тело как Blob и инициируем скачивание через временную <a download>.
-// Имя файла берём из Content-Disposition (его формирует gateway, без ПДн);
-// при отсутствии — фолбэк на переданное имя.
+// Эндпоинты POST /requests/{id}/export и POST /export/batch отдают НЕ JSON,
+// а бинарный файл — используем прямой fetch с Bearer-токеном.
 import { API_BASE } from "../api/client";
 import { ApiError } from "../api/errors";
-import type { ExportFormat, ExportRequest } from "../api/types";
+import { getAccessToken } from "../api/session";
+import type { BatchExportRequest, ExportFormat, ExportRequest } from "../api/types";
 
 /** MIME-типы по формату (для фолбэка имени файла). */
 const EXT_BY_FORMAT: Record<ExportFormat, string> = {
@@ -16,26 +14,23 @@ const EXT_BY_FORMAT: Record<ExportFormat, string> = {
   txt: "txt",
 };
 
-/**
- * Запрашивает экспорт записи истории и сохраняет файл в браузере.
- * Бросает ApiError при сетевом сбое или не-2xx ответе (для тоста на UI).
- *
- * @param requestId — id записи истории (request_id из /generate или /requests).
- * @param body — формат и (опционально) подстановки плейсхолдеров.
- * @param fallbackName — имя файла без расширения, если сервер не прислал имя.
- */
-export async function downloadExport(
-  requestId: string,
-  body: ExportRequest,
-  fallbackName = "diary",
+async function downloadBinary(
+  url: string,
+  body: unknown,
+  fallbackName: string,
+  format: ExportFormat,
 ): Promise<void> {
-  const url = `${API_BASE}/requests/${encodeURIComponent(requestId)}/export`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json; charset=utf-8",
+  };
+  const access = getAccessToken();
+  if (access) headers["Authorization"] = `Bearer ${access}`;
 
   let res: Response;
   try {
     res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json; charset=utf-8" },
+      headers,
       body: JSON.stringify(body),
     });
   } catch {
@@ -43,7 +38,6 @@ export async function downloadExport(
   }
 
   if (!res.ok) {
-    // Тело ошибки — JSON-конверт {error:{code,message}} (docs/07 §1).
     let code = "UNKNOWN";
     let message = `HTTP ${res.status}`;
     try {
@@ -63,15 +57,37 @@ export async function downloadExport(
   const blob = await res.blob();
   const filename =
     filenameFromDisposition(res.headers.get("Content-Disposition")) ??
-    `${fallbackName}.${EXT_BY_FORMAT[body.format]}`;
+    `${fallbackName}.${EXT_BY_FORMAT[format]}`;
 
   triggerBlobDownload(blob, filename);
+}
+
+/**
+ * Запрашивает экспорт одной записи истории и сохраняет файл в браузере.
+ */
+export async function downloadExport(
+  requestId: string,
+  body: ExportRequest,
+  fallbackName = "diary",
+): Promise<void> {
+  const url = `${API_BASE}/requests/${encodeURIComponent(requestId)}/export`;
+  await downloadBinary(url, body, fallbackName, body.format);
+}
+
+/**
+ * Запрашивает пакетный экспорт нескольких записей в один файл.
+ */
+export async function downloadBatchExport(
+  body: BatchExportRequest,
+  fallbackName = "diaries_batch",
+): Promise<void> {
+  const url = `${API_BASE}/export/batch`;
+  await downloadBinary(url, body, fallbackName, body.format);
 }
 
 /** Извлекает filename из заголовка Content-Disposition (RFC 5987 / plain). */
 export function filenameFromDisposition(header: string | null): string | null {
   if (!header) return null;
-  // filename*=UTF-8''<encoded> имеет приоритет (RFC 5987).
   const star = /filename\*=UTF-8''([^;]+)/i.exec(header);
   if (star?.[1]) {
     try {
@@ -94,6 +110,5 @@ function triggerBlobDownload(blob: Blob, filename: string): void {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  // Освобождаем objectURL чуть позже, чтобы скачивание успело стартовать.
   setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }

@@ -13,7 +13,9 @@ import type {
 } from "../../api/types";
 import { copyText } from "../../lib/clipboard";
 import { downloadExport } from "../../lib/download";
+import { buildExportSubstitutions } from "../../lib/exportSubstitutions";
 import { documentTypeLabel, formatDateTime } from "../../lib/format";
+import { useAuth } from "../../auth/AuthContext";
 import { Badge, Button } from "../ui";
 import { AnonymizationNotice } from "./AnonymizationNotice";
 import { DocumentView } from "./DocumentView";
@@ -43,6 +45,7 @@ export function GenerationResult({
   createdAt,
   anonymization,
 }: GenerationResultProps) {
+  const { doctor } = useAuth();
   const [toast, setToast] = useState<string | null>(null);
   // Какой формат сейчас экспортируется (для лоадера на конкретной кнопке).
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
@@ -62,7 +65,13 @@ export function GenerationResult({
     if (!requestId || exporting) return;
     setExporting(format);
     try {
-      await downloadExport(requestId, { format });
+      await downloadExport(requestId, {
+        format,
+        substitutions: buildExportSubstitutions({
+          createdAt,
+          doctorName: doctor?.display_name,
+        }),
+      });
       setToast("Файл сохранён");
     } catch (err) {
       const msg =

@@ -47,20 +47,28 @@ func newCyrillicPDF() *fpdf.Fpdf {
 	return pdf
 }
 
-// renderPDF builds an A4 PDF from the anonymized Document, formatted like the
-// real doctor templates: left body (никакого justify), centred bold title,
-// right-aligned ИБ№, centred date, bold section labels.
+// renderPDF builds an A4 PDF from the anonymized Document.
 func renderPDF(doc Document) ([]byte, error) {
+	return renderPDFBatch([]Document{doc})
+}
+
+// renderPDFBatch combines multiple diaries into one PDF.
+func renderPDFBatch(docs []Document) ([]byte, error) {
 	pdf := newCyrillicPDF()
 	pdf.SetMargins(20, 20, 20)
 	pdf.SetAutoPageBreak(true, 20)
 	pdf.AddPage()
 
 	pageW, _ := pdf.GetPageSize()
-	usableW := pageW - 40 // page width minus left+right margins
+	usableW := pageW - 40
 
-	for _, l := range buildDocLines(doc) {
-		pdfRenderLine(pdf, l, usableW)
+	for i, doc := range docs {
+		if i > 0 {
+			pdf.Ln(4)
+		}
+		for _, l := range buildDocLines(doc) {
+			pdfRenderLine(pdf, l, usableW)
+		}
 	}
 
 	if err := pdf.Error(); err != nil {
@@ -93,26 +101,47 @@ func pdfRenderLine(pdf *fpdf.Fpdf, l docLine, usableW float64) {
 		pdf.Ln(2)
 		pdf.SetFont(pdfFontFamily, "", pdfCaseNoPt)
 		pdf.MultiCell(usableW, 5, l.text, "", "L", false)
-	case kindLabelValue:
-		pdfLabelValue(pdf, l.label, l.value, usableW)
-	default:
+	case kindConsultNote:
 		pdf.SetFont(pdfFontFamily, "", pdfBodyPt)
 		pdf.MultiCell(usableW, pdfLineH, l.text, "", "L", false)
+		pdf.Ln(1)
+	case kindDoctorSignature:
+		pdf.Ln(2)
+		pdf.SetFont(pdfFontFamily, "", pdfCaseNoPt)
+		pdf.MultiCell(usableW, 5, l.text, "", "J", false)
+		pdf.Ln(1)
+	case kindDailyNarrative:
+		pdf.SetFont(pdfFontFamily, "B", pdfBodyPt)
+		pdf.MultiCell(usableW, pdfLineH, l.text, "", "J", false)
+		pdf.Ln(1)
+	case kindExamTitle:
+		pdf.SetFont(pdfFontFamily, "B", pdfTitlePt)
+		pdf.MultiCell(usableW, 7, strings.ToUpper(l.text), "", "C", false)
+		pdf.Ln(1)
+	case kindExamSubtitle:
+		pdf.SetFont(pdfFontFamily, "", pdfBodyPt)
+		pdf.MultiCell(usableW, pdfLineH, l.text, "", "C", false)
+		pdf.Ln(2)
+	case kindLabelValue:
+		pdfLabelValue(pdf, l.label, l.value, usableW)
+		pdf.Ln(1.5)
+	default:
+		pdf.SetFont(pdfFontFamily, "", pdfBodyPt)
+		pdf.MultiCell(usableW, pdfLineH, l.text, "", "J", false)
 		pdf.Ln(1)
 	}
 }
 
-// pdfLabelValue writes a «Метка: значение» line: bold label then regular value,
-// wrapping naturally to the left margin. Uses pdf.Write so the bold→regular
-// switch happens mid-line; the final Ln closes the paragraph. Left-aligned by
-// construction (Write flows from the left margin), never justified.
-func pdfLabelValue(pdf *fpdf.Fpdf, label, value string, _ float64) {
+func pdfLabelValue(pdf *fpdf.Fpdf, label, value string, usableW float64) {
+	text := label + ":"
 	pdf.SetFont(pdfFontFamily, "B", pdfBodyPt)
-	pdf.Write(pdfLineH, label+":")
-	if value != "" {
-		pdf.SetFont(pdfFontFamily, "", pdfBodyPt)
-		pdf.Write(pdfLineH, " "+value)
+	if value == "" {
+		pdf.MultiCell(usableW, pdfLineH, text, "", "J", false)
+		return
 	}
-	pdf.Ln(pdfLineH)
-	pdf.Ln(1.5)
+	// Bold label then normal value on the same line when possible.
+	labelW := pdf.GetStringWidth(text + " ")
+	pdf.Cell(labelW, pdfLineH, text+" ")
+	pdf.SetFont(pdfFontFamily, "", pdfBodyPt)
+	pdf.MultiCell(usableW-labelW, pdfLineH, value, "", "J", false)
 }

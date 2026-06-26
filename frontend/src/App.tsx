@@ -7,6 +7,7 @@ import { AppShell } from "./components/layout/AppShell";
 import { EmptyState } from "./components/ui";
 import { AdminPage } from "./pages/AdminPage";
 import { AuthPage } from "./pages/AuthPage";
+import { BatchDiaryPage } from "./pages/BatchDiaryPage";
 import { DiaryPage } from "./pages/DiaryPage";
 import { RequestDetailPage } from "./pages/RequestDetailPage";
 
@@ -23,6 +24,7 @@ function App() {
           {/* Главная → генерация дневников (ядро MVP). */}
           <Route index element={<Navigate to="/diary" replace />} />
           <Route path="diary" element={<DiaryPage />} />
+          <Route path="diary/batch" element={<BatchDiaryPage />} />
           {/* Просмотр прошлого результата из истории. */}
           <Route path="requests/:id" element={<RequestDetailPage />} />
           {/* Фолбэк. */}

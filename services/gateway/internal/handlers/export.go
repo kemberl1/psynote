@@ -75,15 +75,12 @@ func newExportHandler(repo store.Repository, exporter export.Exporter) http.Hand
 			return
 		}
 
-		// Apply client-side substitutions IN MEMORY (docs/07 §7). Result is
-		// never persisted. Values are not logged.
-		content := applySubstitutions(detail.Content, req.Substitutions)
-
 		doc := export.Document{
 			Title:            titleForExport(detail),
 			DocumentTypeCode: detail.DocumentType,
 			GeneratedAt:      detail.CreatedAt,
-			Content:          content,
+			Content:          detail.Content,
+			Substitutions:    req.Substitutions,
 		}
 
 		data, err := exporter.Export(r.Context(), format, doc)

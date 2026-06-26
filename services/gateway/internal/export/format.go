@@ -1,37 +1,39 @@
 // Structural parser for the diary body, shared by the DOCX and PDF renderers.
 //
-// ЗАЧЕМ: приёмка Этапа 8 показала, что «плоский» вывод (весь дневник одним
-// потоком одинаковых justify-абзацев) не похож на реальные шаблоны врача
-// («шаблон каждый день.odt», «шаблон раз в 10 дней.odt»). Реальные шаблоны
-// (Times New Roman 11pt) устроены так:
-//   - строка «ИБ №…» — по ПРАВОМУ краю, мелким кеглем;
-//   - заголовок «ОСМОТР …» — по ЦЕНТРУ, ЖИРНЫМ;
-//   - строка даты/времени «[ДАТА] время: [ВРЕМЯ]» — по ЦЕНТРУ;
-//   - тело: «Метка: значение» — метка ЖИРНАЯ, значение обычным, в одном абзаце,
-//     выравнивание по ЛЕВОМУ краю (НЕ justify!);
-//   - внизу — подпись врача.
-//
-// Этот парсер раскладывает сгенерированный (обезличенный) текст в типизированные
-// строки docLine, которые docx.go и pdf.go превращают в форматирование. Парсер
-// устойчив к порядку: главный принцип — «строка с двоеточием → жирная метка +
-// обычное значение», всё неизвестное → обычный абзац слева.
+// Форматирование под корпусный сборник дневников (`Документы/02_корпус/сборник_дневников_ИБ/`, локально):
+// Times New Roman 11pt, justify для тела, жирные метки секций «Метка: значение»,
+// консультации слева, подпись врача мелким кеглем.
 //
 // ПРИВАТНОСТЬ: парсер работает только с обезличенным текстом и плейсхолдерами
 // ([ДАТА], [ВРЕМЯ], [НОМЕР_ИБ], [ФИО_ВРАЧА], …) — никаких ПДн не вводит.
 package export
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
+
+// consultNoteRE matches specialist consultation lines from the corpus сборник.
+var consultNoteRE = regexp.MustCompile(` от \d{2}\.\d{2}\.\d{2,4}:`)
+
+// datePrefixedRE matches diary narrative lines starting with a date.
+var datePrefixedRE = regexp.MustCompile(`^\d{2}\.\d{2}\.\d{4}`)
 
 // lineKind classifies one logical line of the diary for formatting.
 type lineKind int
 
 const (
-	kindPlain            lineKind = iota // обычный абзац, по левому краю
+	kindPlain            lineKind = iota // обычный абзац, justify
+	kindDailyNarrative                   // DD.MM.YYYY + narrative, жирным
 	kindCaseNo                           // «ИБ №…» → по правому краю, мелко
-	kindTitle                            // «ОСМОТР …» → по центру, жирным
+	kindTitle                            // legacy centred title
+	kindExamTitle                        // «ОСМОТР» → по центру, жирным
+	kindExamSubtitle                     // подзаголовок осмотра → по центру
 	kindDateTime                         // строка даты/времени → по центру
 	kindSignatureCaption                 // «Фамилия, имя, отчество …» подпись-подпись
-	kindLabelValue                       // «Метка: значение» → жирная метка + значение
+	kindLabelValue                       // «Метка: значение» → жирная метка + обычное значение
+	kindConsultNote                      // консультации («Педиатр от …») → слева
+	kindDoctorSignature                  // подпись врача → justify, мелкий кегль
 )
 
 // docLine is one formatted line of the document.
@@ -56,8 +58,10 @@ var knownSectionLabels = map[string]bool{
 	"анамнез жизни (дополнения к анамнезу)":                      true,
 	"физикальное исследование, локальный статус (его изменение)": true,
 	"психический статус":                                         true,
+	"психический статус (его изменение)":                         true,
 	"соматический статус":                                        true,
 	"неврологический статус":                                     true,
+	"неврологический статус (его изменение)":                     true,
 	"диагноз": true,
 	"основное заболевание":                   true,
 	"осложнение основного заболевания":       true,
@@ -89,17 +93,41 @@ func classifyLine(line string) docLine {
 	switch {
 	case strings.HasPrefix(line, "ИБ №") || strings.HasPrefix(upper, "ИБ N"):
 		return docLine{kind: kindCaseNo, text: line}
-	case strings.HasPrefix(upper, "ОСМОТР"):
+	case upper == "ОСМОТР":
+		return docLine{kind: kindExamTitle, text: line}
+	case strings.EqualFold(line, "лечащим врачом совместно с заведующим отделением"):
+		return docLine{kind: kindExamSubtitle, text: line}
+	case strings.HasPrefix(upper, "ОСМОТР") && len(line) > len("ОСМОТР"):
 		return docLine{kind: kindTitle, text: line}
 	case isDateTimeLine(line):
 		return docLine{kind: kindDateTime, text: line}
+	case datePrefixedRE.MatchString(line):
+		return docLine{kind: kindDailyNarrative, text: line}
 	case strings.HasPrefix(line, "Фамилия, имя, отчество"):
 		return docLine{kind: kindSignatureCaption, text: line}
+	case isDoctorSignatureLine(line):
+		return docLine{kind: kindDoctorSignature, text: line}
+	case isConsultNoteLine(line):
+		return docLine{kind: kindConsultNote, text: line}
 	}
 	if label, value, ok := splitLabelValue(line); ok {
 		return docLine{kind: kindLabelValue, label: label, value: value}
 	}
 	return docLine{kind: kindPlain, text: line}
+}
+
+func isConsultNoteLine(line string) bool {
+	return consultNoteRE.MatchString(line)
+}
+
+func isDoctorSignatureLine(line string) bool {
+	if strings.HasPrefix(line, "Врач-") {
+		return true
+	}
+	if strings.HasPrefix(line, "Лечащий врач:") || strings.HasPrefix(line, "Заведующий отделением:") {
+		return true
+	}
+	return false
 }
 
 // isDateTimeLine detects the centred date/time header line. It matches the
@@ -109,10 +137,10 @@ func isDateTimeLine(line string) bool {
 	if strings.Contains(line, "[ДАТА]") {
 		return true
 	}
-	if strings.Contains(line, "время:") {
+	if strings.Contains(line, "время:") && strings.Contains(line, "час.") {
 		return true
 	}
-	if strings.HasPrefix(line, "«") {
+	if strings.HasPrefix(line, "«") && strings.Contains(line, "г.") {
 		return true
 	}
 	return false
@@ -148,39 +176,8 @@ func parseDocLines(content string) []docLine {
 	return out
 }
 
-// buildDocLines parses the document body and, if the body does not already
-// carry a centred title line («ОСМОТР …»), synthesizes a header (ИБ №, title,
-// date/time) from the document type/metadata. The header uses only neutral
-// placeholders — the doctor fills real values at export time (приватность).
+// buildDocLines transforms template output into corpus layout, then classifies.
 func buildDocLines(doc Document) []docLine {
-	lines := parseDocLines(doc.Content)
-	for _, l := range lines {
-		if l.kind == kindTitle {
-			return lines // body already includes the template header
-		}
-	}
-	return append(synthHeader(doc), lines...)
-}
-
-// synthHeader derives the top header lines from the document type. Real values
-// are never inserted — only placeholders ([НОМЕР_ИБ], [ДАТА], [ВРЕМЯ]).
-func synthHeader(doc Document) []docLine {
-	var title string
-	switch doc.DocumentTypeCode {
-	case "exam_10d":
-		title = "ОСМОТР лечащим врачом совместно с заведующим отделением"
-	case "daily":
-		title = "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ"
-	default:
-		if t := strings.TrimSpace(doc.Title); t != "" {
-			title = t
-		} else {
-			title = "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ"
-		}
-	}
-	return []docLine{
-		{kind: kindCaseNo, text: "ИБ №[НОМЕР_ИБ]"},
-		{kind: kindTitle, text: title},
-		{kind: kindDateTime, text: "[ДАТА] время: [ВРЕМЯ]"},
-	}
+	content := transformContent(doc, doc.Substitutions)
+	return parseDocLines(content)
 }

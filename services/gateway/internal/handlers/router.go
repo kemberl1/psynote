@@ -88,8 +88,11 @@ func NewRouter(cfg config.Config, deps Deps) http.Handler {
 		mux.HandleFunc("GET "+config.APIPrefix+"/history/{id}", protect(detailH))
 
 		// ─── Экспорт документа (docs/07 §7)
-		exportH := newExportHandler(deps.Repo, export.New())
+		exporter := export.New()
+		exportH := newExportHandler(deps.Repo, exporter)
+		batchExportH := newBatchExportHandler(deps.Repo, exporter)
 		mux.HandleFunc("POST "+config.APIPrefix+"/requests/{id}/export", protect(exportH))
+		mux.HandleFunc("POST "+config.APIPrefix+"/export/batch", protect(batchExportH))
 	}
 
 	// ─── Админка: загрузка документов (Этап 10, docs/07 §8)

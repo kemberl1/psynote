@@ -74,11 +74,14 @@ type Document struct {
 	GeneratedAt time.Time
 	// Content — обезличенный текст дневника с плейсхолдерами ([ДАТА], …).
 	Content string
+	// Substitutions — плейсхолдеры от клиента; дефолты ([ДАТА], [ВРЕМЯ]) из GeneratedAt.
+	Substitutions map[string]string
 }
 
 // Exporter renders an anonymized Document into downloadable file bytes.
 type Exporter interface {
 	Export(ctx context.Context, format Format, doc Document) ([]byte, error)
+	ExportBatch(ctx context.Context, format Format, docs []Document) ([]byte, error)
 }
 
 // renderer is the concrete Exporter used in production. It is stateless and
@@ -88,15 +91,23 @@ type renderer struct{}
 // New returns the production Exporter.
 func New() Exporter { return renderer{} }
 
-// Export dispatches to the per-format renderer.
-func (renderer) Export(_ context.Context, format Format, doc Document) ([]byte, error) {
+// Export dispatches to the per-format renderer (single document).
+func (r renderer) Export(ctx context.Context, format Format, doc Document) ([]byte, error) {
+	return r.ExportBatch(ctx, format, []Document{doc})
+}
+
+// ExportBatch renders multiple diaries into one combined file, in order.
+func (renderer) ExportBatch(_ context.Context, format Format, docs []Document) ([]byte, error) {
+	if len(docs) == 0 {
+		return nil, fmt.Errorf("export: no documents")
+	}
 	switch format {
 	case FormatDOCX:
-		return renderDOCX(doc)
+		return renderDOCXBatch(docs)
 	case FormatPDF:
-		return renderPDF(doc)
+		return renderPDFBatch(docs)
 	case FormatTXT:
-		return renderTXT(doc), nil
+		return renderTXTBatch(docs), nil
 	default:
 		return nil, fmt.Errorf("export: unsupported format %q", format)
 	}
@@ -145,6 +156,17 @@ func renderTXT(doc Document) []byte {
 	return []byte(b.String())
 }
 
+func renderTXTBatch(docs []Document) []byte {
+	var b strings.Builder
+	for i, doc := range docs {
+		if i > 0 {
+			b.WriteString("\n\n---\n\n")
+		}
+		b.Write(renderTXT(doc))
+	}
+	return []byte(b.String())
+}
+
 // Filename builds a PII-free download name: diary_<type>_<YYYY-MM-DD>.<ext>
 // (docs/07 §7, docs/09 — никаких ФИО). Falls back to "document" for an unknown
 // type code.
@@ -158,4 +180,21 @@ func Filename(doc Document, format Format) string {
 		d = time.Now()
 	}
 	return fmt.Sprintf("diary_%s_%s.%s", typeSlug, d.Format("2006-01-02"), format)
+}
+
+// BatchFilename builds a PII-free name for combined export: diaries_batch_<from>_to_<to>.<ext>
+func BatchFilename(docs []Document, format Format) string {
+	if len(docs) == 0 {
+		return fmt.Sprintf("diaries_batch.%s", format)
+	}
+	from := docs[0].GeneratedAt
+	to := docs[len(docs)-1].GeneratedAt
+	if from.IsZero() {
+		from = time.Now()
+	}
+	if to.IsZero() {
+		to = from
+	}
+	return fmt.Sprintf("diaries_batch_%s_to_%s.%s",
+		from.Format("2006-01-02"), to.Format("2006-01-02"), format)
 }

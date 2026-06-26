@@ -18,6 +18,7 @@ const sampleContent = "ИБ №[НОМЕР_ИБ]\n" +
 	"Жалобы: не предъявляет\n" +
 	"Анамнез заболевания (дополнения к анамнезу): без дополнений\n" +
 	"Психический статус: Настроение сниженное, отмечается тревожность. Сон нарушен.\n" +
+	"Физикальное исследование, локальный статус (его изменение): Т – 36,6 С.\n" +
 	"Диагноз:\n" +
 	"Назначения: продолжить терапию [ДАТА].\n" +
 	"Фамилия, имя, отчество (при наличии) врача, должность, специальность, подпись\n" +
@@ -108,24 +109,20 @@ func TestExportDOCX_ValidZipContainsText(t *testing.T) {
 	}
 }
 
-// TestExportDOCX_NoJustify is the primary Этап 8.1 regression: the body must be
-// left-aligned, NEVER justified («w:jc w:val="both"» растягивало строки).
-func TestExportDOCX_NoJustify(t *testing.T) {
+// TestExportDOCX_CorpusJustify checks body paragraphs use justify (both),
+// matching the corpus сборник formatting.
+func TestExportDOCX_CorpusJustify(t *testing.T) {
 	data, err := New().Export(context.Background(), FormatDOCX, sampleDoc())
 	if err != nil {
 		t.Fatalf("export docx: %v", err)
 	}
 	documentXML := docxDocumentXML(t, data)
-	if strings.Contains(documentXML, `w:jc w:val="both"`) {
-		t.Error("docx still contains justify alignment (w:jc=both) — растянутые строки не исправлены")
-	}
-	if !strings.Contains(documentXML, `w:jc w:val="left"`) {
-		t.Error("docx body paragraphs should be explicitly left-aligned")
+	if !strings.Contains(documentXML, `w:jc w:val="both"`) {
+		t.Error("docx body should use justify alignment (w:jc=both) per corpus сборник")
 	}
 }
 
-// TestExportDOCX_TimesNewRoman checks the font is set both in runs and in the
-// styles.xml document defaults.
+// TestExportDOCX_TimesNewRoman checks the font matches the corpus сборник default.
 func TestExportDOCX_TimesNewRoman(t *testing.T) {
 	data, err := New().Export(context.Background(), FormatDOCX, sampleDoc())
 	if err != nil {
@@ -141,28 +138,39 @@ func TestExportDOCX_TimesNewRoman(t *testing.T) {
 	}
 }
 
-// TestExportDOCX_BoldSectionLabels checks the «Метка:» label is a bold run and
-// the title is centred bold.
+// TestExportDOCX_DailyCompactFormat checks daily export uses narrative, not ОСМОТР template.
+func TestExportDOCX_DailyCompactFormat(t *testing.T) {
+	data, err := New().Export(context.Background(), FormatDOCX, sampleDoc())
+	if err != nil {
+		t.Fatalf("export docx: %v", err)
+	}
+	documentXML := docxDocumentXML(t, data)
+	if strings.Contains(documentXML, "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ") {
+		t.Error("daily docx must not dump full ОСМОТР template header")
+	}
+	if !strings.Contains(documentXML, "19.09.2025") {
+		t.Error("daily docx should include date from GeneratedAt")
+	}
+	if !strings.Contains(documentXML, "Настроение сниженное") {
+		t.Error("daily docx missing psychiatric narrative")
+	}
+}
+
+// TestExportDOCX_BoldSectionLabels checks label:value uses bold label runs.
 func TestExportDOCX_BoldSectionLabels(t *testing.T) {
 	data, err := New().Export(context.Background(), FormatDOCX, sampleDoc())
 	if err != nil {
 		t.Fatalf("export docx: %v", err)
 	}
 	documentXML := docxDocumentXML(t, data)
-	// A bold run carrying the «Жалобы:» label must exist.
 	if !strings.Contains(documentXML, "<w:b/>") {
-		t.Error("docx has no bold runs — section labels not emphasised")
+		t.Error("docx should contain bold runs for narrative/labels")
 	}
-	if !strings.Contains(documentXML, "Жалобы:") {
-		t.Error("docx missing section label text")
+	if !strings.Contains(documentXML, "Физикальное исследование") {
+		t.Error("docx missing inline physical exam section label")
 	}
-	// Title centred.
-	if !strings.Contains(documentXML, `w:jc w:val="center"`) {
-		t.Error("docx title/date should be centred")
-	}
-	// Case number right-aligned.
-	if !strings.Contains(documentXML, `w:jc w:val="right"`) {
-		t.Error("docx ИБ№ should be right-aligned")
+	if !strings.Contains(documentXML, `w:jc w:val="both"`) {
+		t.Error("docx body should use justify alignment (w:jc=both) per corpus сборник")
 	}
 }
 
@@ -242,5 +250,29 @@ func TestContentType(t *testing.T) {
 	}
 	if FormatPDF.ContentType() != "application/pdf" {
 		t.Error("pdf content-type wrong")
+	}
+}
+
+func TestExportBatchDOCX(t *testing.T) {
+	docs := []Document{sampleDoc(), sampleDoc()}
+	data, err := New().ExportBatch(context.Background(), FormatDOCX, docs)
+	if err != nil {
+		t.Fatalf("export batch docx: %v", err)
+	}
+	documentXML := docxDocumentXML(t, data)
+	// Two diaries → duplicate body text appears twice.
+	if strings.Count(documentXML, "Настроение сниженное") < 2 {
+		t.Error("batch docx should contain both diary bodies")
+	}
+}
+
+func TestBatchFilename(t *testing.T) {
+	docs := []Document{
+		sampleDoc(),
+		{DocumentTypeCode: "daily", GeneratedAt: time.Date(2025, 9, 25, 0, 0, 0, 0, time.UTC)},
+	}
+	got := BatchFilename(docs, FormatDOCX)
+	if got != "diaries_batch_2025-09-19_to_2025-09-25.docx" {
+		t.Errorf("BatchFilename=%q", got)
 	}
 }

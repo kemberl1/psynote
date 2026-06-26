@@ -20,6 +20,7 @@ import {
   computeVisibleIds,
   prepareAnswers,
 } from "../lib/questionnaire";
+import { DiaryNav } from "./DiaryNav";
 import "./pages.css";
 
 const DEFAULT_DOC_TYPE = "daily";
@@ -139,6 +140,7 @@ export function DiaryPage() {
 
   return (
     <>
+      <DiaryNav />
       <div className="page-head">
         <h1 className="page-head__title">Новый дневник</h1>
         <p className="page-head__subtitle">

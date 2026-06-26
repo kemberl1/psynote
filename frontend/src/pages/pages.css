@@ -19,6 +19,165 @@
   line-height: var(--lh-snug);
 }
 
+/* Переключатель режима: один день / пакет (docs/08 §4.3). */
+.diary-nav {
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  margin-bottom: var(--space-6);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.diary-nav__btn {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-radius: var(--radius-md);
+  transition: background var(--transition), color var(--transition);
+}
+.diary-nav__btn:hover {
+  color: var(--text);
+}
+.diary-nav__btn--active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+/* Пакетная генерация — даты и превью */
+.batch-dates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.batch-date-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.batch-date-field__label {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+.batch-preview {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  margin-top: var(--space-3);
+}
+.batch-context {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.batch-context__label {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+.batch-context__area {
+  min-height: 96px;
+}
+
+/* Прогресс пакетной генерации */
+.batch-progress {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-6) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 420px;
+  width: 100%;
+}
+.batch-progress--compact {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.batch-progress__item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.batch-progress__item--running {
+  border-color: var(--accent);
+}
+.batch-progress__item--done .batch-progress__status {
+  color: var(--success);
+}
+.batch-progress__item--error .batch-progress__status {
+  color: var(--danger);
+}
+.batch-progress__day {
+  font-weight: 500;
+}
+.batch-progress__type {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+
+/* Результаты пакета */
+.batch-result {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) 1fr;
+  gap: var(--space-5);
+  min-height: 360px;
+}
+@media (max-width: 768px) {
+  .batch-result {
+    grid-template-columns: 1fr;
+  }
+}
+.batch-result__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 520px;
+  overflow-y: auto;
+}
+.batch-result__item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  font-size: var(--fs-sm);
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+.batch-result__item:hover {
+  border-color: var(--border-strong);
+}
+.batch-result__item--active {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+.batch-result__item--error {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+.batch-result__err {
+  font-size: var(--fs-xs);
+  color: var(--danger);
+}
+.batch-result__content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  overflow: auto;
+}
+
 /* Переключатель типа документа (docs/08 §4.3) — сегментированный контрол. */
 .doctype {
   display: inline-flex;
