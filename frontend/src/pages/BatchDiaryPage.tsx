@@ -1,6 +1,6 @@
 // BatchDiaryPage (/diary/batch) — пакетная генерация дневников за период.
-// Сжатый опросник + дата поступления → для каждого дня POST /generate;
-// дни 10/20/30… автоматически получают шаблон exam_10d.
+// Нарративный опросник (один раз) → AI строит полный дневниковый ряд с правильной дугой.
+// Дни 10/20/30… автоматически получают шаблон exam_10d.
 import { useAuth } from "../auth/AuthContext";
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -45,8 +45,9 @@ export function BatchDiaryPage() {
   const [admissionDate, setAdmissionDate] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [estimatedDischargeDate, setEstimatedDischargeDate] = useState("");
   const [answers, setAnswers] = useState<Answers>(() => buildDefaults(schema));
-  const [freeContext, setFreeContext] = useState("");
+  const [directorContext, setDirectorContext] = useState("");
   const [showInvalid, setShowInvalid] = useState(false);
 
   const [running, setRunning] = useState(false);
@@ -74,9 +75,10 @@ export function BatchDiaryPage() {
       dateFrom,
       dateTo,
       answers,
-      freeContext,
+      directorContext,
+      estimatedDischargeDate,
     });
-  }, [admissionDate, dateFrom, dateTo, answers, freeContext, dateValidation.ok]);
+  }, [admissionDate, dateFrom, dateTo, answers, directorContext, estimatedDischargeDate, dateValidation.ok]);
 
   const invalidIds = useMemo(
     () =>
@@ -108,6 +110,7 @@ export function BatchDiaryPage() {
     setRunning(true);
 
     const payload = prepareAnswers(schema, answers, visible);
+    const totalDays = planPreview.days.length;
     const initial: DayResult[] = planPreview.days.map((plan) => ({
       plan,
       status: "pending",
@@ -127,7 +130,10 @@ export function BatchDiaryPage() {
         const genAnswers = buildGenerateAnswers(
           payload,
           plan.dayNumber,
-          freeContext,
+          totalDays,
+          plan.isoDate,
+          directorContext,
+          estimatedDischargeDate,
           plan.documentType,
         );
         const result = await generate({
@@ -190,7 +196,7 @@ export function BatchDiaryPage() {
         <div className="generating">
           <Spinner size="lg" />
           <div className="generating__title">
-            Генерируем пакет… {completed} / {dayResults.length}
+            Генерация дневников за период… {completed} / {dayResults.length}
           </div>
           <div className="generating__hint">
             {current
@@ -208,14 +214,15 @@ export function BatchDiaryPage() {
       <DiaryNav />
 
       <div className="page-head">
-        <h1 className="page-head__title">Пакетная генерация</h1>
+        <h1 className="page-head__title">Сформировать дневники за выбранный период</h1>
         <p className="page-head__subtitle">
-          Заполните сжатый опросник один раз — система создаст дневники за каждый
-          день периода. Дни 10, 20, 30… автоматически оформятся как осмотр раз в
-          10 дней.
+          Опишите нарратив периода один раз — AI построит полный ряд дневников
+          с правильной клинической динамикой. Дни 10, 20, 30… автоматически
+          оформятся как расширенный осмотр.
         </p>
       </div>
 
+      {/* ── Период и поступление ─────────────────────────────────────────── */}
       <div className="section">
         <span className="section__label">Период и поступление</span>
         <div className="batch-dates">
@@ -229,7 +236,7 @@ export function BatchDiaryPage() {
           />
           <DateField
             id="from"
-            label="С"
+            label="Начало периода"
             required
             value={dateFrom}
             onChange={setDateFrom}
@@ -237,11 +244,19 @@ export function BatchDiaryPage() {
           />
           <DateField
             id="to"
-            label="По"
+            label="Конец периода"
             required
             value={dateTo}
             onChange={setDateTo}
             min={dateFrom || admissionDate || undefined}
+          />
+          <DateField
+            id="discharge"
+            label="Ориентировочная выписка"
+            value={estimatedDischargeDate}
+            onChange={setEstimatedDischargeDate}
+            min={dateTo || dateFrom || admissionDate || undefined}
+            help="Необязательно — задаёт темп улучшения"
           />
         </div>
         {datesComplete && !dateValidation.ok && (
@@ -251,13 +266,39 @@ export function BatchDiaryPage() {
           <p className="batch-preview">
             Будет сгенерировано <b>{planPreview.days.length}</b> записей:{" "}
             <b>{planPreview.dailyCount}</b> ежедневных,{" "}
-            <b>{planPreview.examCount}</b> осмотров (10 дней).
+            <b>{planPreview.examCount}</b>{" "}
+            {planPreview.examCount === 1 ? "осмотр" : "осмотров"} (раз в 10 дней).
           </p>
         )}
       </div>
 
+      {/* ── Дополнительный контекст ──────────────────────────────────────────── */}
       <div className="section">
-        <span className="section__label">Сжатый опросник</span>
+        <span className="section__label">Дополнительный контекст</span>
+        <label className="batch-context">
+          <span className="batch-context__label">
+            Установка для ИИ{" "}
+            <span className="field__optional">необязательно</span>
+          </span>
+          <textarea
+            className="field__textarea batch-context__area"
+            rows={4}
+            placeholder="Например: пациент поступил в тяжёлом состоянии, постепенно стабилизировался, к концу периода — устойчивая ремиссия. Или: мать настаивает на выписке, динамика должна быть ускорена."
+            value={directorContext}
+            onChange={(e) => setDirectorContext(e.target.value)}
+          />
+          <span className="field__help">
+            Окно для ввода дополнительного контекста. Помогает ИИ лучше
+            понимать индивидуальную историю пациента.{" "}
+            <b>Не попадёт в текст дневников</b> — нужно только для формирования
+            контекста.
+          </span>
+        </label>
+      </div>
+
+      {/* ── Нарративный опросник ──────────────────────────────────────────── */}
+      <div className="section">
+        <span className="section__label">Клинические параметры</span>
         <QuestionnaireRenderer
           schema={schema}
           answers={answers}
@@ -266,27 +307,6 @@ export function BatchDiaryPage() {
           }
           invalidIds={invalidIds}
         />
-      </div>
-
-      <div className="section">
-        <span className="section__label">Дополнительный контекст</span>
-        <label className="batch-context">
-          <span className="batch-context__label">
-            Свободный текст{" "}
-            <span className="field__optional">необязательно</span>
-          </span>
-          <textarea
-            className="field__textarea batch-context__area"
-            rows={4}
-            placeholder="Общий контекст периода: особенности наблюдения, семейная ситуация, договорённости… Без персональных данных."
-            value={freeContext}
-            onChange={(e) => setFreeContext(e.target.value)}
-          />
-          <span className="field__help">
-            Будет добавлен к каждому дневнику. Не указывайте ФИО, точные даты и
-            адреса.
-          </span>
-        </label>
       </div>
 
       {progress && (

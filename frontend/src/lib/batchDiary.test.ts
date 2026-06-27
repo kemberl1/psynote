@@ -4,6 +4,7 @@ import {
   buildBatchPlan,
   buildGenerateAnswers,
   dayNumberFromAdmission,
+  filterDirectorContextForDay,
   isExam10Day,
   resolveDocType,
   validateBatchDates,
@@ -66,7 +67,8 @@ describe("buildBatchPlan", () => {
       dateFrom: "2025-06-08",
       dateTo: "2025-06-11",
       answers: {},
-      freeContext: "",
+      directorContext: "",
+      estimatedDischargeDate: "",
     });
     expect(plan).not.toBeNull();
     expect(plan!.days).toHaveLength(4);
@@ -79,20 +81,210 @@ describe("buildBatchPlan", () => {
 describe("buildGenerateAnswers", () => {
   it("includes exam defaults for exam_10d", () => {
     const ans = buildGenerateAnswers(
-      { dynamics: "positive", mood: "even", behavior: "ordered" },
+      { overall_dynamics: "positive", leading_syndrome: "anxiety_depressive" },
       10,
+      10,
+      "2025-06-10",
       "контекст",
+      "",
       "exam_10d",
     );
-    expect(ans.period_dynamics).toBeDefined();
+    expect(ans.period_dynamics).toBe("improvement");
     expect(ans.syndrome).toBe("anxiety_depressive");
-    expect(ans.events_detail).toContain("День госпитализации: 10");
-    expect(ans.events_detail).toContain("контекст");
   });
 
   it("omits exam fields for daily", () => {
-    const ans = buildGenerateAnswers({}, 3, "", "daily");
+    const ans = buildGenerateAnswers({}, 3, 10, "2025-06-03", "", "", "daily");
     expect(ans.period_dynamics).toBeUndefined();
     expect(ans.dynamics).toBe("no_change");
+  });
+
+  it("injects arc context with day position", () => {
+    const ans = buildGenerateAnswers(
+      { overall_dynamics: "positive" },
+      5,
+      10,
+      "2025-06-05",
+      "режиссёрский контекст",
+      "2025-06-15",
+      "daily",
+    );
+    const arc = ans.__arc_context__ as string;
+    expect(arc.toLowerCase()).toContain("день госпитализации: 5 из 10");
+    expect(arc.toLowerCase()).toContain("режиссёрский контекст");
+  });
+
+  it("includes days until discharge in arc context", () => {
+    const ans = buildGenerateAnswers(
+      {},
+      1,
+      7,
+      "2025-06-01",
+      "",
+      "2025-06-10",
+      "daily",
+    );
+    const arc = ans.__arc_context__ as string;
+    expect(arc).toContain("9");
+  });
+
+  it("maps positive dynamics to improvement for exam_10d", () => {
+    const ans = buildGenerateAnswers(
+      { overall_dynamics: "positive" },
+      10,
+      10,
+      "2025-06-10",
+      "",
+      "",
+      "exam_10d",
+    );
+    expect(ans.period_dynamics).toBe("improvement");
+  });
+
+  it("maps negative dynamics correctly", () => {
+    const ansDaily = buildGenerateAnswers(
+      { overall_dynamics: "negative" },
+      3,
+      10,
+      "2025-06-03",
+      "",
+      "",
+      "daily",
+    );
+    expect(ansDaily.dynamics).toBe("worsening");
+
+    const ansExam = buildGenerateAnswers(
+      { overall_dynamics: "negative" },
+      10,
+      10,
+      "2025-06-10",
+      "",
+      "",
+      "exam_10d",
+    );
+    expect(ansExam.period_dynamics).toBe("no_improvement");
+  });
+
+  it("includes improvement pace in arc context when dynamics positive", () => {
+    const ans = buildGenerateAnswers(
+      { overall_dynamics: "positive", improvement_pace: "fast" },
+      2,
+      10,
+      "2025-06-02",
+      "",
+      "",
+      "daily",
+    );
+    const arc = ans.__arc_context__ as string;
+    expect(arc.toLowerCase()).toContain("быстрый");
+  });
+
+  it("maps ecg_eeg event to interventions in exam_10d", () => {
+    const ans = buildGenerateAnswers(
+      { overall_dynamics: "positive", notable_events: ["ecg_eeg"] },
+      10,
+      10,
+      "2025-06-10",
+      "",
+      "",
+      "exam_10d",
+    );
+    const interventions = ans.interventions as string[];
+    expect(interventions).toContain("ecg");
+    expect(interventions).toContain("eeg");
+  });
+
+  it("filters weekend events only to weekend days", () => {
+    // 2025-06-07 is a Saturday
+    const satAns = buildGenerateAnswers(
+      { overall_dynamics: "positive" },
+      7,
+      10,
+      "2025-06-07",
+      "Фон настроения снижен. На выходных искусал губу до крови.",
+      "",
+      "daily",
+    );
+    const satArc = satAns.__arc_context__ as string;
+    expect(satArc).toContain("искусал губу");
+
+    // 2025-06-09 is a Monday — weekend event should be excluded
+    const monAns = buildGenerateAnswers(
+      { overall_dynamics: "positive" },
+      9,
+      10,
+      "2025-06-09",
+      "Фон настроения снижен. На выходных искусал губу до крови.",
+      "",
+      "daily",
+    );
+    const monArc = monAns.__arc_context__ as string;
+    expect(monArc).not.toContain("искусал губу");
+    expect(monArc).toContain("Фон настроения снижен");
+  });
+});
+
+describe("filterDirectorContextForDay", () => {
+  // 2025-06-07 = Saturday (dow=6), 2025-06-08 = Sunday (dow=0),
+  // 2025-06-09 = Monday (dow=1)
+  const sat = new Date(2025, 5, 7);
+  const sun = new Date(2025, 5, 8);
+  const mon = new Date(2025, 5, 9);
+  const wed = new Date(2025, 5, 11); // Wednesday
+
+  it("includes weekend events on Saturday", () => {
+    const ctx = "Общее состояние стабильно. В выходные встретилась с матерью.";
+    const result = filterDirectorContextForDay(ctx, sat, 7, 10);
+    expect(result).toContain("встретилась с матерью");
+  });
+
+  it("excludes weekend events on Monday", () => {
+    const ctx = "Общее состояние стабильно. В выходные встретилась с матерью.";
+    const result = filterDirectorContextForDay(ctx, mon, 9, 10);
+    expect(result).not.toContain("встретилась с матерью");
+    expect(result).toContain("Общее состояние стабильно");
+  });
+
+  it("includes Sunday events on Sunday", () => {
+    const ctx = "В воскресенье был конфликт с соседкой по палате.";
+    const result = filterDirectorContextForDay(ctx, sun, 8, 10);
+    expect(result).toContain("конфликт");
+  });
+
+  it("excludes Sunday events on Wednesday", () => {
+    const ctx = "В воскресенье был конфликт с соседкой по палате.";
+    const result = filterDirectorContextForDay(ctx, wed, 11, 10);
+    expect(result).not.toContain("конфликт");
+  });
+
+  it("includes early-period events for day 1–3", () => {
+    const ctx = "При поступлении была резко возбуждена.";
+    const result1 = filterDirectorContextForDay(ctx, mon, 1, 10);
+    expect(result1).toContain("возбуждена");
+    const result4 = filterDirectorContextForDay(ctx, wed, 4, 10);
+    expect(result4).not.toContain("возбуждена");
+  });
+
+  it("includes late events only for last 2 days", () => {
+    const ctx = "Перед выпиской тревога нарастает.";
+    // day 9 of 10 → last 2 days (days 9, 10)
+    const result9 = filterDirectorContextForDay(ctx, mon, 9, 10);
+    expect(result9).toContain("тревога нарастает");
+    // day 5 of 10 → not last 2 days
+    const result5 = filterDirectorContextForDay(ctx, sat, 5, 10);
+    expect(result5).not.toContain("тревога нарастает");
+  });
+
+  it("keeps background sentences for all days", () => {
+    const ctx = "Фон настроения со снижением, лабильна. В выходные встречалась с матерью.";
+    const monResult = filterDirectorContextForDay(ctx, mon, 9, 10);
+    // Background present even on non-weekend
+    expect(monResult).toContain("Фон настроения");
+    // Event excluded on non-weekend
+    expect(monResult).not.toContain("встречалась с матерью");
+  });
+
+  it("returns empty string for empty context", () => {
+    expect(filterDirectorContextForDay("", mon, 3, 10)).toBe("");
   });
 });

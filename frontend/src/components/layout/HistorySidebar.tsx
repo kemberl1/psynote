@@ -44,7 +44,7 @@ export function HistorySidebar() {
           onClick={() => navigate("/diary/batch")}
           aria-label="Пакетная генерация за период"
         >
-          Пакет за период
+          Новые дневники за период
         </Button>
         <input
           className="sidebar__search"

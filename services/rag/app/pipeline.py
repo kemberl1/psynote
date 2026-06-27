@@ -29,7 +29,7 @@ from app.config import Settings
 from app.generation import build_messages, build_query_text
 from app.llm_client import LLMClient, LLMResult, X5CopilotClient
 from app.questionnaire import iter_free_text, map_answers
-from app.templates import SUPPORTED_DOC_TYPES
+from app.templates import SUPPORTED_DOC_TYPES, DOC_TYPE_DAILY
 
 logger = logging.getLogger(__name__)
 
@@ -186,8 +186,14 @@ class DiaryGenerator:
         # 4. Сборка промпта (daily/exam_10d).
         messages = build_messages(doc_type, mapped, samples)
 
-        # 5. Вызов LLM с автофолбэком (исключения пробрасываются в API-слой).
-        result: LLMResult = self._get_llm().generate(messages)
+        # 5. Вызов LLM с автофолбэком. Температура зависит от типа документа:
+        # ежедневные дневники — выше (живость стиля), осмотр 10 дней — чуть ниже.
+        temp = (
+            self._settings.llm_temperature
+            if doc_type == DOC_TYPE_DAILY
+            else self._settings.llm_temperature_exam10d
+        )
+        result: LLMResult = self._get_llm().generate(messages, temperature=temp)
 
         logger.info("generate: doc_type=%s, модель=%s, образцов=%d, токенов=%s",
                     doc_type, result.model, len(samples),

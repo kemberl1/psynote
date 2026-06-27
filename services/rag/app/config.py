@@ -104,13 +104,16 @@ class Settings:
     llm_backoff_initial_s: float = float(
         os.getenv("LLM_BACKOFF_INITIAL_S", "1.0"))
     llm_backoff_max_s: float = float(os.getenv("LLM_BACKOFF_MAX_S", "30.0"))
-    # Низкая температура — предсказуемость и юр.аккуратность (docs/03 §8).
-    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.4"))
+    # Температура для ежедневных дневников (более живой стиль) и расширенных осмотров.
+    # Ежедневные: 0.75 — баланс между предсказуемостью и клинической живостью.
+    # Осмотр 10 дней: 0.6 — чуть консервативнее из-за развёрнутого эпикриза.
+    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.75"))
+    llm_temperature_exam10d: float = float(os.getenv("LLM_TEMPERATURE_EXAM10D", "0.6"))
     llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "2048"))
 
     # ─── Retrieval для генерации (docs/03 §6) ────────────────────────────────
-    # Число few-shot образцов из корпуса (k=4–6 по docs/03 §6).
-    retrieval_top_k: int = int(os.getenv("RETRIEVAL_TOP_K", "5"))
+    # Число few-shot образцов из корпуса (увеличено до 7 для лучшего стиля).
+    retrieval_top_k: int = int(os.getenv("RETRIEVAL_TOP_K", "7"))
 
     # ─── HTTP server ─────────────────────────────────────────────────────────
     host: str = os.getenv("RAG_HOST", "0.0.0.0")

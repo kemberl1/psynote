@@ -183,11 +183,17 @@ _DAILY_QUESTIONS: dict[str, dict] = {
 # врача; они проходят анонимайзер-гейт ДО маппинга (docs/04). Multiselect-поля
 # с allow_custom (mood_detail, sleep_detail, …) обрабатываются как select-блок
 # выше, а их кастом-элементы извлекаются iter_free_text напрямую.
+#
+# Специальный ключ __arc_context__: режиссёрский контекст пакетной генерации.
+# Проходит анонимайзер-гейт, но НЕ попадает в prompt_lines —
+# вместо этого сохраняется в MappedAnswers.director_note и инжектируется
+# в системный промпт с пометкой «не цитировать» (см. generation.py).
 _DAILY_FREETEXT_QUESTIONS: dict[str, str] = {
     "dynamics_detail": "В чём проявляется ухудшение",
     "adverse_detail": "Нежелательные явления",
     "complaints_detail": "Жалобы",
     "events_detail": "Детали событий дня",
+    "__arc_context__": "Контекст нарратива (служебный)",
 }
 
 # Расширенный осмотр (docs/06 §5). Базовый блок наследуется от daily.
@@ -371,6 +377,9 @@ class MappedAnswers:
     dynamics: str | None = None
     # Безопасный заголовок истории (docs/05 §2.2) — без ПДн.
     title_safe: str = ""
+    # Режиссёрский контекст нарратива (из __arc_context__ в answers).
+    # Инжектируется в системный промпт, НЕ в текст дневника.
+    director_note: str | None = None
 
 
 def _normalize_value(raw: object) -> tuple[str | None, str | None, bool]:
@@ -527,6 +536,14 @@ def map_answers(doc_type: str, answers: dict) -> MappedAnswers:
         text = text.strip()
         if not text:
             continue
+
+        # __arc_context__ — режиссёрский контекст пакетной генерации.
+        # Не идёт в prompt_lines (не вставляется в дневник), а сохраняется
+        # в director_note и затем инжектируется в системный промпт.
+        if qid == "__arc_context__":
+            result.director_note = text
+            continue
+
         result.prompt_lines.append(f"{label}: {text}.")
         query_parts.append(text)
 

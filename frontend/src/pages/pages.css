@@ -49,9 +49,19 @@
 /* Пакетная генерация — даты и превью */
 .batch-dates {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-4);
   margin-bottom: var(--space-4);
+}
+@media (max-width: 700px) {
+  .batch-dates {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 420px) {
+  .batch-dates {
+    grid-template-columns: 1fr;
+  }
 }
 .batch-date-field {
   display: flex;

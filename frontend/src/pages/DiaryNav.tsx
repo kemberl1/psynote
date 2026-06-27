@@ -21,7 +21,7 @@ export function DiaryNav() {
         }
         role="tab"
       >
-        Пакет за период
+        Период
       </NavLink>
     </nav>
   );
