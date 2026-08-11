@@ -28,6 +28,8 @@
 | 08 | [`08_ui_ux.md`](08_ui_ux.md) | UI/UX: роуты, макет (история сбоку + рабочая область), один день и пакет за период, дизайн-язык в стиле Cursor (тёмная тема). |
 | 09 | [`09_security_privacy.md`](09_security_privacy.md) | Безопасность: аутентификация (JWT + Argon2id), изоляция по врачу, threat model, «ничего не утекает». |
 | 10 | [`10_roadmap_stepbystep.md`](10_roadmap_stepbystep.md) | ⭐ Пошаговый план реализации по этапам (под срок ~1 неделя) + что ложится в текст диплома. |
+| 11 | [`11_final_synthesis.md`](11_final_synthesis.md) | Финальный синтез для защиты. |
+| 12 | [`12_deploy_timeweb.md`](12_deploy_timeweb.md) | ⭐ Деплой на Timeweb + Coolify (рубли, HTTPS, автоиз `main`). |
 
 ---
 
@@ -39,13 +41,13 @@
 | **MCP** | Не в ядро (избыточно); опционально — как фасад над Go-анонимизатором на последнем шаге. |
 | **RAG / векторная БД** | **Qdrant** (open-source); План Б — pgvector. |
 | **Эмбеддинги** | **Локальная** multilingual-e5-large (приватность; русский язык). |
-| **LLM** | DeepSeek (OpenAI-совместимый): `deepseek-v4-flash` → `deepseek-v4-pro` → `deepseek-v4-flash`; TLS-верификация включена, `LLM_CA_BUNDLE` опционален для корпоративного прокси. |
+| **LLM** | DeepSeek (OpenAI-совместимый): `deepseek-v4-flash` → `deepseek-v4-pro`; TLS-верификация включена, `LLM_CA_BUNDLE` опционален для корпоративного прокси. |
 | **Анонимизация** | Многоуровневый гейт (regex + словари + NER + морфология ФИО + whitelist + валидатор), необратимая, локальная. |
 | **Аутентификация** | Своя на Go: **JWT + Argon2id**, refresh c отзывом, изоляция по врачу. |
 | **Реляционная БД** | PostgreSQL (без ПДн). |
 | **Фронтенд** | React 19 + Vite + TS, тёмная тема в стиле cursor.com. |
 | **Клинические рекомендации** | На MVP **не подключаем** к дневникам; заложены в архитектуру для будущих документов. |
-| **Деплой** | Docker Compose (всё локально). |
+| **Деплой** | Docker Compose локально; прод — Timeweb VPS + Coolify ([`12_deploy_timeweb.md`](12_deploy_timeweb.md)). |
 
 ---
 

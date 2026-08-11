@@ -54,6 +54,10 @@ deploy/volumes/
 postgres_data/
 qdrant_data/
 
+# Прод-корпус на VPS (копия Документы/). Не коммитить содержимое.
+data/corpus/**
+!data/corpus/.gitkeep
+
 # ─── ОС / IDE ────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db

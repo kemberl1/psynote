@@ -1,0 +1,153 @@
+# ============================================================================
+# AI MED / PsyNote — PRODUCTION docker-compose
+#
+# Для Coolify / VPS (Timeweb). Локальная разработка — docker-compose.yml.
+#
+# Отличия от dev-compose:
+#   • frontend — nginx + статика (Dockerfile.prod), не Vite-dev
+#   • postgres / qdrant / rag / gateway НЕ публикуют порты наружу
+#   • наружу только frontend:80 (Coolify Traefik проксирует HTTPS сюда)
+#   • корпус: ./data/corpus (создайте на сервере, см. docs/12_deploy_timeweb.md)
+#
+# Запуск на VPS вручную:
+#   cp .env.example .env   # заполнить секреты
+#   mkdir -p data/corpus && # положить сюда содержимое Документы/
+#   docker compose -f docker-compose.prod.yml up --build -d
+# ============================================================================
+
+name: ai-med
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aimed-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aimed}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-aimed}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aimed} -d ${POSTGRES_DB:-aimed}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aimed-net
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: aimed-qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - aimed-net
+
+  rag:
+    build:
+      context: ./services/rag
+      dockerfile: Dockerfile
+    container_name: aimed-rag
+    restart: unless-stopped
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-corpus_diaries}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      GATEWAY_URL: ${GATEWAY_URL:-http://gateway:8080}
+      CORPUS_DIR: ${CORPUS_DIR:-/data/corpus}
+      CORPUS_DIARIES_SCOPE: ${CORPUS_DIARIES_SCOPE:-all}
+      CORPUS_DIARIES_SUBDIR: ${CORPUS_DIARIES_SUBDIR:-02_корпус/сборник_дневников_ИБ}
+      CORPUS_DIARY_NAME_RE: ${CORPUS_DIARY_NAME_RE:-дневник}
+      CORPUS_DIARY_DIRS: ${CORPUS_DIARY_DIRS:-сборник_дневников_ИБ,заготовки_дневников}
+      CORPUS_EXCLUDE_NAME_RE: ${CORPUS_EXCLUDE_NAME_RE:-первичк|первичн|эпикриз|выписк|лист[ _]*назнач|назначени|статкарт|статистическ}
+      CHUNK_MAX_CHARS: ${CHUNK_MAX_CHARS:-1200}
+      CHUNK_OVERLAP_CHARS: ${CHUNK_OVERLAP_CHARS:-150}
+      RAG_PORT: "8000"
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY is required}
+      LLM_CA_BUNDLE: ${LLM_CA_BUNDLE:-}
+      LLM_MODEL_LARGE: ${LLM_MODEL_LARGE:-deepseek-v4-flash}
+      LLM_MODEL_MEDIUM: ${LLM_MODEL_MEDIUM:-deepseek-v4-pro}
+      LLM_MODEL_SMALL: ${LLM_MODEL_SMALL:-}
+      LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-60}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.4}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-2048}
+      LLM_THINKING: ${LLM_THINKING:-disabled}
+      LLM_BACKOFF_INITIAL_S: ${LLM_BACKOFF_INITIAL_S:-1.0}
+      LLM_BACKOFF_MAX_S: ${LLM_BACKOFF_MAX_S:-30.0}
+      RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K:-5}
+    volumes:
+      # На сервере: data/corpus = копия локальной папки Документы/
+      - ${CORPUS_HOST_PATH:-./data/corpus}:/data/corpus:ro
+      - rag_hf_cache:/app/.cache/huggingface
+    depends_on:
+      qdrant:
+        condition: service_started
+    networks:
+      - aimed-net
+
+  gateway:
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+    container_name: aimed-gateway
+    restart: unless-stopped
+    environment:
+      GATEWAY_HTTP_ADDR: ":8080"
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-aimed}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aimed}?sslmode=disable"
+      QDRANT_URL: http://qdrant:6333
+      RAG_URL: http://rag:8000
+      RAG_GENERATE_TIMEOUT_S: ${RAG_GENERATE_TIMEOUT_S:-120}
+      RAG_HEALTH_TIMEOUT_S: ${RAG_HEALTH_TIMEOUT_S:-5}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      ACCESS_TOKEN_TTL_S: ${ACCESS_TOKEN_TTL_S:-900}
+      REFRESH_TOKEN_TTL_S: ${REFRESH_TOKEN_TTL_S:-2592000}
+      # Публичный HTTPS URL сайта (Coolify / домен). Без слэша в конце.
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:?CORS_ALLOWED_ORIGIN is required}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_CA_BUNDLE: ${LLM_CA_BUNDLE:-}
+      LLM_MODEL_LARGE: ${LLM_MODEL_LARGE:-deepseek-v4-flash}
+      LLM_MODEL_MEDIUM: ${LLM_MODEL_MEDIUM:-deepseek-v4-pro}
+      LLM_MODEL_SMALL: ${LLM_MODEL_SMALL:-}
+      ANONYMIZER_DICT_DIR: ${ANONYMIZER_DICT_DIR:-}
+      ANONYMIZER_NER_URL: ${ANONYMIZER_NER_URL:-}
+      ANONYMIZER_FAIL_CLOSED: ${ANONYMIZER_FAIL_CLOSED:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rag:
+        condition: service_started
+    networks:
+      - aimed-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: aimed-frontend
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_started
+    # Coolify/Traefik проксирует на контейнерный порт 80.
+    # Не публикуем 80 на хост сами — иначе конфликт с прокси Coolify.
+    expose:
+      - "80"
+    networks:
+      - aimed-net
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  rag_hf_cache:
+
+networks:
+  aimed-net:
+    driver: bridge

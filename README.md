@@ -183,6 +183,14 @@ docker compose down        # остановить контейнеры
 docker compose down -v     # + удалить volume-данные (postgres, qdrant, HF-кэш)
 ```
 
+### Прод (врачи, HTTPS, автодеплой из `main`)
+
+Локальный `docker compose` — для разработки. Боевой выкат на Timeweb VPS + Coolify:
+
+- конфиг: [`docker-compose.prod.yml`](docker-compose.prod.yml)
+- фронт: [`frontend/Dockerfile.prod`](frontend/Dockerfile.prod) + nginx
+- пошагово для новичка: [`docs/12_deploy_timeweb.md`](docs/12_deploy_timeweb.md)
+
 ### Авто-подбор свободных портов
 
 Если порты по умолчанию заняты другим docker-стеком:
@@ -431,7 +439,7 @@ cd frontend && npm test
 | 8 | Админ-панель (управление врачами, статистика) | ✅ Завершён |
 | 9 | Расширение каталога документов (первички, эпикризы, выписки) | 🔲 Планируется |
 | 10 | Интеграция MCP (Model Context Protocol) для внешних агентов | 🔲 Планируется |
-| 11 | Деплой на сервер больницы (prod-конфигурация) | 🔲 Планируется |
+| 11 | Деплой на сервер (Timeweb + Coolify, автоиз `main`) | ✅ [`docs/12_deploy_timeweb.md`](docs/12_deploy_timeweb.md) |
 
 Подробный roadmap — [`docs/10_roadmap_stepbystep.md`](docs/10_roadmap_stepbystep.md).
 
