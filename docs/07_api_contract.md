@@ -118,7 +118,7 @@
   "options": { "stream": true }
 }
 // Response 200 (нестриминговый вариант)
-{ "meta": { "llm_model_used": "x5-airun-large", "tokens_used": 812, "request_id": "uuid" },
+{ "meta": { "llm_model_used": "deepseek-v4-flash", "tokens_used": 812, "request_id": "uuid" },
   "data": {
     "request_id": "uuid",
     "content": "обезличенный текст дневника с плейсхолдерами [ДАТА], [ФИО_ВРАЧА]...",
@@ -154,7 +154,7 @@
 ```jsonc
 // Response 200
 { "meta": { "total": 134 }, "data": [
-  { "request_id": "uuid", "document_type": "daily", "title_safe": "Ежедневный дневник · сниженное настроение · без динамики", "llm_model_used": "x5-airun-large", "status": "done", "created_at": "..." }
+  { "request_id": "uuid", "document_type": "daily", "title_safe": "Ежедневный дневник · сниженное настроение · без динамики", "llm_model_used": "deepseek-v4-flash", "status": "done", "created_at": "..." }
 ]}
 ```
 
@@ -167,7 +167,7 @@
   "answers_anonymized": { /* ... */ },
   "content": "обезличенный текст...",
   "title_safe": "Ежедневный дневник · ...",
-  "llm_model_used": "x5-airun-large",
+  "llm_model_used": "deepseek-v4-flash",
   "status": "done",
   "anonymizer_removed_count": 5,   // аудит, без значений ПДн (docs/05 §2.2)
   "created_at": "..."
@@ -213,7 +213,7 @@
 ### GET /api/v1/health
 Состояние сервиса (gateway, доступность Qdrant, доступность LLM по `GET /models`).
 ```jsonc
-{ "meta": {...}, "data": { "status": "ok", "llm": { "enabled": true, "models_available": ["x5-airun-large","x5-airun-medium"] }, "vector_db": "ok" } }
+{ "meta": {...}, "data": { "status": "ok", "llm": { "enabled": true, "models_available": ["deepseek-v4-flash","deepseek-v4-pro","deepseek-v4-flash"] }, "vector_db": "ok" } }
 ```
 
 ### (Будущее) Админка корпуса

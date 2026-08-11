@@ -29,7 +29,7 @@ flowchart TB
 **Что делаем:**
 - Репозиторий, структура папок (`gateway/` Go, `rag/` Python, `frontend/` React, `docs/`, `deploy/`).
 - `docker-compose.yml` со скелетами сервисов: `frontend`, `gateway`, `rag`, `postgres`, `qdrant` (+ `embeddings`).
-- `.env.example` (по образцу `hh_analyser`: `API_KEY`, `LLM_BASE_URL`, `LLM_CA_BUNDLE`, список моделей, JWT-секрет, DSN Postgres).
+- `.env.example` (по образцу `hh_analyser`: `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_CA_BUNDLE`, список моделей, JWT-секрет, DSN Postgres).
 - Health-эндпоинты во всех сервисах.
 
 **Зачем:** единая среда «одной командой», на которую дальше наслаиваем функции.
@@ -79,7 +79,7 @@ flowchart TB
 ## Этап 3. ⭐ LLM, генерация и fallback
 
 **Что делаем (Go-Gateway, паттерн из `hh_analyser`):**
-- OpenAI-совместимый клиент: `base_url`, Bearer-ключ, **корпоративный CA-bundle**, тайм-ауты, ретраи.
+- OpenAI-совместимый клиент для DeepSeek: `base_url`, Bearer-ключ, тайм-ауты, ретраи; `LLM_CA_BUNDLE` опционален только для корпоративного прокси.
 - Абстрактный интерфейс LLM-клиента (заменяемость провайдера).
 - Сборка промпта: шаблон + RAG-образцы + ответы опросника.
 - **Fallback** large → medium → small (см. [`03_rag_design.md`](03_rag_design.md) §10).
@@ -90,7 +90,7 @@ flowchart TB
 
 **Проверка:** `POST /generate` (с замоканными ответами) возвращает осмысленный дневник; при недоступности основной модели происходит переключение; `GET /models` подтверждает доступные модели токену.
 
-**Для диплома:** «Интеграция корпоративного LLM, отказоустойчивость (fallback), безопасное TLS-подключение через корпоративный CA».
+**Для диплома:** «Интеграция OpenAI-совместимого LLM, отказоустойчивость (fallback), безопасное TLS-подключение».
 
 ---
 

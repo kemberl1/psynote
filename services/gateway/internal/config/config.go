@@ -44,7 +44,7 @@ type Config struct {
 	// RefreshTokenTTL — время жизни refresh-токена (длинное, ~7–30 дней).
 	RefreshTokenTTL time.Duration
 
-	// LLM (X5 CoPilot, OpenAI-совместимый) — см. docs/03_rag_design.md §9.
+	// LLM (OpenAI-совместимый API) — см. docs/03_rag_design.md §9.
 	// TODO(этап 3): использовать при реализации LLM-клиента с fallback.
 	LLMBaseURL     string
 	LLMAPIKey      string
@@ -82,12 +82,12 @@ func Load() Config {
 		AccessTokenTTL:     getEnvDuration("ACCESS_TOKEN_TTL_S", 15*time.Minute),
 		RefreshTokenTTL:    getEnvDuration("REFRESH_TOKEN_TTL_S", 30*24*time.Hour),
 
-		LLMBaseURL:     getEnv("X5_BASE_URL", "https://api-copilot.x5.ru/aigw/v1/"),
-		LLMAPIKey:      getEnv("X5_API_KEY", ""),
-		LLMCABundle:    getEnv("LLM_CA_BUNDLE", "/app/certs/x5_root_ca.pem"),
-		LLMModelLarge:  getEnv("LLM_MODEL_LARGE", "x5-airun-large"),
-		LLMModelMedium: getEnv("LLM_MODEL_MEDIUM", "x5-airun-medium"),
-		LLMModelSmall:  getEnv("LLM_MODEL_SMALL", "x5-airun-small"),
+		LLMBaseURL:     getEnv("LLM_BASE_URL", "https://api.deepseek.com"),
+		LLMAPIKey:      getEnv("LLM_API_KEY", ""),
+		LLMCABundle:    getEnv("LLM_CA_BUNDLE", ""),
+		LLMModelLarge:  getEnv("LLM_MODEL_LARGE", "deepseek-v4-flash"),
+		LLMModelMedium: getEnv("LLM_MODEL_MEDIUM", "deepseek-v4-pro"),
+		LLMModelSmall:  getEnv("LLM_MODEL_SMALL", ""),
 
 		CORSAllowedOrigin: getEnv("CORS_ALLOWED_ORIGIN", "http://localhost:5173"),
 

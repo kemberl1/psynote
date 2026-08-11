@@ -26,7 +26,7 @@ func TestGenerate_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{
 			"meta": {"request_id":"rid-1","ts":"2026-01-01T00:00:00Z",
-			         "llm_model_used":"x5-airun-large","tokens_used":812,"chunks_used":5},
+			         "llm_model_used":"deepseek-v4-flash","tokens_used":812,"chunks_used":5},
 			"data": {"document_type":"daily","content":"дневник [ДАТА]","status":"done",
 			         "title_safe":"Ежедневный дневник · тревожный","answers_anonymized":{"mood":"lowered"},
 			         "anonymizer_removed_count":2,
@@ -39,7 +39,7 @@ func TestGenerate_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.RequestID != "rid-1" || res.LLMModelUsed != "x5-airun-large" || res.TokensUsed != 812 {
+	if res.RequestID != "rid-1" || res.LLMModelUsed != "deepseek-v4-flash" || res.TokensUsed != 812 {
 		t.Errorf("meta mapping wrong: %+v", res)
 	}
 	if res.Content != "дневник [ДАТА]" || res.Status != "done" || res.TitleSafe == "" {

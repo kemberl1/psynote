@@ -1,9 +1,9 @@
-"""OpenAI-совместимый клиент к корпоративному X5 CoPilot с АВТОФОЛБЭКОМ моделей.
+"""OpenAI-совместимый LLM-клиент с АВТОФОЛБЭКОМ моделей.
 
-Этап 4 (docs/03 §9–10). Паттерн подключения переиспользован из референс-проекта
-hh_analyser (`backend/app/services/llm/x5_copilot.py`): openai SDK → base_url X5,
-Bearer-ключ из ENV, корпоративный CA-bundle (TLS-верификация ВКЛЮЧЕНА), ретраи
-через tenacity (экспоненциальный backoff с джиттером). Код — собственный.
+Этап 4 (docs/03 §9–10). Работает с любым OpenAI-совместимым API
+(DeepSeek / OpenRouter / Groq / др.): openai SDK → base_url + Bearer-ключ из ENV,
+опциональный CA-bundle (TLS-верификация ВКЛЮЧЕНА), ретраи через tenacity
+(экспоненциальный backoff с джиттером).
 
 ОТКЛОНЕНИЕ ОТ docs/02/03: в исходном дизайне LLM-клиент с фолбэком жил в
 Go-Gateway. По заданию Этапа 4 он реализован здесь, в services/rag (Python),
@@ -130,10 +130,10 @@ class LLMClient(abc.ABC):
         """Сгенерировать ответ, перебирая модели по приоритету при сбоях."""
 
 
-# ─── Реализация X5 CoPilot ──────────────────────────────────────────────────
+# ─── OpenAI-совместимая реализация ───────────────────────────────────────────
 
-class X5CopilotClient(LLMClient):
-    """Клиент X5 CoPilot (OpenAI-совместимый) с автофолбэком large→medium→small.
+class OpenAICompatibleClient(LLMClient):
+    """Клиент любого OpenAI-совместимого API с автофолбэком large→medium→small.
 
     Параметры берутся из Settings; openai-клиент можно подменить в тестах
     (`openai_client=`), чтобы не ходить в реальную сеть.
@@ -154,18 +154,18 @@ class X5CopilotClient(LLMClient):
             self._configured = True
             return
 
-        if not settings.x5_api_key:
+        if not settings.llm_api_key:
             # Ключ не задан — клиент создаётся «неактивным». Ошибка вылетит
             # только при попытке генерации (LLMNotConfiguredError), чтобы
             # сервис мог стартовать и отвечать на /health без ключа.
             self._client = None
             self._configured = False
             logger.warning(
-                "X5 LLM: X5_API_KEY не задан — генерация будет недоступна")
+                "LLM: LLM_API_KEY не задан — генерация будет недоступна")
             return
 
-        # Корпоративный CA X5: TLS-верификация ОСТАЁТСЯ включённой, мы лишь
-        # добавляем доверенный bundle (docs/03 §9.2). Не отключаем verify!
+        # Опциональный CA-bundle: TLS-верификация ОСТАЁТСЯ включённой
+        # (docs/03 §9.2). Не отключаем verify!
         http_client: httpx.Client | None = None
         if settings.llm_ca_bundle:
             ssl_ctx = ssl.create_default_context(cafile=settings.llm_ca_bundle)
@@ -173,8 +173,8 @@ class X5CopilotClient(LLMClient):
                 verify=ssl_ctx, timeout=float(self._timeout))
 
         self._client = OpenAI(
-            base_url=settings.x5_base_url,
-            api_key=settings.x5_api_key,
+            base_url=settings.llm_base_url,
+            api_key=settings.llm_api_key,
             timeout=float(self._timeout),
             max_retries=0,  # ретраи делаем сами через tenacity
             http_client=http_client,
@@ -182,9 +182,9 @@ class X5CopilotClient(LLMClient):
         self._configured = True
 
         logger.info(
-            "X5 LLM init: base_url=%s, models=%s, timeout=%.0fs, retries=%d, "
+            "LLM init: base_url=%s, models=%s, timeout=%.0fs, retries=%d, "
             "custom_ca=%s",  # ключ НИКОГДА не логируем
-            settings.x5_base_url, self._models, self._timeout,
+            settings.llm_base_url, self._models, self._timeout,
             self._max_retries, bool(settings.llm_ca_bundle),
         )
 
@@ -198,7 +198,7 @@ class X5CopilotClient(LLMClient):
         """Перебрать модели по приоритету. См. правила фолбэка в docstring модуля."""
         if not self._configured or self._client is None:
             raise LLMNotConfiguredError(
-                "LLM не сконфигурирован: задайте X5_API_KEY в окружении (.env)")
+                "LLM не сконфигурирован: задайте LLM_API_KEY в окружении (.env)")
         if not self._models:
             raise LLMNotConfiguredError(
                 "Список моделей пуст: задайте LLM_MODEL_LARGE/MEDIUM/SMALL")
@@ -252,18 +252,26 @@ class X5CopilotClient(LLMClient):
                   temperature: float, max_tokens: int) -> LLMResult:
         """Один вызов chat-completions без ретраев. Маппит ошибки в LLMError."""
         payload = [{"role": m.role, "content": m.content} for m in messages]
+        create_kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": payload,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        # DeepSeek V4: thinking по умолчанию enabled у провайдера. Явно гасим/
+        # включаем через ENV, иначе при малом max_tokens content бывает пустым.
+        thinking = (self._settings.llm_thinking or "").strip().lower()
+        if thinking in ("disabled", "enabled"):
+            create_kwargs["extra_body"] = {"thinking": {"type": thinking}}
         try:
             response = self._client.chat.completions.create(  # type: ignore[union-attr]
-                model=model,
-                messages=payload,  # type: ignore[arg-type]
-                temperature=temperature,
-                max_tokens=max_tokens,
+                **create_kwargs,
             )
         except (AuthenticationError, PermissionDeniedError) as exc:
             status = getattr(exc, "status_code", None)
             logger.error(
                 "LLM: auth error (status=%s) для модели '%s'", status, model)
-            raise LLMAuthError("Ошибка авторизации LLM (проверьте X5_API_KEY)",
+            raise LLMAuthError("Ошибка авторизации LLM (проверьте LLM_API_KEY)",
                                status_code=status) from exc
         except RateLimitError as exc:
             raise LLMError("LLM rate limit", status_code=getattr(exc, "status_code", 429),
@@ -274,6 +282,7 @@ class X5CopilotClient(LLMClient):
             raise LLMError("LLM connection error", retryable=True) from exc
         except APIStatusError as exc:
             status = getattr(exc, "status_code", None) or 500
+            # 402 Insufficient Balance — не ретраим (проблема баланса, не сети).
             raise LLMError(f"LLM provider error ({status})", status_code=status,
                            retryable=status >= 500) from exc
 

@@ -83,20 +83,25 @@ class Settings:
     # Минимальный размер чанка — короче отбрасываем как шум (подписи и т.п.).
     chunk_min_chars: int = int(os.getenv("CHUNK_MIN_CHARS", "40"))
 
-    # ─── LLM: корпоративный X5 CoPilot (OpenAI-совместимый, docs/03 §9) ───────
+    # ─── LLM: OpenAI-совместимый провайдер (docs/03 §9) ──────────────────────
+    # Дефолт — DeepSeek (доступен из РФ без VPN). Можно подставить
+    # Gemini/OpenRouter/Groq через LLM_BASE_URL + модели.
     # Этап 4: автоматический фолбэк large→medium→small (docs/03 §10).
     # ВАЖНО: ключ только из ENV, никогда не в коде/логах (docs/03 §9.2, docs/09).
-    x5_base_url: str = os.getenv(
-        "X5_BASE_URL", "https://api-copilot.x5.ru/aigw/v1/")
-    x5_api_key: str = os.getenv("X5_API_KEY", "")
-    # Путь к PEM с корпоративным CA X5 ВНУТРИ контейнера (docs/03 §9.2).
-    # TLS-верификация ОСТАЁТСЯ включённой — указываем кастомный bundle, не отключаем.
+    llm_base_url: str = os.getenv(
+        "LLM_BASE_URL",
+        "https://api.deepseek.com",
+    )
+    llm_api_key: str = os.getenv("LLM_API_KEY", "")
+    # Опциональный PEM CA-bundle (для корпоративных прокси). Пусто = системный
+    # trust store. TLS-верификация всегда включена.
     llm_ca_bundle: str = os.getenv("LLM_CA_BUNDLE", "")
     # Список моделей с приоритетом фолбэка. Пустые значения отбрасываются —
     # порядок задаётся ENV без пересборки образа (docs/03 §10).
-    llm_model_large: str = os.getenv("LLM_MODEL_LARGE", "x5-airun-large")
-    llm_model_medium: str = os.getenv("LLM_MODEL_MEDIUM", "x5-airun-medium")
-    llm_model_small: str = os.getenv("LLM_MODEL_SMALL", "x5-airun-small")
+    llm_model_large: str = os.getenv("LLM_MODEL_LARGE", "deepseek-v4-flash")
+    llm_model_medium: str = os.getenv("LLM_MODEL_MEDIUM", "deepseek-v4-pro")
+    # У DeepSeek сейчас две модели — small по умолчанию пустой (фолбэк flash→pro).
+    llm_model_small: str = os.getenv("LLM_MODEL_SMALL", "")
     # Тайм-аут одного запроса к LLM (сек) и число ретраев ВНУТРИ одной модели.
     llm_timeout_s: float = float(os.getenv("LLM_TIMEOUT_S", "60"))
     llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", "3"))
@@ -110,6 +115,10 @@ class Settings:
     llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.75"))
     llm_temperature_exam10d: float = float(os.getenv("LLM_TEMPERATURE_EXAM10D", "0.6"))
     llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "2048"))
+    # DeepSeek V4: thinking включён по умолчанию у провайдера и может «съесть»
+    # max_tokens → пустой content. Для дневников дефолт disabled (дешевле/стабильнее).
+    # Значения: disabled | enabled | "" (не передавать параметр).
+    llm_thinking: str = os.getenv("LLM_THINKING", "disabled")
 
     # ─── Retrieval для генерации (docs/03 §6) ────────────────────────────────
     # Число few-shot образцов из корпуса (увеличено до 7 для лучшего стиля).

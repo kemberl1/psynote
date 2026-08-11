@@ -8,7 +8,7 @@
   2. Маппинг ответов в клинические формулировки + метаданные (questionnaire.py).
   3. Retrieval few-shot образцов из Qdrant с фильтром по метаданным (docs/03 §6).
   4. Сборка промпта daily/exam_10d (generation.py).
-  5. Вызов LLM X5 с автофолбэком моделей (llm_client.py).
+  5. Вызов LLM (OpenAI-совместимый) с автофолбэком моделей (llm_client.py).
   6. Возврат обезличенного результата + метаданных (модель, токены, k).
 
 ПРИВАТНОСТЬ:
@@ -27,7 +27,7 @@ from typing import Callable, Protocol
 from app.anonymizer_client import AnonymizerClient
 from app.config import Settings
 from app.generation import build_messages, build_query_text
-from app.llm_client import LLMClient, LLMResult, X5CopilotClient
+from app.llm_client import LLMClient, LLMResult, OpenAICompatibleClient
 from app.questionnaire import iter_free_text, map_answers
 from app.templates import SUPPORTED_DOC_TYPES, DOC_TYPE_DAILY
 
@@ -118,7 +118,7 @@ class DiaryGenerator:
 
     def _get_llm(self) -> LLMClient:
         if self._llm is None:
-            self._llm = X5CopilotClient(self._settings)
+            self._llm = OpenAICompatibleClient(self._settings)
         return self._llm
 
     def _get_retrieve(self) -> RetrieveFn:

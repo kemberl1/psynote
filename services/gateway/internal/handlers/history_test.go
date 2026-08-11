@@ -18,8 +18,8 @@ func TestHistoryListHandler(t *testing.T) {
 	repo := &fakeRepo{
 		total: 2,
 		list: []store.HistoryItem{
-			{RequestID: "r1", DocumentType: "daily", TitleSafe: "Ежедневный дневник", LLMModelUsed: "x5-airun-large", Status: "done", CreatedAt: time.Now()},
-			{RequestID: "r2", DocumentType: "exam_10d", TitleSafe: "Осмотр", LLMModelUsed: "x5-airun-medium", Status: "failed", CreatedAt: time.Now()},
+			{RequestID: "r1", DocumentType: "daily", TitleSafe: "Ежедневный дневник", LLMModelUsed: "deepseek-v4-flash", Status: "done", CreatedAt: time.Now()},
+			{RequestID: "r2", DocumentType: "exam_10d", TitleSafe: "Осмотр", LLMModelUsed: "deepseek-v4-pro", Status: "failed", CreatedAt: time.Now()},
 		},
 	}
 	h := newHistoryListHandler(repo)

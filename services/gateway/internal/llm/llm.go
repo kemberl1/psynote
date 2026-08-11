@@ -1,12 +1,13 @@
-// Package llm is the OpenAI-compatible client for the X5 CoPilot LLM,
+// Package llm is the OpenAI-compatible client for chat completions,
 // with automatic model fallback (large → medium → small).
 //
 // See docs/03_rag_design.md §9–10:
-//   - base_url, Bearer key, corporate CA bundle (LLM_CA_BUNDLE), timeouts/retries;
+//   - base_url, Bearer key, optional CA bundle (LLM_CA_BUNDLE), timeouts/retries;
 //   - fallback large→medium→small; 401/403 — без ретраев.
 //
-// Этап 1 (каркас): только интерфейс и заглушка. Реальный http.Client с
-// tls.Config{RootCAs: pool} и go-openai-совместимым клиентом — Этап 3 роадмапа.
+// Этап 1 (каркас): только интерфейс и заглушка. Реальный http.Client и
+// go-openai-совместимый клиент — Этап 3 роадмапа. Сейчас генерация идёт
+// через Python RAG-сервис (OpenAICompatibleClient).
 package llm
 
 import "context"

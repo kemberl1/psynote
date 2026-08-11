@@ -1,4 +1,4 @@
-"""Юнит-тесты LLM-клиента X5 с автофолбэком (docs/03 §9–10).
+"""Юнит-тесты OpenAI-совместимого LLM-клиента с автофолбэком (docs/03 §9–10).
 
 Все вызовы МОКАЮТСЯ — реальная сеть/ключ не нужны. Проверяем:
   (а) фолбэк large→medium→small при 5xx/timeout;
@@ -22,11 +22,17 @@ from app.llm_client import (
     LLMAuthError,
     LLMMessage,
     LLMNotConfiguredError,
-    X5CopilotClient,
+    OpenAICompatibleClient,
 )
 
+_MODEL_LARGE = "deepseek-v4-flash"
+_MODEL_MEDIUM = "deepseek-v4-pro"
+_MODEL_SMALL = "deepseek-backup"
+
 _REQ = httpx.Request(
-    "POST", "https://api-copilot.x5.ru/aigw/v1/chat/completions")
+    "POST",
+    "https://api.deepseek.com/chat/completions",
+)
 
 
 def _status_error(code: int) -> APIStatusError:
@@ -92,8 +98,12 @@ class FakeOpenAI:
 
 def _settings(**over) -> Settings:
     # max_retries=1 — чтобы тесты фолбэка не тратили время на backoff.
+    # Явно задаём 3 разные модели — покрываем полный путь фолбэка.
     base = dict(
-        x5_api_key="test-key",
+        llm_api_key="test-key",
+        llm_model_large=_MODEL_LARGE,
+        llm_model_medium=_MODEL_MEDIUM,
+        llm_model_small=_MODEL_SMALL,
         llm_max_retries=1,
         llm_backoff_initial_s=0.0,
         llm_backoff_max_s=0.0,
@@ -111,10 +121,10 @@ def test_success_first_model() -> None:
     def behavior(kwargs, n):
         return _Response("готовый дневник", kwargs["model"])
 
-    client = X5CopilotClient(_settings(), openai_client=FakeOpenAI(behavior))
+    client = OpenAICompatibleClient(_settings(), openai_client=FakeOpenAI(behavior))
     res = client.generate(_msgs())
     assert res.content == "готовый дневник"
-    assert res.model == "x5-airun-large"
+    assert res.model == _MODEL_LARGE
     assert res.usage["total_tokens"] == 150
 
 
@@ -122,30 +132,28 @@ def test_fallback_large_to_medium_to_small() -> None:
     """large и medium падают 5xx → отрабатывает small (docs/03 §10)."""
     def behavior(kwargs, n):
         model = kwargs["model"]
-        if model in ("x5-airun-large", "x5-airun-medium"):
+        if model in (_MODEL_LARGE, _MODEL_MEDIUM):
             raise _status_error(503)
         return _Response("дневник от small", model)
 
     fake = FakeOpenAI(behavior)
-    client = X5CopilotClient(_settings(), openai_client=fake)
+    client = OpenAICompatibleClient(_settings(), openai_client=fake)
     res = client.generate(_msgs())
-    assert res.model == "x5-airun-small"
-    # Перебрали все три модели по порядку.
+    assert res.model == _MODEL_SMALL
     used_models = [c["model"] for c in fake.chat.completions.calls]
-    assert used_models == ["x5-airun-large",
-                           "x5-airun-medium", "x5-airun-small"]
+    assert used_models == [_MODEL_LARGE, _MODEL_MEDIUM, _MODEL_SMALL]
 
 
 def test_fallback_on_timeout() -> None:
     """Timeout основной модели → фолбэк на следующую."""
     def behavior(kwargs, n):
-        if kwargs["model"] == "x5-airun-large":
+        if kwargs["model"] == _MODEL_LARGE:
             raise _timeout_error()
         return _Response("ok", kwargs["model"])
 
-    client = X5CopilotClient(_settings(), openai_client=FakeOpenAI(behavior))
+    client = OpenAICompatibleClient(_settings(), openai_client=FakeOpenAI(behavior))
     res = client.generate(_msgs())
-    assert res.model == "x5-airun-medium"
+    assert res.model == _MODEL_MEDIUM
 
 
 def test_auth_error_no_retry_no_fallback() -> None:
@@ -154,10 +162,9 @@ def test_auth_error_no_retry_no_fallback() -> None:
         raise _auth_error()
 
     fake = FakeOpenAI(behavior)
-    client = X5CopilotClient(_settings(), openai_client=fake)
+    client = OpenAICompatibleClient(_settings(), openai_client=fake)
     with pytest.raises(LLMAuthError):
         client.generate(_msgs())
-    # Ровно ОДИН вызов: не ретраили и не перебирали medium/small.
     assert len(fake.chat.completions.calls) == 1
 
 
@@ -167,33 +174,32 @@ def test_all_models_unavailable() -> None:
         raise _status_error(500)
 
     fake = FakeOpenAI(behavior)
-    client = X5CopilotClient(_settings(), openai_client=fake)
+    client = OpenAICompatibleClient(_settings(), openai_client=fake)
     with pytest.raises(AllModelsUnavailableError) as exc:
         client.generate(_msgs())
     assert exc.value.status_code == 503
     assert set(exc.value.attempts) == {
-        "x5-airun-large", "x5-airun-medium", "x5-airun-small"}
+        _MODEL_LARGE, _MODEL_MEDIUM, _MODEL_SMALL}
 
 
 def test_retries_within_model_before_fallback() -> None:
     """Ретраи ВНУТРИ модели: с retries=2 large вызывается дважды, потом фолбэк."""
     def behavior(kwargs, n):
-        if kwargs["model"] == "x5-airun-large":
+        if kwargs["model"] == _MODEL_LARGE:
             raise _status_error(502)
         return _Response("ok", kwargs["model"])
 
     fake = FakeOpenAI(behavior)
-    client = X5CopilotClient(_settings(llm_max_retries=2), openai_client=fake)
+    client = OpenAICompatibleClient(_settings(llm_max_retries=2), openai_client=fake)
     res = client.generate(_msgs())
-    assert res.model == "x5-airun-medium"
+    assert res.model == _MODEL_MEDIUM
     calls = [c["model"] for c in fake.chat.completions.calls]
-    # large дважды (ретрай), затем medium один раз.
-    assert calls == ["x5-airun-large", "x5-airun-large", "x5-airun-medium"]
+    assert calls == [_MODEL_LARGE, _MODEL_LARGE, _MODEL_MEDIUM]
 
 
 def test_not_configured_without_key() -> None:
-    """Без X5_API_KEY генерация даёт понятную LLMNotConfiguredError."""
-    client = X5CopilotClient(_settings(x5_api_key=""))
+    """Без LLM_API_KEY генерация даёт понятную LLMNotConfiguredError."""
+    client = OpenAICompatibleClient(_settings(llm_api_key=""))
     with pytest.raises(LLMNotConfiguredError):
         client.generate(_msgs())
 

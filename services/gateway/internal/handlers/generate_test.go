@@ -197,7 +197,7 @@ func (r *fakeRepo) RevokeSession(_ context.Context, id string) error {
 func TestGenerateHandler_Success(t *testing.T) {
 	anon := &cleanAnon{}
 	rag := &fakeRAG{res: &ragclient.GenerateResult{
-		RequestID: "rag-rid", LLMModelUsed: "x5-airun-large", TokensUsed: 100,
+		RequestID: "rag-rid", LLMModelUsed: "deepseek-v4-flash", TokensUsed: 100,
 		Content: "дневник [ДАТА]", Status: "done", TitleSafe: "Ежедневный дневник",
 		AnswersAnonymized: map[string]any{"mood": "lowered"}, AnonymizerRemovedCount: 3,
 	}}

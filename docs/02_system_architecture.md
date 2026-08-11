@@ -12,7 +12,7 @@
 | **RAG** | «Генерация с подсказкой из своей базы знаний». Перед тем как попросить ИИ написать дневник, мы находим в корпусе похожие реальные записи и подкладываем их ИИ как образец. Подробно — [`03_rag_design.md`](03_rag_design.md). |
 | **Эмбеддинг** | Превращение текста в набор чисел (вектор), по которому можно искать «похожее по смыслу». |
 | **Векторная БД** | Специальная база, которая хранит эти векторы и умеет быстро находить похожие. У нас — Qdrant. |
-| **LLM** | Большая языковая модель (ИИ), которая и пишет текст дневника. У нас — корпоративная X5 CoPilot. |
+| **LLM** | Большая языковая модель (ИИ), которая и пишет текст дневника. По умолчанию — DeepSeek через OpenAI-совместимый API. |
 | **MCP** | Стандартный «разъём», позволяющий внешнему ИИ-агенту пользоваться вашими инструментами. См. §6 — почему мы его не ставим в ядро. |
 | **Анонимизация** | Удаление/замена персональных данных (ФИО, даты, адреса и т.д.) так, чтобы по тексту нельзя было опознать ребёнка. |
 
@@ -23,7 +23,7 @@
 ```mermaid
 flowchart TB
     Doctor[Врач-психиатр  пользователь] -->|HTTPS, браузер| System[Система ПсихоДневник]
-    System -->|обезличенный текст, HTTPS + corporate CA| LLM[Корпоративный LLM  X5 CoPilot API]
+    System -->|обезличенный текст, HTTPS| LLM[DeepSeek  OpenAI-совместимый API]
     Admin[Администратор корпуса  будущее] -->|загрузка документов| System
     subgraph Локальный периметр  один сервер  docker compose
       System
@@ -52,7 +52,7 @@ flowchart TB
       QD[(Qdrant  векторы корпуса + метаданные)]
     end
 
-    LLM[X5 CoPilot LLM API  внешний]
+    LLM[DeepSeek LLM API  внешний]
 
     FE -->|REST/JSON + JWT| GW
     GW -->|gRPC/REST  обезличенный контекст| RAG
@@ -86,7 +86,7 @@ sequenceDiagram
     participant AN as Go Анонимизатор
     participant RAG as Python RAG
     participant QD as Qdrant
-    participant LLM as X5 CoPilot
+    participant LLM as DeepSeek
 
     FE->>GW: POST /generate (ответы опросника + опц. документ) + JWT
     GW->>GW: Проверка JWT, валидация запроса
@@ -105,9 +105,9 @@ sequenceDiagram
         RAG->>QD: поиск похожих обезличенных записей
         QD-->>RAG: top-k чанков
         RAG-->>GW: промпт (шаблон + few-shot + ответы)
-        GW->>LLM: chat(промпт, model=x5-airun-large)
+        GW->>LLM: chat(промпт, model=deepseek-v4-flash)
         alt Основная модель недоступна
-            GW->>LLM: chat(промпт, model=x5-airun-medium)  // fallback
+            GW->>LLM: chat(промпт, model=deepseek-v4-pro)  // fallback
         end
         LLM-->>GW: сгенерированный дневник
         GW->>GW: пост-валидация (нет ПДн), запись обезличенной истории
@@ -153,13 +153,13 @@ sequenceDiagram
 | Векторная БД | **Qdrant** | pgvector (проще, но Qdrant быстрее и с лучшей фильтрацией); Chroma (отлично для прототипа, слабее в проде). Подробно — [`03_rag_design.md`](03_rag_design.md). |
 | Реляционная БД | **PostgreSQL 16** | MySQL/SQLite (Postgres — золотой стандарт, JSONB, надёжность). |
 | Эмбеддинги | **локальная multilingual-e5-large** | OpenAI/облачные эмбеддинги (НЕЛЬЗЯ — данные не должны утекать). |
-| LLM | **X5 CoPilot (large → medium → small fallback)** | другие облачные LLM (нет корпоративного доступа; способ подключения уже известен из `hh_analyser`). |
+| LLM | **DeepSeek (`deepseek-v4-flash` → `deepseek-v4-pro` → `deepseek-v4-flash`)** | OpenRouter/Groq и другие OpenAI-совместимые провайдеры; интерфейс клиента позволяет заменить провайдера. |
 | Аутентификация | **Go: JWT + Argon2id** (рекоменд.) | Keycloak/Authentik (мощно, но тяжело для 1 недели и роли «учебный Go»). См. [`09_security_privacy.md`](09_security_privacy.md). |
 | Экспорт документов | **Go-библиотеки docx + PDF** | генерация на фронте (хуже контроль над форматом и стилем). |
 | Деплой | **Docker Compose** | k8s (избыточно для локального MVP). |
 
 ### Как это связано с референс-проектом `hh_analyser`
-Из `hh_analyser` мы **переиспользуем проверенный паттерн подключения к LLM** (см. [`03_rag_design.md`](03_rag_design.md) §LLM): OpenAI-совместимый клиент, `base_url`, Bearer-ключ, **корпоративный CA-bundle** (`LLM_CA_BUNDLE`), абстрактный интерфейс клиента, ретраи. В `hh_analyser` это реализовано на Python; у нас аналогичную логику с fallback реализует Go-Gateway (а при необходимости — RAG-сервис на Python, копируя готовый паттерн).
+Из `hh_analyser` мы **переиспользуем проверенный паттерн подключения к LLM** (см. [`03_rag_design.md`](03_rag_design.md) §LLM): OpenAI-совместимый клиент, `base_url`, Bearer-ключ, абстрактный интерфейс клиента и ретраи. `LLM_CA_BUNDLE` опционален для корпоративного прокси; TLS-верификация всегда включена. В `hh_analyser` это реализовано на Python; у нас аналогичную логику с fallback реализует Go-Gateway (а при необходимости — RAG-сервис на Python, копируя готовый паттерн).
 
 ---
 
@@ -214,10 +214,10 @@ flowchart TB
     rag --> emb
     rag --> qd
     gw --> pg
-    gw -->|внешний выход| ext[X5 CoPilot LLM]
+    gw -->|внешний выход| ext[DeepSeek LLM]
 ```
 
-**Сервисы compose:** `frontend`, `gateway` (Go), `rag` (Python), `embeddings` (может быть частью `rag`), `postgres`, `qdrant`. Плюс one-shot контейнеры миграций и первичного ingestion корпуса. Секреты и CA-bundle монтируются через `.env` и volume (как в `hh_analyser`: `LLM_CA_BUNDLE=/app/certs/...`).
+**Сервисы compose:** `frontend`, `gateway` (Go), `rag` (Python), `embeddings` (может быть частью `rag`), `postgres`, `qdrant`. Плюс one-shot контейнеры миграций и первичного ingestion корпуса. Секреты задаются через `.env`; `LLM_CA_BUNDLE` оставляют пустым по умолчанию и указывают только для корпоративного прокси.
 
 ---
 

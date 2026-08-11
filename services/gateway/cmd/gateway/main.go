@@ -4,7 +4,7 @@
 //   - API-Gateway: "front door" for all frontend requests.
 //   - Anonymization gate: strips PII before anything is stored / sent to the LLM.
 //   - Export service: builds Word/PDF documents.
-//   - Orchestration: coordinates RAG (Python) and the X5 CoPilot LLM with fallback.
+//   - Orchestration: coordinates RAG (Python) and the OpenAI-compatible LLM with fallback.
 //
 // Этап 10: wiring admin deps (AdminRepository, AdminRAG) for document upload.
 package main

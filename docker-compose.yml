@@ -4,7 +4,7 @@
 # Топология соответствует docs/02_system_architecture.md §7:
 #   frontend (:5173) → gateway (Go, :8080) → rag (Python, :8000) → qdrant (:6333)
 #   gateway → postgres (:5432)
-#   gateway → X5 CoPilot LLM (внешний выход)
+#   gateway → внешний OpenAI-совместимый LLM (DeepSeek / …)
 #
 # Сервис `embeddings` (docs/02 §7) на каркасе НЕ выделен в отдельный контейнер:
 # по архитектуре он «может быть частью rag» — локальная модель e5 поднимется
@@ -81,18 +81,19 @@ services:
       CHUNK_MAX_CHARS: ${CHUNK_MAX_CHARS:-1200}
       CHUNK_OVERLAP_CHARS: ${CHUNK_OVERLAP_CHARS:-150}
       RAG_PORT: "8000"
-      # LLM X5 CoPilot — генерация дневников (Этап 4, docs/03 §9–10).
-      # Клиент с автофолбэком моделей живёт в RAG-сервисе. Ключ только из ENV.
-      X5_BASE_URL: ${X5_BASE_URL:-https://api-copilot.x5.ru/aigw/v1/}
-      X5_API_KEY: ${X5_API_KEY:-}
-      LLM_CA_BUNDLE: ${LLM_CA_BUNDLE:-/app/certs/x5_root_ca.pem}
-      LLM_MODEL_LARGE: ${LLM_MODEL_LARGE:-x5-airun-large}
-      LLM_MODEL_MEDIUM: ${LLM_MODEL_MEDIUM:-x5-airun-medium}
-      LLM_MODEL_SMALL: ${LLM_MODEL_SMALL:-x5-airun-small}
+      # LLM (OpenAI-совместимый) — генерация дневников (Этап 4, docs/03 §9–10).
+      # Дефолт: DeepSeek. Ключ только из ENV.
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_CA_BUNDLE: ${LLM_CA_BUNDLE:-}
+      LLM_MODEL_LARGE: ${LLM_MODEL_LARGE:-deepseek-v4-flash}
+      LLM_MODEL_MEDIUM: ${LLM_MODEL_MEDIUM:-deepseek-v4-pro}
+      LLM_MODEL_SMALL: ${LLM_MODEL_SMALL:-}
       LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-60}
       LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.4}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-2048}
+      LLM_THINKING: ${LLM_THINKING:-disabled}
       RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K:-5}
     ports:
       - "${RAG_HOST_PORT:-8001}:8000"
@@ -102,9 +103,9 @@ services:
       - ./Документы:/data/corpus:ro
       # Кэш HF-моделей e5 — чтобы не качать модель при каждом запуске ingestion.
       - rag_hf_cache:/app/.cache/huggingface
-      # Корпоративный CA-bundle X5 для реальной генерации (docs/03 §9.2).
-      # Положите PEM в ./deploy/certs/ (вне git) и раскомментируйте строку ниже:
-      - ./deploy/certs/x5_root_ca.pem:/app/certs/x5_root_ca.pem:ro
+      # Опционально: кастомный CA-bundle для корпоративного прокси
+      # (LLM_CA_BUNDLE=/app/certs/custom_ca.pem):
+      # - ./deploy/certs/custom_ca.pem:/app/certs/custom_ca.pem:ro
     depends_on:
       qdrant:
         condition: service_started
@@ -131,13 +132,14 @@ services:
       ACCESS_TOKEN_TTL_S: ${ACCESS_TOKEN_TTL_S:-900}
       REFRESH_TOKEN_TTL_S: ${REFRESH_TOKEN_TTL_S:-2592000}
       CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-http://localhost:5174}
-      # LLM (X5 CoPilot) — docs/03 §9. На каркасе вызовы не выполняются.
-      X5_BASE_URL: ${X5_BASE_URL:-https://api-copilot.x5.ru/aigw/v1/}
-      X5_API_KEY: ${X5_API_KEY:-}
-      LLM_CA_BUNDLE: ${LLM_CA_BUNDLE:-/app/certs/x5_root_ca.pem}
-      LLM_MODEL_LARGE: ${LLM_MODEL_LARGE:-x5-airun-large}
-      LLM_MODEL_MEDIUM: ${LLM_MODEL_MEDIUM:-x5-airun-medium}
-      LLM_MODEL_SMALL: ${LLM_MODEL_SMALL:-x5-airun-small}
+      # LLM (OpenAI-совместимый) — docs/03 §9. На каркасе вызовы не выполняются
+      # (генерация идёт через RAG). Те же ENV, что у rag, для единообразия.
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_CA_BUNDLE: ${LLM_CA_BUNDLE:-}
+      LLM_MODEL_LARGE: ${LLM_MODEL_LARGE:-deepseek-v4-flash}
+      LLM_MODEL_MEDIUM: ${LLM_MODEL_MEDIUM:-deepseek-v4-pro}
+      LLM_MODEL_SMALL: ${LLM_MODEL_SMALL:-}
     ports:
       - "${GATEWAY_HOST_PORT:-8081}:8080"
     depends_on:
@@ -145,10 +147,9 @@ services:
         condition: service_healthy
       rag:
         condition: service_started
-    # Корпоративный CA-bundle монтируется сюда (docs/03 §9.2). Файл — вне git.
-    # Раскомментировать, когда появится сертификат:
+    # Опционально: кастомный CA-bundle (docs/03 §9.2). Файл — вне git.
     # volumes:
-    #   - ./deploy/certs/x5_root_ca.pem:/app/certs/x5_root_ca.pem:ro
+    #   - ./deploy/certs/custom_ca.pem:/app/certs/custom_ca.pem:ro
     networks:
       - aimed-net
 

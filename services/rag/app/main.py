@@ -40,7 +40,7 @@ app = FastAPI(
     version="0.5.0",
     description=(
         "RAG-сервис: ingestion корпуса (CLI), retrieval из Qdrant, генерация "
-        "психиатрических дневников (LLM X5 с фолбэком), загрузка документов "
+        "психиатрических дневников (LLM с фолбэком), загрузка документов "
         "через admin UI (Этап 10). См. docs/03_rag_design.md."
     ),
 )
@@ -77,7 +77,7 @@ def health() -> dict:
     return {
         "status": "ok",
         "llm": {
-            "configured": bool(settings.x5_api_key),
+            "configured": bool(settings.llm_api_key),
             "models": models,
         },
         "supported_document_types": list(SUPPORTED_DOC_TYPES),
@@ -101,7 +101,7 @@ def generate(req: GenerateRequest) -> JSONResponse:
             logger.error("generate: ошибка авторизации LLM")
             return _error_response(
                 503, "LLM_AUTH_ERROR",
-                "Ошибка авторизации LLM (проверьте X5_API_KEY)")
+                "Ошибка авторизации LLM (проверьте LLM_API_KEY)")
         logger.error("generate: LLM недоступен (%s)", type(exc).__name__)
         return _error_response(503, "LLM_UNAVAILABLE",
                                "Сервис генерации временно недоступен")

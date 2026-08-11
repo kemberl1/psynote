@@ -25,7 +25,7 @@ from app.templates import DOC_TYPE_DAILY, DOC_TYPE_EXAM_10D
 
 
 def _settings() -> Settings:
-    return Settings(x5_api_key="test-key", retrieval_top_k=3)
+    return Settings(llm_api_key="test-key", retrieval_top_k=3)
 
 
 # ─── Фейки компонентов (без сети) ───────────────────────────────────────────
@@ -63,7 +63,7 @@ class FakeLLM:
         if self.raise_exc:
             raise self.raise_exc
         return LLMResult(content="СГЕНЕРИРОВАННЫЙ ДНЕВНИК [ДАТА]",
-                         model="x5-airun-large",
+                         model="deepseek-v4-flash",
                          usage={"total_tokens": 200})
 
 

@@ -44,7 +44,7 @@ PsyNote совмещает:
 
 - **Динамический опросник** — врач отвечает на структурированные вопросы вместо набора текста с нуля.
 - **RAG (Retrieval-Augmented Generation)** — перед генерацией находит в векторной базе похожие реальные записи из корпуса отделения, «подкладывая» LLM стиль и терминологию.
-- **Корпоративный LLM (X5 CoPilot)** — генерирует финальный текст дневника.
+- **Облачный OpenAI-совместимый LLM (DeepSeek)** — генерирует финальный текст дневника.
 - **Многоуровневую анонимизацию** — все персональные данные (ФИО, даты, адреса, названия учреждений) заменяются плейсхолдерами **до** попадания в LLM и векторную БД.
 
 > **Принцип:** персональные данные пациентов **никогда** не покидают локальный периметр в открытом виде.
@@ -87,8 +87,8 @@ PsyNote совмещает:
                                                           обезличенный текст
                                                                   ▼
                                                     ┌─────────────────────┐
-                                                    │  X5 CoPilot LLM    │
-                                                    │  (корпоративный)    │
+                                                    │  DeepSeek LLM  │
+                                                    │  (публичный API)    │
                                                     │  large→medium→small │
                                                     │  fallback           │
                                                     └─────────────────────┘
@@ -109,7 +109,7 @@ PsyNote совмещает:
 | **PostgreSQL** | PostgreSQL 16 | Пользователи, сессии, история запросов, метаданные документов (**без ПДн**) |
 | **Qdrant** | Qdrant v1.12 | Векторное хранилище чанков обезличённого корпуса |
 | **Embeddings** | `multilingual-e5-large` (sentence-transformers) | Локальные эмбеддинги — текст пациентов **не уходит** в облако |
-| **LLM** | X5 CoPilot API (OpenAI-совместимый) | Генерация текста дневника; автоматический фолбэк `large → medium → small` |
+| **LLM** | DeepSeek API (OpenAI-совместимый) | Генерация текста дневника; автоматический фолбэк `large → medium → small` |
 | **Оркестрация** | Docker Compose | Единый `docker compose up --build` для всего стека |
 
 ---
@@ -150,7 +150,9 @@ cp .env.example .env
 # Отредактируйте .env:
 #   — POSTGRES_PASSWORD (сильный пароль)
 #   — JWT_SECRET        (openssl rand -base64 48)
-#   — X5_API_KEY        (ключ корпоративного LLM; пусто = заглушка)
+#   — LLM_API_KEY       (ключ DeepSeek; пусто = заглушка)
+#   — LLM_BASE_URL=https://api.deepseek.com
+#   — LLM_CA_BUNDLE=    (необязательно: путь к PEM только для корпоративного прокси)
 ```
 
 ### Шаг 2 — Поднять весь стек
@@ -286,7 +288,7 @@ PsyNote/
 │   │   │   ├── config/              # Конфигурация из ENV
 │   │   │   ├── export/              # DOCX (gofpdf) + PDF-генерация
 │   │   │   ├── handlers/            # HTTP-хендлеры + middleware
-│   │   │   ├── llm/                 # LLM-клиент (X5 CoPilot)
+│   │   │   ├── llm/                 # OpenAI-совместимый LLM-клиент
 │   │   │   ├── ragclient/           # Клиент RAG-сервиса
 │   │   │   └── store/               # PostgreSQL (pgx v5)
 │   │   └── Dockerfile
@@ -298,7 +300,7 @@ PsyNote/
 │       │   ├── embeddings.py        # Локальные эмбеддинги e5-large
 │       │   ├── retrieval.py         # Векторный поиск в Qdrant
 │       │   ├── generation.py        # Сборка промптов (daily/exam_10d)
-│       │   ├── llm_client.py        # OpenAI SDK → X5 CoPilot + фолбэк
+│       │   ├── llm_client.py        # OpenAI SDK → DeepSeek + фолбэк
 │       │   ├── pipeline.py          # End-to-end: retrieval → prompt → LLM
 │       │   ├── ingest.py / ingestion.py  # Ingestion корпуса
 │       │   ├── anonymizer_client.py # Клиент gateway anonymize API
@@ -371,7 +373,7 @@ cd services/gateway && go test ./... -v
 | **Авторизация** | Middleware: обычный врач / администратор (role-based) | [`docs/09_security_privacy.md`](docs/09_security_privacy.md) |
 | **Секреты** | Хранятся в `.env` (НЕ в коде/репозитории); `.env` исключён из git | [`.gitignore`](.gitignore) |
 | **CORS** | Конфигурируемый origin (по умолчанию — localhost frontend) | [`.env.example`](.env.example) |
-| **LLM-выход** | В облако (X5 CoPilot) уходит **только обезличённый текст** | [`docs/04_anonymization.md`](docs/04_anonymization.md) §1 |
+| **LLM-выход** | В облако (Gemini) уходит **только обезличённый текст** | [`docs/04_anonymization.md`](docs/04_anonymization.md) §1 |
 
 ---
 

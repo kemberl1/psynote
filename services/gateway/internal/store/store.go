@@ -31,7 +31,7 @@ type GenerationRecord struct {
 	AnswersAnonymized map[string]any
 	// TitleSafe — безопасный заголовок истории (без ПДн).
 	TitleSafe string
-	// LLMModelUsed — какая модель X5 сгенерировала документ.
+	// LLMModelUsed — какая LLM-модель сгенерировала документ.
 	LLMModelUsed string
 	// Status — статус запроса (docs/05 §2.4), для MVP обычно "done".
 	Status string
