@@ -87,6 +87,13 @@ func normalizeNewlines(s string) string {
 	return strings.ReplaceAll(s, "\r", "\n")
 }
 
+// normalizeGeneratedLine strips lightweight markdown the LLM may wrap around
+// section labels (**Жалобы:** → Жалобы:). Without this, section lookup in
+// transformExam10d/transformDaily fails and Word export ends up nearly empty.
+func normalizeGeneratedLine(line string) string {
+	return strings.TrimSpace(strings.ReplaceAll(line, "**", ""))
+}
+
 // classifyLine maps one trimmed, non-empty line to a docLine.
 func classifyLine(line string) docLine {
 	upper := strings.ToUpper(line)
@@ -167,7 +174,7 @@ func parseDocLines(content string) []docLine {
 	norm := normalizeNewlines(content)
 	var out []docLine
 	for _, raw := range strings.Split(norm, "\n") {
-		line := strings.TrimSpace(raw)
+		line := normalizeGeneratedLine(raw)
 		if line == "" {
 			continue
 		}

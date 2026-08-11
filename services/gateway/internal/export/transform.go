@@ -170,7 +170,7 @@ func isAlreadyCompactDaily(content string) bool {
 func parseSections(content string) []section {
 	var out []section
 	for _, raw := range strings.Split(normalizeNewlines(content), "\n") {
-		line := strings.TrimSpace(raw)
+		line := normalizeGeneratedLine(raw)
 		if line == "" || isTemplateBoilerplate(line) {
 			continue
 		}
@@ -409,7 +409,7 @@ func stripRemainingPlaceholders(content string, subs map[string]string) string {
 	// Drop lines that still contain unfilled placeholders.
 	var kept []string
 	for _, raw := range strings.Split(normalizeNewlines(out), "\n") {
-		line := strings.TrimSpace(raw)
+		line := normalizeGeneratedLine(raw)
 		if line == "" {
 			continue
 		}

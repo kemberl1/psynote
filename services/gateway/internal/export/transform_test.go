@@ -66,6 +66,37 @@ func TestTransformDaily_SkipsEmptySections(t *testing.T) {
 	}
 }
 
+func TestTransformExam10d_MarkdownLabels(t *testing.T) {
+	doc := Document{
+		DocumentTypeCode: "exam_10d",
+		GeneratedAt:      time.Date(2026, 6, 26, 18, 53, 0, 0, time.UTC),
+		Content: "ИБ №[НОМЕР_ИБ]\n" +
+			"ОСМОТР лечащим врачом совместно с заведующим отделением\n" +
+			"[ДАТА] время: [ВРЕМЯ]\n\n" +
+			"**Жалобы:** Активно жалоб не предъявляет.\n" +
+			"**Психический статус:** Сознание не помрачено. Настроение сниженное.\n" +
+			"**Диагноз:**\n" +
+			"**Основное заболевание:** F50.0 Нервная анорексия.\n" +
+			"**Этапный эпикриз:**\n" +
+			"За прошедший период состояние с отрицательной динамикой.\n" +
+			"Лечащий врач: [ФИО_ВРАЧА]",
+		Substitutions: map[string]string{"[ФИО_ВРАЧА]": "Иванова И.И."},
+	}
+	out := transformContent(doc, doc.Substitutions)
+	if !strings.Contains(out, "Жалобы: Активно жалоб не предъявляет") {
+		t.Errorf("markdown labels not parsed, got: %q", out)
+	}
+	if !strings.Contains(out, "Психический статус:") {
+		t.Error("missing psychiatric section from markdown export")
+	}
+	if !strings.Contains(out, "F50.0") {
+		t.Error("missing diagnosis from markdown export")
+	}
+	if !strings.Contains(out, "отрицательной динамикой") {
+		t.Error("missing epicrisis body from markdown export")
+	}
+}
+
 func TestTransformExam10d_StructuredHeader(t *testing.T) {
 	doc := Document{
 		DocumentTypeCode: "exam_10d",
