@@ -256,6 +256,25 @@ docker volume rm <имя_volume_postgres>
 
 Seed после чистого volume: `admin@aimed.local` / `admin123456`.
 
+### Логин 401 / register INTERNAL (нет таблиц / нет админа)
+
+Coolify раньше мог поднять Postgres **без** SQL из `deploy/initdb`. Накати схему вручную (приложение Running):
+
+```bash
+PG=$(docker ps --format '{{.Names}}' | grep postgres | head -1)
+echo "postgres container: $PG"
+
+for f in 01_schema.sql 02_seed.sql 03_migration_doctor_nullable.sql 04_auth_session_index.sql 05_admin_role.sql; do
+  echo "=== $f ==="
+  curl -fsSL "https://raw.githubusercontent.com/kemberl1/psynote/main/deploy/initdb/$f" \
+    | docker exec -i "$PG" psql -U aimed -d aimed
+done
+
+docker exec -i "$PG" psql -U aimed -d aimed -c "SELECT email, role FROM doctor;"
+```
+
+Потом логин: `admin@aimed.local` / `admin123456`.
+
 ---
 
 ## Безопасность (минимум)

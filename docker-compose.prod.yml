@@ -19,7 +19,9 @@ name: ai-med
 
 services:
   postgres:
-    image: postgres:16-alpine
+    build:
+      context: ./deploy
+      dockerfile: postgres/Dockerfile
     container_name: aimed-postgres
     restart: unless-stopped
     environment:
@@ -27,8 +29,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-aimed}
     volumes:
+      # init SQL зашиты в образ (deploy/postgres/Dockerfile) — bind-mount
+      # ./deploy/initdb на Coolify часто пустой, из-за этого нет seed-админа.
       - postgres_data:/var/lib/postgresql/data
-      - ./deploy/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aimed} -d ${POSTGRES_DB:-aimed}"]
       interval: 10s
