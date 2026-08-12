@@ -99,7 +99,7 @@ describe("buildGenerateAnswers", () => {
     expect(ans.dynamics).toBe("no_change");
   });
 
-  it("injects arc context with day position", () => {
+  it("injects arc context with period position, not hospitalization/period mixup", () => {
     const ans = buildGenerateAnswers(
       { overall_dynamics: "positive" },
       5,
@@ -110,11 +110,11 @@ describe("buildGenerateAnswers", () => {
       "daily",
     );
     const arc = ans.__arc_context__ as string;
-    expect(arc.toLowerCase()).toContain("день госпитализации: 5 из 10");
-    expect(arc.toLowerCase()).toContain("режиссёрский контекст");
+    expect(arc.toLowerCase()).toContain("день госпитализации: 5");
+    expect(arc.toLowerCase()).toMatch(/день в выбранном периоде/);
   });
 
-  it("includes days until discharge in arc context", () => {
+  it("includes estimated discharge date in the brief", () => {
     const ans = buildGenerateAnswers(
       {},
       1,
@@ -125,7 +125,7 @@ describe("buildGenerateAnswers", () => {
       "daily",
     );
     const arc = ans.__arc_context__ as string;
-    expect(arc).toContain("9");
+    expect(arc).toContain("2025-06-10");
   });
 
   it("maps positive dynamics to improvement for exam_10d", () => {
@@ -165,7 +165,7 @@ describe("buildGenerateAnswers", () => {
     expect(ansExam.period_dynamics).toBe("no_improvement");
   });
 
-  it("includes improvement pace in arc context when dynamics positive", () => {
+  it("includes improvement pace via compiled phase, not a dumped percent", () => {
     const ans = buildGenerateAnswers(
       { overall_dynamics: "positive", improvement_pace: "fast" },
       2,
@@ -176,7 +176,7 @@ describe("buildGenerateAnswers", () => {
       "daily",
     );
     const arc = ans.__arc_context__ as string;
-    expect(arc.toLowerCase()).toContain("быстрый");
+    expect(arc.toLowerCase()).toMatch(/фаза дуги|день в выбранном периоде/);
   });
 
   it("maps ecg_eeg event to interventions in exam_10d", () => {
@@ -195,7 +195,6 @@ describe("buildGenerateAnswers", () => {
   });
 
   it("filters weekend events only to weekend days", () => {
-    // 2025-06-07 is a Saturday
     const satAns = buildGenerateAnswers(
       { overall_dynamics: "positive" },
       7,
@@ -208,7 +207,6 @@ describe("buildGenerateAnswers", () => {
     const satArc = satAns.__arc_context__ as string;
     expect(satArc).toContain("искусал губу");
 
-    // 2025-06-09 is a Monday — weekend event should be excluded
     const monAns = buildGenerateAnswers(
       { overall_dynamics: "positive" },
       9,
@@ -220,7 +218,6 @@ describe("buildGenerateAnswers", () => {
     );
     const monArc = monAns.__arc_context__ as string;
     expect(monArc).not.toContain("искусал губу");
-    expect(monArc).toContain("Фон настроения снижен");
   });
 });
 

@@ -13,6 +13,7 @@ import {
   buildGenerateAnswers,
   validateBatchDates,
 } from "../lib/batchDiary";
+import { compileArc } from "../lib/arcCompiler";
 import { BATCH_QUESTIONNAIRE } from "../lib/batchQuestionnaire";
 import { startBatchGeneration } from "../lib/generationRunner";
 import type { EditDiaryState } from "../lib/historyTitles";
@@ -126,7 +127,13 @@ export function BatchDiaryPage() {
 
     const payload = prepareAnswers(schema, answers, visible);
     const totalDays = planPreview.days.length;
-    const days = planPreview.days.map((plan) => ({
+    const briefs = compileArc({
+      days: planPreview.days,
+      directorContext,
+      batchAnswers: payload,
+      estimatedDischargeDate,
+    });
+    const days = planPreview.days.map((plan, i) => ({
       dayNumber: plan.dayNumber,
       isoDate: plan.isoDate,
       documentType: plan.documentType,
@@ -138,6 +145,7 @@ export function BatchDiaryPage() {
         directorContext,
         estimatedDischargeDate,
         plan.documentType,
+        briefs[i],
       ),
     }));
 

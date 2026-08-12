@@ -3,6 +3,11 @@
 // Режиссёрский контекст передаётся как __arc_context__ — специальное поле,
 // которое RAG-сервис инжектирует в системный промпт, а НЕ в текст дневника.
 import type { Answers } from "../api/types";
+import {
+  applyBriefToAnswers,
+  compileArc,
+  type DayBrief,
+} from "./arcCompiler";
 
 export type BatchDocType = "daily" | "exam_10d";
 
@@ -162,16 +167,6 @@ function mapDynamicsToExam(dynamics: unknown): string {
     case "negative": return "no_improvement";
     default: return "no_change";
   }
-}
-
-/** Количество дней между двумя ISO-датами (отрицательное = в прошлом). */
-function daysBetweenIso(fromIso: string, toIso: string): number | null {
-  const from = parseLocalDate(fromIso);
-  const to = parseLocalDate(toIso);
-  if (!from || !to) return null;
-  const a = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate());
-  const b = Date.UTC(to.getFullYear(), to.getMonth(), to.getDate());
-  return Math.floor((b - a) / 86_400_000);
 }
 
 /** Человекочитаемое описание notable_events для событийного поля. */
@@ -362,101 +357,57 @@ export function buildGenerateAnswers(
   directorContext: string,
   estimatedDischargeDate: string,
   docType: BatchDocType,
+  brief?: DayBrief,
 ): Answers {
+  void totalDays;
   const overallDynamics = batchAnswers.overall_dynamics;
-  const admissionSeverity = batchAnswers.admission_severity ?? "moderate";
-  const improvementPace = batchAnswers.improvement_pace;
-  const finalState = batchAnswers.final_state;
-  const keyMedications = batchAnswers.key_medications;
   const notableEvents = batchAnswers.notable_events;
+  const keyMedications = batchAnswers.key_medications;
 
-  // ── Нарративная дуга (arc context) ──────────────────────────────────────────
-  // Это метаданные для LLM-понимания, не для вставки в дневник.
-  const arcParts: string[] = [];
+  const resolvedBrief =
+    brief ??
+    compileArc({
+      days: [
+        {
+          isoDate,
+          dayNumber,
+          documentType: docType,
+        },
+      ],
+      directorContext,
+      batchAnswers,
+      estimatedDischargeDate,
+    })[0];
 
-  const pct = Math.round((dayNumber / totalDays) * 100);
-  arcParts.push(`День госпитализации: ${dayNumber} из ${totalDays} (${pct}% периода пройдено).`);
-
-  if (estimatedDischargeDate) {
-    const daysLeft = daysBetweenIso(isoDate, estimatedDischargeDate);
-    if (daysLeft !== null && daysLeft >= 0) {
-      arcParts.push(`До ориентировочной выписки: ${daysLeft} дн.`);
-    }
-  }
-
-  const severityLabel: Record<string, string> = {
-    mild: "лёгкая",
-    moderate: "средняя",
-    severe: "тяжёлая",
-  };
-  arcParts.push(
-    `Тяжесть при поступлении: ${severityLabel[String(admissionSeverity)] ?? String(admissionSeverity)}.`,
-  );
-
-  if (overallDynamics === "positive" && improvementPace) {
-    const paceLabel: Record<string, string> = {
-      fast: "быстрый (улучшение с первых дней)",
-      moderate: "умеренный (постепенное улучшение)",
-      slow: "медленный (старт медленный, ускорение к концу)",
-    };
-    arcParts.push(
-      `Темп улучшения: ${paceLabel[String(improvementPace)] ?? String(improvementPace)}.`,
-    );
-  }
-
-  if (typeof finalState === "string" && finalState.trim()) {
-    arcParts.push(`Целевое состояние к последнему дню: ${finalState.trim()}.`);
-  }
-
-  // Фильтруем режиссёрский контекст: событийные предложения — только для
-  // соответствующего дня, фоновые — для всех дней.
-  const parsedDate = parseLocalDate(isoDate);
-  const filteredContext = parsedDate
-    ? filterDirectorContextForDay(directorContext, parsedDate, dayNumber, totalDays)
-    : directorContext.trim();
-
-  if (filteredContext) {
-    arcParts.push(`Режиссёрская установка: ${filteredContext}`);
-  }
-
-  // ── Клиническая информация (для events_detail) ────────────────────────────
-  const clinicalParts: string[] = [];
-
-  const eventsDesc = describeNotableEvents(notableEvents);
-  if (eventsDesc) {
-    clinicalParts.push(`В данный период: ${eventsDesc}.`);
-  }
-  if (typeof keyMedications === "string" && keyMedications.trim()) {
-    clinicalParts.push(`Терапия: ${keyMedications.trim()}.`);
-  }
-
-  // ── Базовые ответы (для daily-шаблона) ───────────────────────────────────
   const base: Answers = {
     dynamics: mapDynamicsToDaily(overallDynamics),
     productive_symptoms: "not_detected",
     mood: "even",
     behavior: "ordered",
-    contact: ["productive", "polite_staff"],
+    contact: ["does_not_disclose"],
     sleep: "not_disturbed",
     appetite: "preserved",
     tolerance: "good",
     complaints: "none",
   };
 
-  // Диагноз прокидываем только для exam_10d (там есть freetext-поле «diagnosis»).
-  const diagnosisValue = batchAnswers.diagnosis;
-  const diagnosisStr =
-    typeof diagnosisValue === "string" ? diagnosisValue.trim() : "";
+  const withBrief = resolvedBrief
+    ? applyBriefToAnswers(base, resolvedBrief, batchAnswers, estimatedDischargeDate)
+    : base;
 
-  if (clinicalParts.length > 0) {
-    base.events = ["therapy_correction"];
-    base.events_detail = clinicalParts.join(" ");
+  const clinicalParts: string[] = [];
+  if (resolvedBrief?.therapyToday) {
+    clinicalParts.push(resolvedBrief.therapyToday);
+  } else if (docType === "exam_10d") {
+    const eventsDesc = describeNotableEvents(notableEvents);
+    if (eventsDesc) clinicalParts.push(`В данный период: ${eventsDesc}.`);
+    if (typeof keyMedications === "string" && keyMedications.trim()) {
+      clinicalParts.push(`Терапия: ${keyMedications.trim()}.`);
+    }
   }
-
-  // Режиссёрский контекст + позиция → специальное поле для RAG-сервиса.
-  // Это НЕ попадёт в текст дневника — RAG инжектирует его в системный промпт.
-  if (arcParts.length > 0) {
-    base.__arc_context__ = arcParts.join(" ");
+  if (clinicalParts.length > 0) {
+    withBrief.events = ["therapy_correction"];
+    withBrief.events_detail = clinicalParts.join(" ");
   }
 
   if (docType === "exam_10d") {
@@ -473,15 +424,23 @@ export function buildGenerateAnswers(
       }
     }
 
+    const diagnosisValue = batchAnswers.diagnosis;
+    const diagnosisStr =
+      typeof diagnosisValue === "string" ? diagnosisValue.trim() : "";
+
     return {
-      ...base,
+      ...withBrief,
       anamnesis_disease: "no_additions",
       physical_status: "unremarkable",
       neuro_status: "no_acute",
       criticism: "formal",
       thinking: "no_gross",
       attention_memory: "no_gross",
-      intellect: "age_norm",
+      intellect: /F71|F72|умеренн\w* умственн|выраженн\w* умственн/i.test(diagnosisStr)
+        ? "reduced"
+        : /F70|лёгк\w* УО|легк\w* УО/i.test(diagnosisStr)
+          ? "mild_id"
+          : "age_norm",
       suicidal: "not_detected",
       syndrome: batchAnswers.leading_syndrome ?? "anxious",
       comorbidities: ["none"],
@@ -492,5 +451,5 @@ export function buildGenerateAnswers(
     };
   }
 
-  return base;
+  return withBrief;
 }

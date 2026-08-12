@@ -193,6 +193,9 @@ class DiaryGenerator:
             if doc_type == DOC_TYPE_DAILY
             else self._settings.llm_temperature_exam10d
         )
+        # Пакетный бриф: не даём температуре упасть до «канцелярита» из .env=0.4.
+        if doc_type == DOC_TYPE_DAILY and mapped.director_note:
+            temp = max(temp, 0.7)
         result: LLMResult = self._get_llm().generate(messages, temperature=temp)
 
         logger.info("generate: doc_type=%s, модель=%s, образцов=%d, токенов=%s",

@@ -211,6 +211,23 @@ def test_build_messages_daily_has_template_and_samples() -> None:
     assert "ОТВЕТЫ ОПРОСНИКА" in user
 
 
+def test_build_messages_daily_includes_day_brief() -> None:
+    mapped = map_answers(DOC_TYPE_DAILY, {
+        "mood": "unstable",
+        "__arc_context__": (
+            "День в выбранном периоде: 1 из 12.\n"
+            "СЕГОДНЯ опиши через наблюдения врача ТОЛЬКО это:\n"
+            "• стаскивает простыни"
+        ),
+    })
+    msgs = build_messages(DOC_TYPE_DAILY, mapped, [])
+    system = next(m.content for m in msgs if m.role == "system")
+    assert "БРИФ ЭТОГО ДНЯ" in system
+    assert "стаскивает простыни" in system
+    assert "СРЕЗ ДНЯ" in system
+    assert "ЕЖЕДНЕВНЫЙ" in system
+
+
 def test_build_messages_exam10d_has_epicrisis() -> None:
     """Промпт exam_10d отличается: есть этапный эпикриз и совместный осмотр."""
     mapped = map_answers(DOC_TYPE_EXAM_10D, {
