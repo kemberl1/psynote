@@ -99,6 +99,22 @@ describe("buildGenerateAnswers", () => {
     expect(ans.dynamics).toBe("no_change");
   });
 
+  it("passes diagnosis through to daily answers", () => {
+    const ans = buildGenerateAnswers(
+      { diagnosis: "F71.18 Умственная отсталость умеренная" },
+      3,
+      10,
+      "2025-06-03",
+      "",
+      "",
+      "daily",
+    );
+    expect(ans.diagnosis).toBe("F71.18 Умственная отсталость умеренная");
+    expect(String(ans.__arc_context__)).toMatch(/F71\.18/);
+    expect(ans.complaints).toBeUndefined();
+    expect(ans.contact).not.toContain("does_not_disclose");
+  });
+
   it("injects arc context with period position, not hospitalization/period mixup", () => {
     const ans = buildGenerateAnswers(
       { overall_dynamics: "positive" },

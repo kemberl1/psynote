@@ -48,6 +48,11 @@
   font-weight: 500;
 }
 
+.document strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
 /* Панель действий */
 .result__actions {
   display: flex;

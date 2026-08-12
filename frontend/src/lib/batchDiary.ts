@@ -384,11 +384,10 @@ export function buildGenerateAnswers(
     productive_symptoms: "not_detected",
     mood: "even",
     behavior: "ordered",
-    contact: ["does_not_disclose"],
+    contact: ["isolated"],
     sleep: "not_disturbed",
     appetite: "preserved",
     tolerance: "good",
-    complaints: "none",
   };
 
   const withBrief = resolvedBrief
@@ -410,6 +409,13 @@ export function buildGenerateAnswers(
     withBrief.events_detail = clinicalParts.join(" ");
   }
 
+  const diagnosisValue = batchAnswers.diagnosis;
+  const diagnosisStr =
+    typeof diagnosisValue === "string" ? diagnosisValue.trim() : "";
+  if (diagnosisStr) {
+    withBrief.diagnosis = diagnosisStr;
+  }
+
   if (docType === "exam_10d") {
     const interventions: string[] = [];
     if (Array.isArray(notableEvents)) {
@@ -424,13 +430,8 @@ export function buildGenerateAnswers(
       }
     }
 
-    const diagnosisValue = batchAnswers.diagnosis;
-    const diagnosisStr =
-      typeof diagnosisValue === "string" ? diagnosisValue.trim() : "";
-
     return {
       ...withBrief,
-      anamnesis_disease: "no_additions",
       physical_status: "unremarkable",
       neuro_status: "no_acute",
       criticism: "formal",

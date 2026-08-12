@@ -86,11 +86,99 @@ describe("compileArc", () => {
     expect(briefs[briefs.length - 1].mood).toBe("even");
   });
 
+  it("does not put sheet/shoe field acts on residual last days", () => {
+    const lastDaily = briefs.filter((b) => b.role !== "exam").slice(-2);
+    for (const b of lastDaily) {
+      expect(b.phase).toBe("residual");
+      expect(b.observations.join(" ")).not.toMatch(/простын|обув/i);
+      expect(b.forbidden.join(" ")).toMatch(/простын|обув/i);
+    }
+  });
+
+  it("marks Saturday/Sunday as weekend in the brief", () => {
+    const sat = briefs.find((b) => b.isoDate === "2026-08-01");
+    const sun = briefs.find((b) => b.isoDate === "2026-08-02");
+    expect(sat?.calendar).toBe("saturday");
+    expect(sun?.calendar).toBe("sunday");
+    const satAns = buildGenerateAnswers(
+      { overall_dynamics: "positive", diagnosis: "F71.18" },
+      sat!.dayNumber,
+      days.length,
+      sat!.isoDate,
+      DOCTOR_NARRATIVE,
+      "",
+      "daily",
+      sat,
+    );
+    expect(String(satAns.__arc_context__)).toMatch(/суббота|выходн/i);
+  });
+
+  it("locks the ICD diagnosis into every day brief", () => {
+    const withDx = compileArc({
+      days,
+      directorContext: DOCTOR_NARRATIVE,
+      batchAnswers: {
+        overall_dynamics: "positive",
+        diagnosis: "F71.18 Умственная отсталость умеренная",
+        final_state: "берет за руку",
+      },
+      estimatedDischargeDate: "",
+    });
+    const ans = buildGenerateAnswers(
+      { overall_dynamics: "positive", diagnosis: "F71.18 Умственная отсталость умеренная" },
+      withDx[0].dayNumber,
+      days.length,
+      withDx[0].isoDate,
+      DOCTOR_NARRATIVE,
+      "",
+      "daily",
+      withDx[0],
+    );
+    expect(ans.diagnosis).toMatch(/F71\.18/);
+    expect(String(ans.__arc_context__)).toMatch(/F71\.18/);
+    expect(String(ans.__arc_context__)).toMatch(/не подставляй другой код/i);
+  });
+
   it("does not hardcode polite productive contact", () => {
     for (const b of briefs) {
       expect(b.contact).not.toContain("polite_staff");
       expect(b.contact).not.toContain("productive");
     }
+  });
+
+  it("locks nonverbal speech so days cannot get verbal cliches", () => {
+    const withSpeech = compileArc({
+      days,
+      directorContext: DOCTOR_NARRATIVE + " Собственная речь представлена отдельными звукокомплексами.",
+      batchAnswers: {
+        overall_dynamics: "positive",
+        diagnosis: "F71.18 Умственная отсталость умеренная",
+        final_state: "берет за руку, ведет к двери. Речь — звукокомплексы.",
+      },
+      estimatedDischargeDate: "",
+    });
+    expect(withSpeech[0].speechLevel).toBe("sounds");
+    expect(withSpeech[0].contact).not.toContain("does_not_disclose");
+    const ans = buildGenerateAnswers(
+      {
+        overall_dynamics: "positive",
+        diagnosis: "F71.18 Умственная отсталость умеренная",
+        final_state: "берет за руку. Речь — звукокомплексы.",
+      },
+      withSpeech[0].dayNumber,
+      days.length,
+      withSpeech[0].isoDate,
+      DOCTOR_NARRATIVE + " звукокомплексами",
+      "",
+      "daily",
+      withSpeech[0],
+    );
+    const arc = String(ans.__arc_context__);
+    expect(arc).toMatch(/звукокомплекс/i);
+    expect(arc).toMatch(/ЗАПРЕЩЕНО/);
+    expect(arc).toMatch(/односложн/i);
+    expect(arc).toMatch(/без формулы «под наблюдением персонала»|не пиши.*под наблюдением/i);
+    expect(ans.complaints).toBeUndefined();
   });
 });
 

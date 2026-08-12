@@ -228,6 +228,22 @@ def test_build_messages_daily_includes_day_brief() -> None:
     assert "ЕЖЕДНЕВНЫЙ" in system
 
 
+def test_build_messages_daily_locks_diagnosis_and_plain_markup() -> None:
+    mapped = map_answers(DOC_TYPE_DAILY, {
+        "mood": "even",
+        "diagnosis": "F71.18 Умственная отсталость умеренная",
+    })
+    msgs = build_messages(DOC_TYPE_DAILY, mapped, [])
+    system = next(m.content for m in msgs if m.role == "system")
+    assert "F71.18" in "\n".join(mapped.prompt_lines)
+    assert "не выдумывай" in system.lower()
+    assert "Сознание" in system
+    assert "звукокомплекс" in system.lower()
+    assert "не противоречь" in system.lower() or "не противоречь" in system
+    assert "под наблюдением" in system.lower()
+    assert "вероятно" in system.lower()
+
+
 def test_build_messages_exam10d_has_epicrisis() -> None:
     """Промпт exam_10d отличается: есть этапный эпикриз и совместный осмотр."""
     mapped = map_answers(DOC_TYPE_EXAM_10D, {

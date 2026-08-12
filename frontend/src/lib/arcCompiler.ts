@@ -13,6 +13,9 @@ export interface ArcDayPlan {
 export type DayRole = "quiet" | "event" | "exam";
 export type DayPhase = "admission" | "field" | "titration" | "improving" | "residual";
 
+export type DayCalendar = "weekday" | "saturday" | "sunday" | "monday";
+export type SpeechLevel = "sounds" | "words" | "short_phrases" | "expanded" | "unknown";
+
 export interface DayBrief {
   isoDate: string;
   dayNumber: number;
@@ -21,6 +24,8 @@ export interface DayBrief {
   periodPct: number;
   role: DayRole;
   phase: DayPhase;
+  calendar: DayCalendar;
+  speechLevel: SpeechLevel;
   mood: string;
   moodDetail: string[];
   behavior: string;
@@ -156,6 +161,91 @@ function unique(items: string[]): string[] {
   return out;
 }
 
+/** Полевые акты (простыни, обувь, хаос) — только ранняя/средняя фаза, не финал. */
+export function isFieldAct(text: string): boolean {
+  return /простын|обув|хаотичн|возбужд|агресс|бьёт|бьет себя|царап|головой|растормож|суетлив|таска|обирает|стаскива|разбрасыв/.test(
+    text.toLowerCase(),
+  );
+}
+
+function calendarFor(iso: string): DayCalendar {
+  const date = parseIso(iso);
+  if (!date) return "weekday";
+  const dow = date.getDay();
+  if (dow === 6) return "saturday";
+  if (dow === 0) return "sunday";
+  if (dow === 1) return "monday";
+  return "weekday";
+}
+
+function diagnosisText(batchAnswers: Answers): string {
+  const raw = batchAnswers.diagnosis;
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+function intellectLock(diagnosis: string): string | null {
+  if (/F71|F72|умеренн\w* умственн|выраженн\w* умственн/i.test(diagnosis)) {
+    return (
+      "Интеллект — умственная отсталость умеренной (или выраженной) степени по диагнозу, " +
+      "словами полностью. Не пиши «лёгкую», не пиши аббревиатуру «УО», не подставляй F70/F91."
+    );
+  }
+  if (/F70|лёгк\w* умственн|легк\w* умственн/i.test(diagnosis)) {
+    return (
+      "Интеллект — умственная отсталость лёгкой степени по диагнозу, словами полностью. " +
+      "Не подставляй F71/F91 и не пиши аббревиатуру «УО»."
+    );
+  }
+  return null;
+}
+
+/** Уровень речи из эпикриза/диагноза — чтобы не приписывать словесные акты неговорящему. */
+export function inferSpeechLevel(
+  directorContext: string,
+  diagnosis: string,
+  finalState = "",
+): SpeechLevel {
+  const blob = `${directorContext} ${finalState} ${diagnosis}`.toLowerCase();
+  if (
+    /звукокомплекс|не говорит|безречев|невербальн|речь не сформир|отдельн\w* звук|собственная речь представлена/.test(
+      blob,
+    )
+  ) {
+    return "sounds";
+  }
+  if (/отдельн\w* слов|слова-предложен|лепетн/.test(blob)) return "words";
+  if (/короткие фраз|простые фраз|фразовая речь не/.test(blob)) return "short_phrases";
+  if (/развернут\w* предложен|фразовая речь сформир/.test(blob)) return "expanded";
+  if (/F72|выраженн\w* умственн/.test(diagnosis)) return "sounds";
+  return "unknown";
+}
+
+function speechLockLines(level: SpeechLevel): string[] {
+  const lines = [
+    "Речь и контакт должны быть согласованы: если ребёнок не говорит словами — не приписывай словесные ответы, жалобы, пререкания, повышение голоса, «не раскрывает переживания».",
+  ];
+  if (level === "sounds") {
+    lines.push(
+      "Речевой профиль ЭТОГО ребёнка: обращённую речь понимает на уровне простых инструкций (если так в наблюдениях); собственная речь — звукокомплексы/звуки, не слова.",
+    );
+    lines.push(
+      "ЗАПРЕЩЕНО сегодня: отвечает односложно, отвечает в плане заданного, переживаний не раскрывает, пререкается, спорит, повышает голос, предъявляет жалобы словами, продуктивный речевой контакт.",
+    );
+    lines.push(
+      "МОЖНО: вокализации, звуки, жесты, берёт за руку, плач, двигательный протест, не удерживает дистанцию, зрительный/тактильный контакт.",
+    );
+  } else if (level === "words") {
+    lines.push(
+      "Речевой профиль: отдельные слова, не развёрнутые предложения. Не пиши «развёрнуто рассказывает» и не пиши «не раскрывает переживания в полном объёме» как у говорящего подростка.",
+    );
+  } else if (level === "short_phrases") {
+    lines.push("Речевой профиль: короткие фразы. Не пиши развёрнутые предложения, если их нет в наблюдениях.");
+  } else if (level === "expanded") {
+    lines.push("Речевой профиль: доступна фразовая/развёрнутая речь — описывай её, не снижай до звукокомплексов.");
+  }
+  return lines;
+}
+
 function phaseFor(pct: number, dayNumber: number): DayPhase {
   if (dayNumber <= 3) return "admission";
   if (pct < 35) return "field";
@@ -206,18 +296,28 @@ function interpolateBehavior(phase: DayPhase, role: DayRole): string {
   return "ordered";
 }
 
-function interpolateContact(facts: ExtractedFacts, role: DayRole, phase: DayPhase): string[] {
+function interpolateContact(
+  facts: ExtractedFacts,
+  role: DayRole,
+  phase: DayPhase,
+  speech: SpeechLevel,
+): string[] {
+  const nonverbal = speech === "sounds" || speech === "words";
   const contact: string[] = [];
   const blob = [...facts.traits, ...facts.laterBehaviors].join(" ").toLowerCase();
   if (/не взаимодейств|обособлен/.test(blob)) contact.push("isolated");
-  if (/коррекци|замечан|каприз|плак/.test(blob) && role !== "quiet") {
+  if (
+    !nonverbal &&
+    /коррекци|замечан|каприз|плак/.test(blob) &&
+    role !== "quiet"
+  ) {
     contact.push("staff_remarks");
   }
   if (phase === "improving" || phase === "residual") {
     contact.push("calm_distance");
   }
-  if (contact.length === 0) contact.push("does_not_disclose");
-  return contact;
+  if (contact.length === 0) contact.push(nonverbal ? "isolated" : "calm_distance");
+  return contact.filter((c) => !(nonverbal && (c === "does_not_disclose" || c === "productive")));
 }
 
 function pickRotated(pool: string[], index: number, count: number): string[] {
@@ -276,6 +376,10 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
   const n = days.length;
   const facts = extractFacts(directorContext);
   const dynamics = batchAnswers.overall_dynamics;
+  const diagnosis = diagnosisText(batchAnswers);
+  const finalState =
+    typeof batchAnswers.final_state === "string" ? batchAnswers.final_state : "";
+  const speechLevel = inferSpeechLevel(directorContext, diagnosis, finalState);
   const examIndex = days.findIndex((d) => d.documentType === "exam_10d");
   const titrationIndex =
     examIndex >= 0 ? examIndex : Math.min(Math.floor(n * 0.4), Math.max(0, n - 1));
@@ -286,7 +390,7 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     const role = roleFor(day, index, n);
     const { mood, moodDetail } = interpolateMood(dynamics, phase);
     const behavior = interpolateBehavior(phase, role);
-    const contact = interpolateContact(facts, role, phase);
+    const contact = interpolateContact(facts, role, phase, speechLevel);
     const includeFinalState =
       role === "exam" || index >= n - 2;
     const therapyToday =
@@ -294,10 +398,21 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
         ? facts.therapy.join(" ") || null
         : null;
 
+    const fieldPool = facts.laterBehaviors.filter(isFieldAct);
+    const calmPool = facts.laterBehaviors.filter((s) => !isFieldAct(s));
     const obsCount = role === "quiet" ? 1 : role === "exam" ? 3 : 2;
     const observations: string[] = [];
-    if (phase === "admission") observations.push(...pickRotated(facts.early, index, 1));
-    observations.push(...pickRotated(facts.laterBehaviors, index, obsCount));
+    if (phase === "admission") {
+      observations.push(...pickRotated(facts.early, index, 1));
+      observations.push(...pickRotated(fieldPool, index, Math.max(1, obsCount - 1)));
+    } else if (phase === "field") {
+      observations.push(...pickRotated(fieldPool, index, obsCount));
+    } else if (phase === "titration") {
+      observations.push(...pickRotated(fieldPool, index + 2, 1));
+      observations.push(...pickRotated(calmPool, index, Math.max(1, obsCount - 1)));
+    } else {
+      observations.push(...pickRotated(calmPool, index, obsCount));
+    }
     if (role !== "quiet") {
       observations.push(...pickRotated(facts.traits, index, 1));
     } else {
@@ -311,6 +426,7 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     }
     observations.push(...timedForDay(directorContext, day, n));
 
+    const obsCap = role === "exam" ? 6 : role === "quiet" ? 2 : 3;
     return {
       isoDate: day.isoDate,
       dayNumber: day.dayNumber,
@@ -319,13 +435,15 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
       periodPct,
       role,
       phase,
+      calendar: calendarFor(day.isoDate),
+      speechLevel,
       mood,
       moodDetail,
       behavior,
       contact,
       sleep: "not_disturbed",
       appetite: "preserved",
-      observations: unique(observations).slice(0, role === "exam" ? 6 : 4),
+      observations: unique(observations).slice(0, obsCap),
       forbidden: [],
       therapyToday,
       includeFinalState,
@@ -345,6 +463,9 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     if (!briefs[i].therapyToday) extra.push(...facts.therapy);
     if (briefs[i].phase === "admission" || briefs[i].phase === "field") {
       extra.push(...facts.improvement, ...facts.residual);
+    }
+    if (briefs[i].phase === "improving" || briefs[i].phase === "residual") {
+      extra.push(...facts.laterBehaviors.filter(isFieldAct), ...facts.early);
     }
     briefs[i].forbidden = unique([...extra, ...others]).slice(0, 16);
   }
@@ -379,6 +500,40 @@ export function formatDayBrief(
     exam: "расширенный осмотр 10 дней — полный статус + этапный эпикриз периода",
   };
   lines.push(`Роль дня: ${roleLabel[brief.role]}.`);
+
+  const calendarLabel: Record<DayCalendar, string> = {
+    weekday: "будний день",
+    saturday: "суббота, выходной",
+    sunday: "воскресенье, выходной",
+    monday: "понедельник после выходных",
+  };
+  lines.push(`Календарь: ${calendarLabel[brief.calendar]}.`);
+  if (brief.calendar === "saturday" || brief.calendar === "sunday") {
+    lines.push(
+      "Выходной: короткий статус; детали дня — в «Дополнительные сведения». " +
+        "Не пиши построения/занятия как в будни. Визиты и прогулки — только если они в наблюдениях сегодня.",
+    );
+  } else if (brief.calendar === "monday") {
+    lines.push(
+      "Понедельник: в доп. сведениях можно кратко «за период выходных» — без выдуманных инцидентов и без формулы «под наблюдением персонала».",
+    );
+  }
+
+  const diagnosis = diagnosisText(batchAnswers);
+  if (diagnosis) {
+    lines.push(
+      `Диагноз основного заболевания пиши РОВНО: ${diagnosis}. ` +
+        "Не подставляй другой код МКБ (не F70 вместо F71, не F91, не выдуманный). " +
+        "Сопутствующие — «не выявлено» / «—», если врач их не указал.",
+    );
+    const intellect = intellectLock(diagnosis);
+    if (intellect) lines.push(intellect);
+  } else {
+    lines.push(
+      "Код МКБ не дан — в диагнозе плейсхолдер [ОСНОВНОЙ_ДИАГНОЗ], не выдумывай F-код.",
+    );
+  }
+  lines.push(...speechLockLines(brief.speechLevel));
 
   const syndrome = batchAnswers.leading_syndrome;
   if (typeof syndrome === "string" && syndrome) {
@@ -422,19 +577,19 @@ export function formatDayBrief(
 
   if (brief.lengthHint === "short") {
     lines.push(
-      "Длина как в корпусе сборника: один плотный абзац психического статуса (не шаблон-эпикриз). Соматика/неврология — коротко, без копипаста полного осмотра.",
+      "Тихий день: обычный объём ежедневного осмотра. Психический статус ВСЕГДА с сознания и ориентировки, дальше — 1–2 наблюдения за сегодня. Соматику и «жалоб не предъявляет» не пиши.",
     );
   } else if (brief.lengthHint === "medium") {
     lines.push(
-      "Ежедневная запись: конкретные наблюдения за сегодня + короткий соматический/неврологический блок. Не пересказывай весь период.",
+      "Событийный день: обычный объём ежедневного осмотра, статус с сознания и ориентировки, 2–3 наблюдения за сегодня. Соматику не пиши.",
     );
   } else {
     lines.push(
-      "Осмотр 10 дней: развёрнутый статус и этапный эпикриз динамики ЗА ПЕРИОД. Ежедневные мелочи не копируй дословно из других дней — обобщи дугу.",
+      "Осмотр 10 дней: развёрнутый статус в том же порядке (сознание → … → критика/опасные тенденции → психопродукция) и этапный эпикриз ЗА ПЕРИОД. Соматику в психический статус не тащи.",
     );
   }
   lines.push(
-    "Запрещено: одинаковые фразы с соседними днями; полный психический статус-копия финального абзаца врача во все дни; выдуманные прогулки/визиты.",
+    "Запрещено: одинаковые фразы с соседними днями; «вероятно»; аббревиатура «УО»; «под наблюдением/надзором персонала»; жалобы и «без дополнений» внутри статуса; выдуманные прогулки/визиты.",
   );
   return lines.join("\n");
 }
