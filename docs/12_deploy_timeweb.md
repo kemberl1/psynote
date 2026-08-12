@@ -85,24 +85,27 @@ curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash
 | Переменная | Пример / как получить |
 |---|---|
 | `POSTGRES_USER` | `aimed` |
-| `POSTGRES_PASSWORD` | длинный случайный пароль |
+| `POSTGRES_PASSWORD` | **только hex** (см. ниже) — без `/+=` |
 | `POSTGRES_DB` | `aimed` |
-| `JWT_SECRET` | `openssl rand -base64 48` (на любом Mac/Linux) |
+| `JWT_SECRET` | длинная случайная строка |
 | `LLM_API_KEY` | ключ с [platform.deepseek.com](https://platform.deepseek.com) |
 | `LLM_BASE_URL` | `https://api.deepseek.com` |
 | `LLM_MODEL_LARGE` | `deepseek-v4-flash` |
 | `LLM_MODEL_MEDIUM` | `deepseek-v4-pro` |
 | `LLM_THINKING` | `disabled` |
-| `CORS_ALLOWED_ORIGIN` | пока поставь `https://placeholder.local` — **заменишь** после первого URL |
+| `CORS_ALLOWED_ORIGIN` | пока `http://placeholder.local` — **заменишь** на реальный URL (без `/` в конце) |
 
 **Не коммить** эти значения в git. Только в Coolify.
 
-Сгенерировать пароли можно так (на своём Mac):
+Сгенерировать пароли (на своём Mac):
 
 ```bash
-openssl rand -base64 24   # для POSTGRES_PASSWORD
-openssl rand -base64 48   # для JWT_SECRET
+openssl rand -hex 24    # POSTGRES_PASSWORD (безопасно для DSN)
+openssl rand -hex 32    # JWT_SECRET
 ```
+
+> Смена `POSTGRES_PASSWORD` **после** первого деплоя не меняет пароль в уже созданном volume.
+> Нужно либо вернуть старый пароль, либо удалить postgres volume и задеплоить заново (см. «Типовые проблемы»).
 
 ---
 
@@ -228,11 +231,30 @@ docker compose -f docker-compose.prod.yml exec rag curl -fsS http://127.0.0.1:80
 | Симптом | Что проверить |
 |---|---|
 | Сайт не открывается | Порты 80/443 в файрволе Timeweb; статус Deploy в Coolify |
+| Логин → **404** или **503** | Это не «неверный пароль». Coolify → сервис **gateway** → **Logs** (не Deploy log). Ищи `postgres connect failed` / `login_enabled":false`. Чаще всего пароль БД не совпадает с volume (см. ниже) |
+| Логин → **401** | Инфраструктура ок; неверный email/пароль или нет seed-админа |
 | Логин есть, генерация падает | `LLM_API_KEY`, баланс DeepSeek, логи сервиса `rag` |
 | Пустые/странные дневники | Забыт ingestion; пустой `data/corpus` |
-| CORS / сеть в браузере | `CORS_ALLOWED_ORIGIN` точно равен URL из адресной строки |
+| CORS / сеть в браузере | `CORS_ALLOWED_ORIGIN` точно равен URL из адресной строки (схема `http`/`https` тоже) |
 | Не хватает памяти | VPS 8 GB минимум; смотри `dmesg` / OOM в логах |
 | Сборка rag вечность | Первый раз качает модели — подожди; кэш в volume `rag_hf_cache` |
+
+### Сброс Postgres volume (если логин 404/503 после смены пароля)
+
+На VPS по SSH:
+
+```bash
+# найти volume проекта
+docker volume ls | grep -i postgres
+
+# остановить стек в Coolify (Stop), затем:
+docker volume rm <имя_volume_postgres>
+
+# в Coolify: POSTGRES_PASSWORD = результат `openssl rand -hex 24`
+# Deploy заново — initdb + seed admin создадутся снова
+```
+
+Seed после чистого volume: `admin@aimed.local` / `admin123456`.
 
 ---
 

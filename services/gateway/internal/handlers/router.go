@@ -57,6 +57,8 @@ func NewRouter(cfg config.Config, deps Deps) http.Handler {
 	}
 
 	// ─── Аутентификация (docs/07 §2, docs/09 §1)
+	// Always register routes: missing JWT/DB must be 503, not Go mux 404
+	// (404 on /auth/login is confusing in Coolify when postgres failed to connect).
 	if deps.Tokens != nil && deps.Repo != nil {
 		ad := authDeps{repo: deps.Repo, tokens: deps.Tokens, params: auth.DefaultArgon2Params}
 		mux.HandleFunc("POST "+config.APIPrefix+"/auth/register", newRegisterHandler(ad))
@@ -64,6 +66,13 @@ func NewRouter(cfg config.Config, deps Deps) http.Handler {
 		mux.HandleFunc("POST "+config.APIPrefix+"/auth/refresh", newRefreshHandler(ad))
 		mux.HandleFunc("POST "+config.APIPrefix+"/auth/logout", newLogoutHandler(ad))
 		mux.HandleFunc("GET "+config.APIPrefix+"/auth/me", protect(newMeHandler(deps.Repo)))
+	} else {
+		unavail := newUnavailableHandler()
+		mux.HandleFunc("POST "+config.APIPrefix+"/auth/register", unavail)
+		mux.HandleFunc("POST "+config.APIPrefix+"/auth/login", unavail)
+		mux.HandleFunc("POST "+config.APIPrefix+"/auth/refresh", unavail)
+		mux.HandleFunc("POST "+config.APIPrefix+"/auth/logout", unavail)
+		mux.HandleFunc("GET "+config.APIPrefix+"/auth/me", unavail)
 	}
 
 	// ─── Справочники и схема опросника (docs/07 §3)

@@ -8,8 +8,11 @@
 package config
 
 import (
+	"fmt"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -71,7 +74,7 @@ type Config struct {
 func Load() Config {
 	return Config{
 		HTTPAddr:    getEnv("GATEWAY_HTTP_ADDR", ":8080"),
-		PostgresDSN: getEnv("POSTGRES_DSN", ""),
+		PostgresDSN: loadPostgresDSN(),
 		QdrantURL:   getEnv("QDRANT_URL", "http://qdrant:6333"),
 		// RAG_URL — предпочтительное имя (задание Этапа 5); RAG_BASE_URL —
 		// исторический алиас (каркас). Поддерживаем оба, RAG_URL выигрывает.
@@ -131,4 +134,31 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// loadPostgresDSN prefers an explicit POSTGRES_DSN, otherwise builds one from
+// discrete Coolify-friendly vars. Password is URL-encoded so base64 `/+` does
+// not break the connection string (common cause of "auth 404" in prod).
+func loadPostgresDSN() string {
+	if dsn := strings.TrimSpace(os.Getenv("POSTGRES_DSN")); dsn != "" && !strings.Contains(dsn, "${") {
+		return dsn
+	}
+	pass := os.Getenv("POSTGRES_PASSWORD")
+	if pass == "" {
+		return ""
+	}
+	user := getEnv("POSTGRES_USER", "aimed")
+	host := getEnv("POSTGRES_HOST", "postgres")
+	port := getEnv("POSTGRES_PORT", "5432")
+	db := getEnv("POSTGRES_DB", "aimed")
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(user, pass),
+		Host:   fmt.Sprintf("%s:%s", host, port),
+		Path:   "/" + db,
+	}
+	q := u.Query()
+	q.Set("sslmode", getEnv("POSTGRES_SSLMODE", "disable"))
+	u.RawQuery = q.Encode()
+	return u.String()
 }

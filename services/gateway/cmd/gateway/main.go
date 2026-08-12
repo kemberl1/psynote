@@ -58,14 +58,17 @@ func main() {
 		pr, derr := store.NewPgxRepository(dbCtx, cfg.PostgresDSN)
 		dbCancel()
 		if derr != nil {
-			slog.Error("postgres connect failed; history/generate disabled", "error_type", "store")
+			// Log the error type only (no DSN/password). Auth routes stay registered as 503.
+			slog.Error("postgres connect failed; auth/history/generate disabled",
+				"error_type", "store", "error", derr.Error())
 		} else {
 			pgRepo = pr
 			repo = pr
 			defer pr.Close()
+			slog.Info("postgres connected")
 		}
 	} else {
-		slog.Warn("POSTGRES_DSN empty; history/generate disabled")
+		slog.Warn("POSTGRES_DSN/PASSWORD empty; auth/history/generate disabled")
 	}
 
 	// Auth (Этап 9, docs/09): сервис JWT/refresh.
@@ -78,8 +81,12 @@ func main() {
 			tokens = ts
 		}
 	} else {
-		slog.Warn("JWT_SECRET empty; auth disabled (protected routes return 503)")
+		slog.Warn("JWT_SECRET empty; auth disabled (auth routes return 503)")
 	}
+	slog.Info("auth subsystem",
+		"jwt_ready", tokens != nil,
+		"postgres_ready", repo != nil,
+		"login_enabled", tokens != nil && repo != nil)
 
 	// Admin deps (Этап 10): reuse PgxRepository for admin_document table,
 	// reuse the same RAG HTTP client (satisfies AdminIngestClient via IngestFile).

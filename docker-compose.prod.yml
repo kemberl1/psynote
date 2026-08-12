@@ -24,7 +24,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-aimed}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-aimed}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -69,7 +69,7 @@ services:
       CHUNK_OVERLAP_CHARS: ${CHUNK_OVERLAP_CHARS:-150}
       RAG_PORT: "8000"
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
-      LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY is required}
+      LLM_API_KEY: ${LLM_API_KEY}
       LLM_CA_BUNDLE: ${LLM_CA_BUNDLE:-}
       LLM_MODEL_LARGE: ${LLM_MODEL_LARGE:-deepseek-v4-flash}
       LLM_MODEL_MEDIUM: ${LLM_MODEL_MEDIUM:-deepseek-v4-pro}
@@ -100,16 +100,23 @@ services:
     restart: unless-stopped
     environment:
       GATEWAY_HTTP_ADDR: ":8080"
-      POSTGRES_DSN: "postgres://${POSTGRES_USER:-aimed}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aimed}?sslmode=disable"
+      # Discrete PG vars (gateway builds URL-encoded DSN). Avoids Coolify/base64
+      # password breakage in postgres://user:pass@host strings.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-aimed}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-aimed}
+      POSTGRES_SSLMODE: disable
       QDRANT_URL: http://qdrant:6333
       RAG_URL: http://rag:8000
       RAG_GENERATE_TIMEOUT_S: ${RAG_GENERATE_TIMEOUT_S:-120}
       RAG_HEALTH_TIMEOUT_S: ${RAG_HEALTH_TIMEOUT_S:-5}
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_SECRET: ${JWT_SECRET}
       ACCESS_TOKEN_TTL_S: ${ACCESS_TOKEN_TTL_S:-900}
       REFRESH_TOKEN_TTL_S: ${REFRESH_TOKEN_TTL_S:-2592000}
-      # Публичный HTTPS URL сайта (Coolify / домен). Без слэша в конце.
-      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:?CORS_ALLOWED_ORIGIN is required}
+      # Публичный URL сайта (Coolify / домен). Без слэша в конце.
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_CA_BUNDLE: ${LLM_CA_BUNDLE:-}
