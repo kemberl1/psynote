@@ -128,21 +128,20 @@ def test_pii_blocked_raises() -> None:
 def test_retrieval_filters_passed() -> None:
     """В retrieve передаются doc_type и метаданные (syndrome/diagnosis_class).
 
-    Этап 7: syndrome теперь coded select — врач выбирает код (anxiety_depressive),
-    который маппится в метку корпуса для фильтра retrieval (единые коды, docs/06).
+    Этап 7: syndrome — coded select (anxious → «тревожный» для retrieval).
     """
     retrieve = _fake_retrieve(
-        [{"text": "образец", "syndrome": "тревожно-депрессивный"}])
+        [{"text": "образец", "syndrome": "тревожный"}])
     gen = DiaryGenerator(_settings(), anonymizer=FakeAnonymizer(), llm=FakeLLM(),
                          retrieve_fn=retrieve)
     answers = {
-        "syndrome": "anxiety_depressive",
+        "syndrome": "anxious",
         "diagnosis": "F41.2 смешанное тревожное расстройство",
     }
     res = gen.generate(DOC_TYPE_EXAM_10D, answers)
     call = retrieve.calls[0]
     assert call["doc_type"] == DOC_TYPE_EXAM_10D
-    assert call["syndrome"] == "тревожно-депрессивный"
+    assert call["syndrome"] == "тревожный"
     assert call["diagnosis_class"] == "F4x"
     assert call["top_k"] == 3
     assert res.chunks_used == 1
@@ -314,9 +313,9 @@ def test_map_exam_psych_status_and_syndrome_select() -> None:
         "attention_memory": "reduced",
         "intellect": "low_norm",
         "criticism": "conciliatory",
-        "syndrome": "anxiety_depressive",
+        "syndrome": "anxious",
         "comorbidities": ["r51"],
-        "interventions": ["psychologist", "eeg"],
+        "interventions": ["eeg", "lab"],
     })
     joined = " ".join(mapped.prompt_lines)
     assert "Мышление конкретное" in joined
@@ -324,9 +323,8 @@ def test_map_exam_psych_status_and_syndrome_select() -> None:
     assert "низкой возрастной нормы" in joined
     assert "соглашательская" in joined
     assert "R51" in joined
-    assert "консультация психолога" in joined and "ЭЭГ" in joined
-    # syndrome-код смаппился в метку корпуса для фильтра.
-    assert mapped.syndrome == "тревожно-депрессивный"
+    assert "ЭЭГ" in joined and "лабораторное обследование" in joined
+    assert mapped.syndrome == "тревожный"
 
 
 def test_map_exam_discharge_freetext() -> None:

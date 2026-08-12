@@ -153,6 +153,20 @@ ls data/corpus | head
 
 В compose переменная `CORPUS_HOST_PATH` по умолчанию `./data/corpus`.
 
+После копирования с Mac папки часто приходят с правами `drwx------` — контейнер `rag` (не root) их не читает. Обязательно:
+
+```bash
+chmod -R a+rX /data/coolify/applications/<uuid>/data/corpus
+# проверка: должно быть тысячи файлов, не 15
+docker exec "$(docker ps --format '{{.Names}}' | grep rag | head -1)" find /data/corpus -type f | wc -l
+```
+
+Ingest на Coolify (compose-файла в applications/ может не быть):
+
+```bash
+docker exec -it "$(docker ps --format '{{.Names}}' | grep rag | head -1)" python -m app.ingest ingest
+```
+
 ---
 
 ## Шаг F — первый деплой

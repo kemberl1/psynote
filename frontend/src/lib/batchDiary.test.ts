@@ -81,7 +81,7 @@ describe("buildBatchPlan", () => {
 describe("buildGenerateAnswers", () => {
   it("includes exam defaults for exam_10d", () => {
     const ans = buildGenerateAnswers(
-      { overall_dynamics: "positive", leading_syndrome: "anxiety_depressive" },
+      { overall_dynamics: "positive", leading_syndrome: "anxious" },
       10,
       10,
       "2025-06-10",
@@ -90,7 +90,7 @@ describe("buildGenerateAnswers", () => {
       "exam_10d",
     );
     expect(ans.period_dynamics).toBe("improvement");
-    expect(ans.syndrome).toBe("anxiety_depressive");
+    expect(ans.syndrome).toBe("anxious");
   });
 
   it("omits exam fields for daily", () => {

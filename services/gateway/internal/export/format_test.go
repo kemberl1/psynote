@@ -60,7 +60,8 @@ func TestKnownSectionLabels(t *testing.T) {
 	for _, lbl := range []string{
 		"Жалобы", "Психический статус", "Соматический статус",
 		"Диагноз", "Назначения", "Этапный эпикриз",
-		"План лечения (дополнения к плану)",
+		"Дополнительные сведения",
+		"План обследования (дополнения к плану)",
 	} {
 		if !isKnownSectionLabel(lbl) {
 			t.Errorf("isKnownSectionLabel(%q) = false, want true", lbl)

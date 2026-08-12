@@ -170,7 +170,7 @@ func dailyQuestions() []Question {
 			ID: "mood", Label: "Фон настроения", Type: "select",
 			Required: true, AllowCustom: true, Default: "even", Group: grpState,
 			Options: []Option{
-				{Value: "even", Label: "ровный, без снижения", Prompt: "Фон настроения ровный, без снижения."},
+				{Value: "even", Label: "ровный, без резких колебаний", Prompt: "Фон настроения ровный, без резких колебаний."},
 				{Value: "lowered", Label: "снижен", Prompt: "Настроение снижено."},
 				{Value: "unstable", Label: "неустойчивый", Prompt: "Фон настроения неустойчивый."},
 				{Value: "dysphoric", Label: "с оттенком дисфории", Prompt: "Фон настроения с оттенком дисфории."},
@@ -220,11 +220,14 @@ func dailyQuestions() []Question {
 			ID: "contact", Label: "Общение и контакт", Type: "multiselect",
 			Required: false, AllowCustom: true, Group: grpBehavior,
 			Options: []Option{
+				{Value: "calm_distance", Label: "в беседе спокоен, дистанцию соблюдает", Prompt: "в беседе с врачом спокоен, дистанцию соблюдает"},
 				{Value: "productive", Label: "доступен продуктивному контакту", Prompt: "доступен продуктивному контакту"},
 				{Value: "selective_children", Label: "общается с детьми избирательно", Prompt: "общается с детьми избирательно"},
 				{Value: "isolated", Label: "держится обособленно", Prompt: "держится обособленно"},
 				{Value: "polite_staff", Label: "с персоналом вежлив", Prompt: "с персоналом вежлив"},
 				{Value: "negativistic", Label: "негативистичен", Prompt: "негативистичен"},
+				{Value: "does_not_disclose", Label: "переживаний не раскрывает", Prompt: "переживаний в полном объеме не раскрывает"},
+				{Value: "staff_remarks", Label: "замечания персонала (без причины)", Prompt: "со слов персонала получал замечания, на них реагировал непродолжительно, пререкался/спорил/повышал голос; вербальной коррекции поддавался слабо, быстро возвращался к исходному рисунку поведения"},
 			},
 		},
 
@@ -257,9 +260,9 @@ func dailyQuestions() []Question {
 			ID: "appetite", Label: "Аппетит", Type: "select",
 			Required: true, AllowCustom: true, Default: "preserved", Group: grpSleep,
 			Options: []Option{
-				{Value: "preserved", Label: "сохранён", Prompt: "Аппетит сохранён."},
-				{Value: "decreased", Label: "снижен", Prompt: "Аппетит снижен."},
-				{Value: "selective", Label: "избирательный", Prompt: "Аппетит избирательный."},
+				{Value: "preserved", Label: "достаточен, избирателен", Prompt: "Аппетит достаточен, избирателен."},
+				{Value: "decreased", Label: "снижен (в период болезни)", Prompt: "Аппетит снижен (в период болезни)."},
+				{Value: "selective", Label: "избирателен", Prompt: "Аппетит избирателен."},
 				{Value: "increased", Label: "повышен", Prompt: "Аппетит повышен."},
 			},
 		},
@@ -285,7 +288,7 @@ func dailyQuestions() []Question {
 			ID: "complaints", Label: "Жалобы", Type: "select",
 			Required: true, AllowCustom: true, Default: "none", Group: grpTherapy,
 			Options: []Option{
-				{Value: "none", Label: "не предъявляет", Prompt: "Жалоб активно не предъявляет."},
+				{Value: "none", Label: "не предъявляет", Prompt: "Жалобы не предъявляет."},
 				{Value: "cannot_formulate", Label: "самостоятельно не формирует", Prompt: "Жалобы самостоятельно не формирует."},
 				{Value: "present", Label: "есть жалобы", Prompt: "Предъявляет жалобы."},
 			},
@@ -294,42 +297,11 @@ func dailyQuestions() []Question {
 		{
 			ID: "complaints_detail", Label: "Какие жалобы", Type: "text",
 			Required: false, AllowCustom: true, Group: grpTherapy,
-			Help: "Опишите жалобы (без персональных данных).",
+			Help: "Опишите жалобы полностью (без персональных данных).",
 		},
-
-		// ─── Группа «События дня» ────────────────────────────────────────────
-		{
-			ID: "events", Label: "События дня", Type: "multiselect",
-			Required: false, AllowCustom: true, Group: grpEvents,
-			Help: "Отметьте, если были консультации, коррекция терапии, обследования.",
-			Options: []Option{
-				{Value: "consultation", Label: "консультация специалиста", Prompt: "проведена консультация специалиста"},
-				{Value: "therapy_correction", Label: "коррекция терапии", Prompt: "проведена коррекция терапии"},
-				{Value: "somatic", Label: "соматическое заболевание", Prompt: "отмечается сопутствующее соматическое заболевание"},
-				{Value: "examination", Label: "обследование (ЭКГ/ЭЭГ/УЗИ/лаб.)", Prompt: "выполнено обследование"},
-			},
-			Conditional: []Conditional{
-				{IfValue: "consultation", Show: []string{"events_detail"}},
-				{IfValue: "therapy_correction", Show: []string{"events_detail"}},
-				{IfValue: "somatic", Show: []string{"events_detail"}},
-				{IfValue: "examination", Show: []string{"events_detail"}},
-			},
-		},
-		{
-			ID: "events_detail", Label: "Детали событий дня", Type: "text",
-			Required: false, AllowCustom: true, Group: grpEvents,
-			Help: "Специалист, заключение, изменение дозы и т.п. (без персональных данных).",
-		},
-	}
-}
-
-// examQuestions builds the extra sections of the 10-day exam (docs/06 §5).
-func examQuestions() []Question {
-	return []Question{
-		// ─── Жалобы и анамнез ────────────────────────────────────────────────
 		{
 			ID: "anamnesis_disease", Label: "Анамнез заболевания (дополнения)", Type: "select",
-			Required: false, AllowCustom: true, Default: "no_additions", Group: grpAnamnesis,
+			Required: false, AllowCustom: true, Default: "no_additions", Group: grpTherapy,
 			Options: []Option{
 				{Value: "no_additions", Label: "без дополнений", Prompt: "Анамнез заболевания: без дополнений."},
 				{Value: "present", Label: "есть дополнения", Prompt: "Имеются дополнения к анамнезу заболевания."},
@@ -338,9 +310,70 @@ func examQuestions() []Question {
 		},
 		{
 			ID: "anamnesis_detail", Label: "Дополнения к анамнезу", Type: "text",
-			Required: false, AllowCustom: true, Group: grpAnamnesis,
+			Required: false, AllowCustom: true, Group: grpTherapy,
 			Help: "Опишите дополнения к анамнезу (без персональных данных).",
 		},
+
+		// ─── Группа «События дня» ────────────────────────────────────────────
+		{
+			ID: "events", Label: "События дня", Type: "multiselect",
+			Required: false, AllowCustom: true, Group: grpEvents,
+			Help: "Коррекция терапии, обследования, выходные. Консультации специалистов сюда не включаем.",
+			Options: []Option{
+				{Value: "therapy_correction", Label: "коррекция терапии", Prompt: "проведена коррекция терапии"},
+				{Value: "somatic", Label: "соматическое заболевание", Prompt: "отмечается сопутствующее соматическое заболевание"},
+				{Value: "examination", Label: "обследование (ЭКГ/ЭЭГ/УЗИ/лаб.)", Prompt: "выполнено обследование"},
+				{Value: "weekend_duty", Label: "выходной / дежурный персонал", Prompt: "детали выходного дня / наблюдения дежурного персонала"},
+				{Value: "relative_visit", Label: "визит родственника / прогулка", Prompt: "визит родственника / прогулка (только если реально было)"},
+			},
+			Conditional: []Conditional{
+				{IfValue: "therapy_correction", Show: []string{"events_detail"}},
+				{IfValue: "somatic", Show: []string{"events_detail"}},
+				{IfValue: "examination", Show: []string{"events_detail"}},
+				{IfValue: "weekend_duty", Show: []string{"events_detail", "additional_info"}},
+				{IfValue: "relative_visit", Show: []string{"events_detail"}},
+			},
+		},
+		{
+			ID: "events_detail", Label: "Детали событий дня", Type: "text",
+			Required: false, AllowCustom: true, Group: grpEvents,
+			Help: "Изменение дозы, результаты обследований и т.п. (без персональных данных).",
+		},
+		{
+			ID: "additional_info", Label: "Дополнительные сведения", Type: "text",
+			Required: false, AllowCustom: true, Group: grpEvents,
+			Help: "Выходной день или блок «за период выходных» в понедельник (без персональных данных).",
+		},
+		{
+			ID: "exam_plan", Label: "План обследования", Type: "select",
+			Required: false, AllowCustom: true, Default: "no_change", Group: grpEvents,
+			Options: []Option{
+				{Value: "no_change", Label: "без дополнений", Prompt: "План обследования: без дополнений."},
+				{Value: "adjusted", Label: "была корректировка", Prompt: "План обследования: в связи с изменением состояния проведена корректировка."},
+			},
+			Conditional: []Conditional{{IfValue: "adjusted", Show: []string{"exam_plan_detail"}}},
+		},
+		{
+			ID: "exam_plan_detail", Label: "Причина корректировки плана обследования", Type: "text",
+			Required: false, AllowCustom: true, Group: grpEvents,
+			Help: "В связи с чем проведена корректировка (без персональных данных).",
+		},
+		{
+			ID: "prescriptions", Label: "Назначения", Type: "select",
+			Required: false, AllowCustom: true, Default: "see_list", Group: grpEvents,
+			Help: "Только препараты. Режим отделения в назначения не включаем.",
+			Options: []Option{
+				{Value: "see_list", Label: "препараты по листу назначений", Prompt: "Назначения: лекарственная терапия согласно листу назначений (только препараты, без режима отделения)."},
+				{Value: "no_change", Label: "без изменений (только препараты)", Prompt: "Назначения без изменений (только препараты, без режима отделения)."},
+			},
+		},
+	}
+}
+
+// examQuestions builds the extra sections of the 10-day exam (docs/06 §5).
+func examQuestions() []Question {
+	return []Question{
+		// Анамнез заболевания — в dailyQuestions (общий для всех режимов).
 
 		// ─── Соматический и неврологический статус ───────────────────────────
 		{
@@ -375,6 +408,15 @@ func examQuestions() []Question {
 
 		// ─── Психический статус (E5, docs/06 §5.2) ───────────────────────────
 		{
+			ID: "orientation", Label: "Ориентировка", Type: "select",
+			Required: false, AllowCustom: true, Default: "partial_typical", Group: grpPsych,
+			Options: []Option{
+				{Value: "partial_typical", Label: "частично (место, время, личность)", Prompt: "Ориентирован(а) частично (в месте, времени, собственной личности)."},
+				{Value: "correct", Label: "верно", Prompt: "Ориентирован(а) верно в месте, времени, собственной личности."},
+				{Value: "impaired", Label: "нарушена", Prompt: "Ориентировка нарушена."},
+			},
+		},
+		{
 			ID: "criticism", Label: "Критика к состоянию", Type: "select",
 			Required: false, AllowCustom: true, Default: "formal", Group: grpPsych,
 			Options: []Option{
@@ -408,10 +450,21 @@ func examQuestions() []Question {
 			ID: "intellect", Label: "Интеллект", Type: "select",
 			Required: false, AllowCustom: true, Default: "age_norm", Group: grpPsych,
 			Options: []Option{
-				{Value: "age_norm", Label: "на уровне возрастной нормы", Prompt: "Интеллект на уровне возрастной нормы."},
-				{Value: "low_norm", Label: "на уровне низкой возрастной нормы", Prompt: "Интеллект на уровне низкой возрастной нормы."},
-				{Value: "reduced", Label: "снижен", Prompt: "Интеллект снижен."},
+				{Value: "age_norm", Label: "возрастная норма", Prompt: "Интеллектуально представляется на уровне возрастной нормы, запас сведений неравномерен. На вопросы из школьной программы отвечает выборочно."},
+				{Value: "low_norm", Label: "низкая возрастная норма", Prompt: "Интеллектуально представляется на уровне низкой возрастной нормы, запас сведений неравномерен. На вопросы из школьной программы отвечает выборочно."},
+				{Value: "mild_id", Label: "лёгкая УО", Prompt: "Интеллектуально представляется сниженным до уровня легкой УО, запас сведений неравномерен. На вопросы из школьной программы отвечает выборочно."},
+				{Value: "reduced", Label: "интеллектуально-мнестически снижен", Prompt: "Интеллектуально-мнестически снижен, запас сведений неравномерен."},
 			},
+			Conditional: []Conditional{
+				{IfValue: "age_norm", Show: []string{"intellect_example"}},
+				{IfValue: "low_norm", Show: []string{"intellect_example"}},
+				{IfValue: "mild_id", Show: []string{"intellect_example"}},
+			},
+		},
+		{
+			ID: "intellect_example", Label: "Пример из школьной программы", Type: "text",
+			Required: false, AllowCustom: true, Group: grpPsych,
+			Help: "Краткий пример выборочного ответа (без персональных данных).",
 		},
 		{
 			ID: "suicidal", Label: "Суицидальные тенденции", Type: "select",
@@ -438,10 +491,13 @@ func examQuestions() []Question {
 			ID: "syndrome", Label: "Синдром", Type: "select",
 			Required: false, AllowCustom: true, Group: grpDiagnosis,
 			Options: []Option{
-				{Value: "anxiety_depressive", Label: "тревожно-депрессивный", Prompt: "тревожно-депрессивный синдром"},
-				{Value: "psychopathic", Label: "психопатоподобный", Prompt: "психопатоподобный синдром"},
-				{Value: "emotional_volitional", Label: "эмоционально-волевой неустойчивости", Prompt: "синдром эмоционально-волевой неустойчивости"},
+				{Value: "behavioral", Label: "поведенческих нарушений", Prompt: "синдром поведенческих нарушений"},
 				{Value: "anxious", Label: "тревожный", Prompt: "тревожный синдром"},
+				{Value: "depressive", Label: "депрессивный", Prompt: "депрессивный синдром"},
+				{Value: "psychomotor_aggression", Label: "психомоторной расторможенности (с агрессией)", Prompt: "синдром психомоторной расторможенности (с агрессией)"},
+				{Value: "psychomotor_autoaggression", Label: "психомоторной расторможенности (с аутоагрессией)", Prompt: "синдром психомоторной расторможенности (с аутоагрессией)"},
+				{Value: "affective_volitional", Label: "аффективно-волевой неустойчивости", Prompt: "синдром аффективно-волевой неустойчивости"},
+				{Value: "psychopathic", Label: "психопатоподобный", Prompt: "психопатоподобный синдром"},
 				{Value: "asthenic", Label: "астенический", Prompt: "астенический синдром"},
 			},
 		},
@@ -457,38 +513,19 @@ func examQuestions() []Question {
 			},
 		},
 
-		// ─── Назначения и вмешательства ──────────────────────────────────────
-		{
-			ID: "prescriptions", Label: "Назначения", Type: "select",
-			Required: false, AllowCustom: true, Default: "see_list", Group: grpOrders,
-			Help: "Выберите «см. лист назначений» или укажите конкретную схему через «свой вариант».",
-			Options: []Option{
-				{Value: "see_list", Label: "см. лист назначений", Prompt: "Назначения — согласно листу назначений."},
-				{Value: "no_change", Label: "без изменений", Prompt: "Назначения без изменений."},
-			},
-		},
+		// ─── Вмешательства (без консультаций доп. специалистов) ──────────────
+		// Назначения — в dailyQuestions (только препараты).
 		{
 			ID: "interventions", Label: "Выполненные вмешательства", Type: "multiselect",
 			Required: false, AllowCustom: true, Group: grpOrders,
+			Help: "Инструментальные/лабораторные. Консультации специалистов — вручную вне генерации.",
 			Options: []Option{
-				{Value: "pediatrician", Label: "педиатр", Prompt: "осмотр педиатра"},
-				{Value: "neurologist", Label: "невролог", Prompt: "осмотр невролога"},
-				{Value: "psychologist", Label: "психолог", Prompt: "консультация психолога"},
-				{Value: "psychotherapist", Label: "психотерапевт", Prompt: "консультация психотерапевта"},
-				{Value: "speech_therapist", Label: "логопед", Prompt: "занятие с логопедом"},
-				{Value: "physiotherapist", Label: "физиотерапевт", Prompt: "физиотерапия"},
 				{Value: "ecg", Label: "ЭКГ", Prompt: "ЭКГ"},
 				{Value: "eeg", Label: "ЭЭГ", Prompt: "ЭЭГ"},
 				{Value: "ultrasound", Label: "УЗИ", Prompt: "УЗИ"},
 				{Value: "lab", Label: "лаборатория", Prompt: "лабораторное обследование"},
 			},
 			Conditional: []Conditional{
-				{IfValue: "pediatrician", Show: []string{"interventions_detail"}},
-				{IfValue: "neurologist", Show: []string{"interventions_detail"}},
-				{IfValue: "psychologist", Show: []string{"interventions_detail"}},
-				{IfValue: "psychotherapist", Show: []string{"interventions_detail"}},
-				{IfValue: "speech_therapist", Show: []string{"interventions_detail"}},
-				{IfValue: "physiotherapist", Show: []string{"interventions_detail"}},
 				{IfValue: "ecg", Show: []string{"interventions_detail"}},
 				{IfValue: "eeg", Show: []string{"interventions_detail"}},
 				{IfValue: "ultrasound", Show: []string{"interventions_detail"}},

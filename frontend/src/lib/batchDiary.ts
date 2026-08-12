@@ -449,7 +449,7 @@ export function buildGenerateAnswers(
     typeof diagnosisValue === "string" ? diagnosisValue.trim() : "";
 
   if (clinicalParts.length > 0) {
-    base.events = ["consultation"];
+    base.events = ["therapy_correction"];
     base.events_detail = clinicalParts.join(" ");
   }
 
@@ -466,7 +466,7 @@ export function buildGenerateAnswers(
         interventions.push("ecg", "eeg");
       }
       if (notableEvents.includes("specialist_consult")) {
-        interventions.push("psychologist");
+        // Консультации доп. специалистов не генерируем — врач заполнит вручную.
       }
       if (notableEvents.includes("therapy_change")) {
         interventions.push("lab");
@@ -483,7 +483,7 @@ export function buildGenerateAnswers(
       attention_memory: "no_gross",
       intellect: "age_norm",
       suicidal: "not_detected",
-      syndrome: batchAnswers.leading_syndrome ?? "anxiety_depressive",
+      syndrome: batchAnswers.leading_syndrome ?? "anxious",
       comorbidities: ["none"],
       prescriptions: "see_list",
       period_dynamics: mapDynamicsToExam(overallDynamics),

@@ -117,7 +117,7 @@ func TestDailyConditionalTree(t *testing.T) {
 		{"sleep", "hard_to_fall_asleep", "sleep_detail"},
 		{"tolerance", "adverse", "adverse_detail"},
 		{"complaints", "present", "complaints_detail"},
-		{"events", "consultation", "events_detail"},
+		{"events", "therapy_correction", "events_detail"},
 	}
 	for _, w := range wants {
 		q, ok := ids[w.parent]

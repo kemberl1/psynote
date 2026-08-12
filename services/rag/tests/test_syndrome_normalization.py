@@ -48,15 +48,20 @@ def test_prepositional_case() -> None:
 def test_all_syndromes_from_questionnaire() -> None:
     """Все синдромы из опросника (_SYNDROME_META) должны нормализоваться."""
     expected = {
-        "anxiety_depressive": "тревожно-депрессивный",
-        "psychopathic": "психопатоподобный",
-        "emotional_volitional": "эмоционально-волевой",
+        "behavioral": "поведенческих нарушений",
         "anxious": "тревожный",
+        "depressive": "депрессивный",
+        "psychomotor_aggression": "психомоторной расторможенности",
+        "affective_volitional": "аффективно-волевой",
+        "psychopathic": "психопатоподобный",
         "asthenic": "астенический",
+        # legacy
+        "anxiety_depressive": "тревожно-депрессивный",
+        "emotional_volitional": "аффективно-волевой",
     }
     for code, canonical in expected.items():
-        assert normalize_syndrome(
-            canonical) == canonical, f"{code} не нормализуется"
+        assert _SYNDROME_META[code] == canonical
+        assert normalize_syndrome(canonical) == canonical, f"{code} не нормализуется"
 
 
 def test_asthenic_cases() -> None:
@@ -93,10 +98,10 @@ def test_anxious_cases() -> None:
 
 
 def test_emotional_volitional_cases() -> None:
-    """Эмоционально-волевой неустойчивости — разные падежи."""
+    """Эмоционально-/аффективно-волевой → канон аффективно-волевой."""
     assert normalize_syndrome(
-        "эмоционально-волевого") == "эмоционально-волевой"
-    assert normalize_syndrome("эмоционально-волевым") == "эмоционально-волевой"
+        "эмоционально-волевого") == "аффективно-волевой"
+    assert normalize_syndrome("аффективно-волевым") == "аффективно-волевой"
 
 
 def test_none_returns_none() -> None:
@@ -137,10 +142,8 @@ def test_retrieval_filter_uses_canonical_syndrome() -> None:
 
 def test_map_answers_syndrome_normalization() -> None:
     """map_answers с select-кодом синдрома → канонич. форма."""
-    result = map_answers("exam_10d", {"syndrome": "anxiety_depressive"})
-    # Значение _SYNDROME_META["anxiety_depressive"] = "тревожно-депрессивный"
-    # → normalize_syndrome("тревожно-депрессивный") == "тревожно-депрессивный"
-    assert result.syndrome == "тревожно-депрессивный"
+    result = map_answers("exam_10d", {"syndrome": "anxious"})
+    assert result.syndrome == "тревожный"
 
 
 def test_map_answers_custom_syndrome_normalized() -> None:
