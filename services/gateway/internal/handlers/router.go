@@ -91,8 +91,14 @@ func NewRouter(cfg config.Config, deps Deps) http.Handler {
 	if deps.Repo != nil {
 		listH := newHistoryListHandler(deps.Repo)
 		detailH := newHistoryDetailHandler(deps.Repo)
+		pendingH := newPendingHandler(deps.Repo)
+		patchH := newHistoryPatchHandler(deps.Repo)
+		deleteH := newHistoryDeleteHandler(deps.Repo)
 		mux.HandleFunc("GET "+config.APIPrefix+"/requests", protect(listH))
+		mux.HandleFunc("POST "+config.APIPrefix+"/requests/pending", protect(pendingH))
 		mux.HandleFunc("GET "+config.APIPrefix+"/requests/{id}", protect(detailH))
+		mux.HandleFunc("PATCH "+config.APIPrefix+"/requests/{id}", protect(patchH))
+		mux.HandleFunc("DELETE "+config.APIPrefix+"/requests/{id}", protect(deleteH))
 		mux.HandleFunc("GET "+config.APIPrefix+"/history", protect(listH))
 		mux.HandleFunc("GET "+config.APIPrefix+"/history/{id}", protect(detailH))
 
@@ -142,7 +148,7 @@ func withCommonMiddleware(cfg config.Config, next http.Handler) http.Handler {
 			h := w.Header()
 			h.Set("Access-Control-Allow-Origin", cfg.CORSAllowedOrigin)
 			h.Set("Vary", "Origin")
-			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 			h.Set("Access-Control-Max-Age", "600")
 		}

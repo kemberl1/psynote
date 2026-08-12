@@ -139,6 +139,12 @@ export interface GenerateRequest {
   answers: Answers;
   attachment_ids?: string[];
   options?: { stream?: boolean };
+  /** Обновить существующую pending/failed запись. */
+  request_id?: string;
+  /** Привязать дневник к пакету. */
+  parent_request_id?: string;
+  /** Override заголовка (пакетные дни). */
+  title_safe?: string;
 }
 
 export interface AnonymizationSummary {
@@ -153,6 +159,26 @@ export interface GenerateResult {
   anonymization: AnonymizationSummary;
 }
 
+export interface PendingRequest {
+  document_type: string;
+  title_safe: string;
+  answers_anonymized?: Answers;
+  parent_request_id?: string;
+}
+
+export interface PendingResult {
+  request_id: string;
+  document_type: string;
+  title_safe: string;
+  status: string;
+}
+
+export interface PatchRequestBody {
+  title_safe?: string;
+  status?: string;
+  answers_anonymized?: Answers;
+}
+
 // ─── История запросов (docs/07 §6) ─────────────────────────────────────────
 
 export interface HistoryItem {
@@ -161,6 +187,16 @@ export interface HistoryItem {
   title_safe: string;
   llm_model_used: string;
   status: string;
+  children_count?: number;
+  created_at: string;
+}
+
+export interface HistoryChild {
+  request_id: string;
+  document_type: string;
+  title_safe: string;
+  status: string;
+  content: string;
   created_at: string;
 }
 
@@ -174,6 +210,7 @@ export interface HistoryDetail {
   status: string;
   anonymizer_removed_count: number;
   created_at: string;
+  children?: HistoryChild[];
 }
 
 export interface HistoryListResult {

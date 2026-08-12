@@ -25,8 +25,10 @@ type GenerationRecord struct {
 	// MVP пишет NULL (схема допускает nullable doctor_id), место под scoping
 	// заложено (docs/05 §2 «Изоляция по врачу»).
 	DoctorID *string
-	// DocumentType — код типа документа (daily | exam_10d), FK document_type.
+	// DocumentType — код типа документа (daily | exam_10d | batch), FK document_type.
 	DocumentType string
+	// ParentRequestID — для дочерних дневников пакетной генерации.
+	ParentRequestID *string
 	// AnswersAnonymized — ответы опросника ПОСЛЕ анонимизации (из RAG).
 	AnswersAnonymized map[string]any
 	// TitleSafe — безопасный заголовок истории (без ПДн).
@@ -44,15 +46,26 @@ type GenerationRecord struct {
 }
 
 // HistoryItem is one row of the history list (docs/07 §6, GET /requests).
+// Только top-level записи (parent_request_id IS NULL); пакеты показывают
+// children_count.
 type HistoryItem struct {
-	RequestID    string `json:"request_id"`
-	DocumentType string `json:"document_type"`
-	TitleSafe    string `json:"title_safe"`
-	LLMModelUsed string `json:"llm_model_used"`
-	// Status — статус запроса (docs/05 §2.4). Раньше колонка не выбиралась из БД,
-	// поэтому поле приходило пустым/null на фронт — БАГ приёмки, теперь маппится.
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	RequestID     string `json:"request_id"`
+	DocumentType  string `json:"document_type"`
+	TitleSafe     string `json:"title_safe"`
+	LLMModelUsed  string `json:"llm_model_used"`
+	Status        string `json:"status"`
+	ChildrenCount int    `json:"children_count"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// HistoryChild is one day inside a batch parent (GET /requests/{id}).
+type HistoryChild struct {
+	RequestID    string    `json:"request_id"`
+	DocumentType string    `json:"document_type"`
+	TitleSafe    string    `json:"title_safe"`
+	Status       string    `json:"status"`
+	Content      string    `json:"content"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // HistoryDetail is the full anonymized record (docs/07 §6, GET /requests/{id}).
@@ -65,10 +78,9 @@ type HistoryDetail struct {
 	LLMModelUsed      string         `json:"llm_model_used"`
 	Status            string         `json:"status"`
 	// AnonymizerRemovedCount — счётчик удалённых ПДн (аудит, без значений).
-	// Раньше колонка не выбиралась из БД, поэтому поле приходило null на фронт —
-	// БАГ приёмки, теперь выбирается и маппится.
-	AnonymizerRemovedCount int       `json:"anonymizer_removed_count"`
-	CreatedAt              time.Time `json:"created_at"`
+	AnonymizerRemovedCount int            `json:"anonymizer_removed_count"`
+	CreatedAt              time.Time      `json:"created_at"`
+	Children               []HistoryChild `json:"children,omitempty"`
 }
 
 // ListFilter scopes / paginates the history list (docs/07 §6).
@@ -110,12 +122,23 @@ var ErrEmailTaken = errors.New("store: email already registered")
 // (no real DB in unit tests, см. задание). docs/05 §2.
 type Repository interface {
 	// SaveGeneration persists an anonymized generation atomically and returns
-	// the new request_id.
+	// the new request_id. If rec has an empty content and status=pending, still
+	// creates generated_document with empty content (placeholder for pending).
 	SaveGeneration(ctx context.Context, rec GenerationRecord) (string, error)
+	// CompleteGeneration updates an existing pending/failed record with final
+	// content and metadata. Returns ErrNotFound when absent or not owned.
+	CompleteGeneration(ctx context.Context, id string, doctorID *string, rec GenerationRecord) error
+	// UpdateGenerationMeta updates title/status/answers without touching content
+	// (e.g. mark parent batch done, or re-pending for regenerate).
+	UpdateGenerationMeta(ctx context.Context, id string, doctorID *string, titleSafe, status string, answers map[string]any) error
+	// DeleteGeneration removes a top-level record (children cascade).
+	DeleteGeneration(ctx context.Context, id string, doctorID *string) error
 	// ListGenerations returns the anonymized history list + total count.
+	// Only top-level rows (parent_request_id IS NULL).
 	ListGenerations(ctx context.Context, f ListFilter) ([]HistoryItem, int, error)
 	// GetGeneration returns one full anonymized record by id (scoped by doctor
-	// when filter.DoctorID set). Returns ErrNotFound when absent.
+	// when filter.DoctorID set). For batch parents, Children are populated.
+	// Returns ErrNotFound when absent.
 	GetGeneration(ctx context.Context, id string, doctorID *string) (*HistoryDetail, error)
 
 	// ─── Auth (Этап 9, docs/09) ──────────────────────────────────────────────

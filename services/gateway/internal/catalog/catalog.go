@@ -95,8 +95,8 @@ const (
 // DocumentTypes mirrors deploy/initdb/02_seed.sql (docs/05 §2.2, docs/07 §3).
 func DocumentTypes() []DocumentType {
 	return []DocumentType{
-		{Code: "daily", Title: "Ежедневный дневник", IsActive: true},
-		{Code: "exam_10d", Title: "Осмотр (раз в 10 дней)", IsActive: true},
+		{Code: "daily", Title: "Ежедневный осмотр", IsActive: true},
+		{Code: "exam_10d", Title: "Осмотр за 10 дней", IsActive: true},
 	}
 }
 

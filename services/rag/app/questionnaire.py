@@ -607,8 +607,10 @@ def map_answers(doc_type: str, answers: dict) -> MappedAnswers:
 
 def _build_title(doc_type: str, mapped: MappedAnswers) -> str:
     """Безопасный заголовок истории (docs/05 §2.2): тип · синдром · динамика."""
-    type_label = ("Ежедневный дневник" if doc_type == DOC_TYPE_DAILY
-                  else "Осмотр (раз в 10 дней)")
+    if doc_type == DOC_TYPE_DAILY:
+        type_label = "Ежедневный осмотр"
+    else:
+        type_label = "Осмотр за 10 дней"
     bits = [type_label]
     if mapped.syndrome:
         bits.append(mapped.syndrome)

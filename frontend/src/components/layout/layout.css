@@ -142,15 +142,10 @@
 /* Карточка истории */
 .history-item {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: var(--space-3);
+  align-items: flex-start;
+  gap: 2px;
   border-radius: var(--radius-md);
   border: 1px solid transparent;
-  cursor: pointer;
-  text-align: left;
-  background: transparent;
-  width: 100%;
   transition:
     background var(--transition),
     border-color var(--transition);
@@ -161,6 +156,22 @@
 .history-item--active {
   background: var(--surface-2);
   border-color: var(--border-strong);
+}
+.history-item--pending .history-item__status {
+  color: var(--accent, #6eb6ff);
+}
+.history-item__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: var(--space-3);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  background: transparent;
+  color: inherit;
 }
 .history-item__title {
   font-size: var(--fs-sm);
@@ -175,6 +186,7 @@
 .history-item__meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
   font-size: var(--fs-xs);
   color: var(--text-tertiary);
@@ -184,6 +196,34 @@
   height: 3px;
   border-radius: 50%;
   background: var(--text-tertiary);
+}
+.history-item__delete {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin: 6px 4px 0 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition), background var(--transition), color var(--transition);
+}
+.history-item:hover .history-item__delete,
+.history-item--active .history-item__delete,
+.history-item__delete:focus-visible {
+  opacity: 1;
+}
+.history-item__delete:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.history-item__delete:disabled {
+  opacity: 0.4;
+  cursor: wait;
 }
 
 /* ─── Main / рабочая область ─────────────────────────────────────────────── */

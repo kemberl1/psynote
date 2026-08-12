@@ -43,31 +43,47 @@ var dailyNarrativeKeys = []string{
 }
 
 // dailyInlineKeys — physical/neuro sections kept as «Метка: значение» lines.
+// Короткие названия — как в заготовках/сборнике (не полные шаблонные).
 var dailyInlineKeys = []struct {
 	src  string
 	dest string
 }{
 	{"Физикальное исследование, локальный статус (его изменение)",
-		"Физикальное исследование, локальный статус (его изменение)"},
-	{"Неврологический статус", "Неврологический статус (его изменение)"},
+		"Физикальное исследование"},
+	{"Неврологический статус", "Неврологический статус"},
+	{"Неврологический статус (его изменение)", "Неврологический статус"},
 }
 
 // examSectionOrder — body section order for 10-day exams (corpus reference).
-var examSectionOrder = []string{
-	"Жалобы",
-	"Анамнез заболевания (дополнения к анамнезу)",
-	"Анамнез жизни (дополнения к анамнезу)",
-	"Физикальное исследование, локальный статус (его изменение)",
-	"Неврологический статус",
-	"Психический статус",
-	"Диагноз",
-	"Основное заболевание",
-	"Сопутствующие заболевания",
-	"Дополнительные сведения",
-	"Назначения",
-	"Выполнены медицинские вмешательства",
-	"План обследования (дополнения к плану)",
-	"Этапный эпикриз",
+// display — метка в экспорте; srcs — возможные ключи из LLM-шаблона.
+var examSectionOrder = []struct {
+	display string
+	srcs    []string
+}{
+	{"Жалобы", []string{"Жалобы"}},
+	{"Анамнез заболевания (дополнения к анамнезу)", []string{"Анамнез заболевания (дополнения к анамнезу)"}},
+	{"Анамнез жизни (дополнения к анамнезу)", []string{"Анамнез жизни (дополнения к анамнезу)"}},
+	{"Физикальное исследование, локальный статус (его изменение)", []string{
+		"Физикальное исследование, локальный статус (его изменение)",
+		"Физикальное исследование",
+	}},
+	{"Неврологический статус (его изменение)", []string{
+		"Неврологический статус (его изменение)",
+		"Неврологический статус",
+	}},
+	{"Психический статус (его изменение)", []string{
+		"Психический статус (его изменение)",
+		"Психический статус",
+	}},
+	{"Диагноз", []string{"Диагноз"}},
+	{"Основное заболевание", []string{"Основное заболевание"}},
+	{"Синдром", []string{"Синдром"}},
+	{"Сопутствующие заболевания", []string{"Сопутствующие заболевания"}},
+	{"Дополнительные сведения", []string{"Дополнительные сведения", "Дополнительные сведения о заболевании"}},
+	{"Назначения", []string{"Назначения"}},
+	{"Выполнены медицинские вмешательства", []string{"Выполнены медицинские вмешательства"}},
+	{"План обследования (дополнения к плану)", []string{"План обследования (дополнения к плану)"}},
+	{"Этапный эпикриз", []string{"Этапный эпикриз"}},
 }
 
 // mergeSubstitutions returns client substitutions with server defaults from metadata.
@@ -288,36 +304,67 @@ func transformExam10d(content string, date time.Time, subs map[string]string) st
 	lines = append(lines, "лечащим врачом совместно с заведующим отделением")
 	lines = append(lines, formatExamDateTime(d, subs))
 
-	for _, label := range examSectionOrder {
-		v, ok := sectionValue(secs, label)
+	for _, spec := range examSectionOrder {
+		v, ok := sectionValueAny(secs, spec.srcs...)
 		if !ok {
-			if label == "Диагноз" {
+			if spec.display == "Диагноз" {
 				lines = append(lines, "Диагноз:")
 			}
 			continue
 		}
 		if isSkipSectionValue(v) {
-			if label == "Диагноз" {
+			if spec.display == "Диагноз" {
 				lines = append(lines, "Диагноз:")
 			}
 			continue
 		}
-		if isConsultBlock(label, v) {
+		if isConsultBlock(spec.display, v) {
+			lines = append(lines, "Выполнены медицинские вмешательства:")
 			lines = append(lines, splitConsultationLines(v)...)
 			continue
 		}
-		lines = append(lines, label+": "+v)
+		lines = append(lines, spec.display+": "+v)
 	}
 
-	if sig := doctorSignatureLine(subs, secs); sig != "" {
-		lines = append(lines, sig)
+	// Подписи как в сборнике: подсказка + подчёркнутое ФИО.
+	doctor := doctorDisplayName(subs, secs)
+	if doctor != "" {
+		lines = append(lines,
+			"Фамилия, имя, отчество (при наличии) врача, должность, специальность, подпись",
+			doctor,
+		)
 	}
 	head := subs["[ФИО_ЗАВ_ОТДЕЛЕНИЕМ]"]
 	if head != "" && !strings.Contains(head, "[") {
-		lines = append(lines, "Заведующий отделением: "+head)
+		lines = append(lines,
+			"Фамилия, имя, отчество (при наличии) заведующего отделением, подпись",
+			head,
+		)
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func sectionValueAny(m map[string]string, labels ...string) (string, bool) {
+	for _, label := range labels {
+		if v, ok := sectionValue(m, label); ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+func doctorDisplayName(subs map[string]string, secs map[string]string) string {
+	doctor := subs["[ФИО_ВРАЧА]"]
+	if doctor == "" || strings.Contains(doctor, "[") {
+		if v, ok := sectionValue(secs, "Лечащий врач"); ok {
+			doctor = strings.TrimSpace(strings.TrimPrefix(v, ":"))
+		}
+	}
+	if doctor == "" || strings.Contains(doctor, "[") {
+		return ""
+	}
+	return doctor
 }
 
 func isDiagnosisSection(label string) bool {
@@ -355,19 +402,15 @@ func splitConsultationLines(v string) []string {
 }
 
 func doctorSignatureLine(subs map[string]string, secs map[string]string) string {
-	doctor := subs["[ФИО_ВРАЧА]"]
-	if doctor == "" || strings.Contains(doctor, "[") {
-		if v, ok := sectionValue(secs, "Лечащий врач"); ok {
-			doctor = strings.TrimSpace(strings.TrimPrefix(v, ":"))
-		}
-	}
-	if doctor == "" || strings.Contains(doctor, "[") {
+	doctor := doctorDisplayName(subs, secs)
+	if doctor == "" {
 		return ""
 	}
 	return formatDoctorSignature(doctor)
 }
 
 func formatDoctorSignature(name string) string {
+	// Как в заготовках Екимова/Фок: роль слева, ФИО справа, абзац по центру.
 	const pad = 69
 	role := "Врач-психиатр"
 	spaces := pad - len([]rune(role))
@@ -391,12 +434,12 @@ func formatExamDateTime(d time.Time, subs map[string]string) string {
 	year := d.Year()
 	h, m := d.Hour(), d.Minute()
 	if v := subs["[ДАТА]"]; v != "" && !strings.Contains(v, "[") {
-		// If client passed a full Russian date line, use time from metadata.
-		if strings.Contains(v, "сентября") || strings.Contains(v, "«") {
+		if strings.Contains(v, "«") && strings.Contains(v, "время:") {
 			return v
 		}
 	}
-	return fmt.Sprintf("«%02d » %s %d г.  время: %d час. %02d мин.", day, month, year, h, m)
+	// Формат сборника: «08» декабря 2025 г.  время: 12 час. 14 мин.
+	return fmt.Sprintf("«%02d» %s %d г.  время: %02d час. %02d мин.", day, month, year, h, m)
 }
 
 func stripRemainingPlaceholders(content string, subs map[string]string) string {

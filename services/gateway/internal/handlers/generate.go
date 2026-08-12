@@ -34,6 +34,13 @@ type generateRequest struct {
 	DocumentType string         `json:"document_type"`
 	Answers      map[string]any `json:"answers"`
 	Options      map[string]any `json:"options,omitempty"`
+	// RequestID — обновить существующую pending/failed запись (регенерация /
+	// завершение «Формируется…»).
+	RequestID string `json:"request_id,omitempty"`
+	// ParentRequestID — привязать дневник к пакету.
+	ParentRequestID string `json:"parent_request_id,omitempty"`
+	// TitleSafe — опциональный override заголовка (пакетные дни).
+	TitleSafe string `json:"title_safe,omitempty"`
 }
 
 // generateData is the success payload (docs/07 §5).
@@ -122,21 +129,47 @@ func newGenerateHandler(cfg config.Config, anon anonymizer.Anonymizer, rag ragcl
 		if did, ok := doctorIDFromContext(r.Context()); ok {
 			ownerID = &did
 		}
-		newID, perr := repo.SaveGeneration(ctx, store.GenerationRecord{
+
+		titleSafe := res.TitleSafe
+		if req.TitleSafe != "" {
+			titleSafe = req.TitleSafe
+		}
+
+		var parentID *string
+		if req.ParentRequestID != "" {
+			parentID = &req.ParentRequestID
+		}
+
+		rec := store.GenerationRecord{
 			DoctorID:               ownerID,
 			DocumentType:           req.DocumentType,
+			ParentRequestID:        parentID,
 			AnswersAnonymized:      res.AnswersAnonymized,
-			TitleSafe:              res.TitleSafe,
+			TitleSafe:              titleSafe,
 			LLMModelUsed:           res.LLMModelUsed,
 			Status:                 res.Status,
 			AnonymizerRemovedCount: removedTotal,
 			ContentAnonymized:      res.Content,
 			TokensUsed:             res.TokensUsed,
-		})
-		if perr != nil {
-			slog.Error("generate: persist history failed", "error_type", "store")
-		} else if newID != "" {
-			requestID = newID
+		}
+
+		if req.RequestID != "" {
+			if perr := repo.CompleteGeneration(ctx, req.RequestID, ownerID, rec); perr != nil {
+				if errors.Is(perr, store.ErrNotFound) {
+					writeError(w, http.StatusNotFound, "NOT_FOUND", "запись для обновления не найдена")
+					return
+				}
+				slog.Error("generate: complete history failed", "error_type", "store")
+			} else {
+				requestID = req.RequestID
+			}
+		} else {
+			newID, perr := repo.SaveGeneration(ctx, rec)
+			if perr != nil {
+				slog.Error("generate: persist history failed", "error_type", "store")
+			} else if newID != "" {
+				requestID = newID
+			}
 		}
 
 		// (4) Envelope (docs/07 §1, §5).

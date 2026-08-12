@@ -1,10 +1,10 @@
 // DOCX rendering via raw OOXML (archive/zip + encoding/xml), Go stdlib only.
 //
-// ЭТАП 8.1 — форматирование под корпусный сборник (`Документы/02_корпус/сборник_дневников_ИБ/`, локально):
+// Форматирование под корпус дневников:
 //   - Times New Roman 11pt; поля ~2,5 см;
-//   - тело по ширине (justify); секции «Метка: значение» — жирная метка + текст;
-//   - ежедневные записи — DD.MM.YYYY + narrative; осмотр 10д — центр «ОСМОТР»;
-//   - консультации («Педиатр от …») — слева; подпись врача — мелким кеглем.
+//   - ежедневный: жирная дата, обычный текст; короткие метки;
+//   - осмотр: центр «ОСМОТР», дата/время с underline, подписи с underline;
+//   - метки секций жирные; подпись врача по центру.
 package export
 
 import (
@@ -14,7 +14,6 @@ import (
 	"strings"
 )
 
-// OOXML namespaces / boilerplate.
 const (
 	docxContentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
 		`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
@@ -41,7 +40,7 @@ const (
 	szBody      = 22 // 11pt
 	szCaseNo    = 18 // 9pt
 	szTitle     = 22
-	szSignature = 21 // 10.5pt
+	szSignature = 22
 
 	docxStyles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
 		`<w:styles xmlns:w="` + wNS + `">` +
@@ -52,7 +51,7 @@ const (
 		`</w:rPr></w:rPrDefault></w:docDefaults>` +
 		`<w:style w:type="paragraph" w:default="1" w:styleId="Normal">` +
 		`<w:name w:val="Normal"/>` +
-		`<w:pPr><w:jc w:val="both"/><w:spacing w:after="160" w:line="256" w:lineRule="auto"/></w:pPr>` +
+		`<w:pPr><w:jc w:val="both"/><w:spacing w:after="0" w:line="256" w:lineRule="auto"/></w:pPr>` +
 		`<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>` +
 		`<w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr>` +
 		`</w:style>` +
@@ -68,7 +67,7 @@ func renderDOCXBatch(docs []Document) ([]byte, error) {
 
 	for i, doc := range docs {
 		if i > 0 {
-			body.WriteString(paragraphXML("", paraOpts{spaceAfter: 80}))
+			body.WriteString(paragraphXML("", paraOpts{spaceAfter: 200}))
 		}
 		for _, l := range buildDocLines(doc) {
 			body.WriteString(docxParagraph(l))
@@ -114,27 +113,29 @@ func renderDOCXBatch(docs []Document) ([]byte, error) {
 func docxParagraph(l docLine) string {
 	switch l.kind {
 	case kindCaseNo:
-		return paragraphXML(l.text, paraOpts{align: "right", sizeHalfPt: szCaseNo, spaceAfter: 60})
+		return paragraphXML(l.text, paraOpts{align: "right", sizeHalfPt: szCaseNo, spaceAfter: 40})
 	case kindExamTitle:
-		return paragraphXML(strings.ToUpper(l.text), paraOpts{align: "center", bold: true, sizeHalfPt: szTitle, spaceAfter: 40})
+		return paragraphXML(strings.ToUpper(l.text), paraOpts{align: "center", bold: true, sizeHalfPt: szTitle, spaceAfter: 0})
 	case kindExamSubtitle:
-		return paragraphXML(l.text, paraOpts{align: "center", sizeHalfPt: szBody, spaceAfter: 60})
+		return paragraphXML(l.text, paraOpts{align: "center", sizeHalfPt: szBody, spaceAfter: 40})
 	case kindTitle:
-		return paragraphXML(strings.ToUpper(l.text), paraOpts{align: "center", bold: true, sizeHalfPt: szTitle, spaceAfter: 60})
+		return paragraphXML(strings.ToUpper(l.text), paraOpts{align: "center", bold: true, sizeHalfPt: szTitle, spaceAfter: 40})
 	case kindDateTime:
-		return paragraphXML(l.text, paraOpts{align: "center", sizeHalfPt: szBody, spaceAfter: 200})
+		return paragraphSpans(l.spans, paraOpts{align: "center", sizeHalfPt: szBody, spaceAfter: 160}, l.text)
 	case kindSignatureCaption:
-		return paragraphXML(l.text, paraOpts{align: "left", sizeHalfPt: szCaseNo, spaceBefore: 200, spaceAfter: 40})
+		return paragraphXML(l.text, paraOpts{align: "both", sizeHalfPt: szCaseNo, spaceBefore: 160, spaceAfter: 0})
+	case kindSignatureValue:
+		return paragraphSpans(l.spans, paraOpts{align: "both", sizeHalfPt: szBody, spaceAfter: 80}, l.text)
 	case kindConsultNote:
-		return paragraphXML(l.text, paraOpts{align: "left", sizeHalfPt: szBody, spaceAfter: 80})
+		return paragraphXML(l.text, paraOpts{align: "left", sizeHalfPt: szBody, spaceAfter: 40})
 	case kindDoctorSignature:
-		return paragraphXML(l.text, paraOpts{align: "both", sizeHalfPt: szSignature, spaceBefore: 120, spaceAfter: 80})
+		return paragraphXML(l.text, paraOpts{align: "center", sizeHalfPt: szSignature, spaceBefore: 80, spaceAfter: 120})
 	case kindDailyNarrative:
-		return paragraphXML(l.text, paraOpts{align: "both", bold: true, sizeHalfPt: szBody, spaceAfter: 80})
+		return paragraphSpans(l.spans, paraOpts{align: "both", sizeHalfPt: szBody, spaceAfter: 40}, l.text)
 	case kindLabelValue:
-		return paragraphLabelValue(l.label, l.value, paraOpts{align: "both", sizeHalfPt: szBody, spaceAfter: 80})
+		return paragraphLabelValue(l.label, l.value, paraOpts{align: "both", sizeHalfPt: szBody, spaceAfter: 40})
 	default:
-		return paragraphXML(l.text, paraOpts{align: "both", sizeHalfPt: szBody, spaceAfter: 80})
+		return paragraphXML(l.text, paraOpts{align: "both", sizeHalfPt: szBody, spaceAfter: 40})
 	}
 }
 
@@ -148,26 +149,22 @@ type paraOpts struct {
 
 type runOpts struct {
 	bold       bool
+	underline  bool
 	sizeHalfPt int
 }
 
 func paragraphPr(o paraOpts) string {
 	var b strings.Builder
 	b.WriteString("<w:pPr>")
-	if o.spaceBefore > 0 || o.spaceAfter > 0 {
-		b.WriteString(`<w:spacing`)
-		if o.spaceBefore > 0 {
-			b.WriteString(` w:before="`)
-			b.WriteString(itoa(o.spaceBefore))
-			b.WriteString(`"`)
-		}
-		if o.spaceAfter > 0 {
-			b.WriteString(` w:after="`)
-			b.WriteString(itoa(o.spaceAfter))
-			b.WriteString(`"`)
-		}
-		b.WriteString(` w:line="264" w:lineRule="auto"/>`)
+	b.WriteString(`<w:spacing`)
+	if o.spaceBefore > 0 {
+		b.WriteString(` w:before="`)
+		b.WriteString(itoa(o.spaceBefore))
+		b.WriteString(`"`)
 	}
+	b.WriteString(` w:after="`)
+	b.WriteString(itoa(o.spaceAfter))
+	b.WriteString(`" w:line="256" w:lineRule="auto"/>`)
 	align := o.align
 	if align == "" {
 		align = "both"
@@ -180,11 +177,17 @@ func paragraphPr(o paraOpts) string {
 }
 
 func runXML(text string, o runOpts) string {
+	if text == "" {
+		return ""
+	}
 	var b strings.Builder
 	b.WriteString("<w:r><w:rPr>")
 	b.WriteString(`<w:rFonts w:ascii="` + docxFont + `" w:hAnsi="` + docxFont + `" w:cs="` + docxFont + `"/>`)
 	if o.bold {
-		b.WriteString("<w:b/>")
+		b.WriteString("<w:b/><w:bCs/>")
+	}
+	if o.underline {
+		b.WriteString(`<w:u w:val="single"/>`)
 	}
 	size := o.sizeHalfPt
 	if size == 0 {
@@ -219,17 +222,36 @@ func paragraphXML(text string, o paraOpts) string {
 	return b.String()
 }
 
-// paragraphLabelValue renders «Метка: значение» with a bold label and normal value.
+func paragraphSpans(spans []textSpan, o paraOpts, fallback string) string {
+	var b strings.Builder
+	b.WriteString("<w:p>")
+	b.WriteString(paragraphPr(o))
+	if len(spans) == 0 {
+		b.WriteString(runXML(fallback, runOpts{bold: o.bold, sizeHalfPt: o.sizeHalfPt}))
+	} else {
+		for _, s := range spans {
+			b.WriteString(runXML(s.Text, runOpts{
+				bold:       s.Bold || o.bold,
+				underline:  s.Underline,
+				sizeHalfPt: o.sizeHalfPt,
+			}))
+		}
+	}
+	b.WriteString("</w:p>")
+	return b.String()
+}
+
 func paragraphLabelValue(label, value string, o paraOpts) string {
 	var b strings.Builder
 	b.WriteString("<w:p>")
 	b.WriteString(paragraphPr(o))
 	labelText := label + ":"
+	valueBold := isDiagnosisLikeLabel(label)
 	if value == "" {
 		b.WriteString(runXML(labelText, runOpts{bold: true, sizeHalfPt: o.sizeHalfPt}))
 	} else {
 		b.WriteString(runXML(labelText, runOpts{bold: true, sizeHalfPt: o.sizeHalfPt}))
-		b.WriteString(runXML(" "+value, runOpts{bold: false, sizeHalfPt: o.sizeHalfPt}))
+		b.WriteString(runXML(" "+value, runOpts{bold: valueBold, sizeHalfPt: o.sizeHalfPt}))
 	}
 	b.WriteString("</w:p>")
 	return b.String()

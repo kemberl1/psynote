@@ -14,7 +14,7 @@ import type {
 import { copyText } from "../../lib/clipboard";
 import { downloadExport } from "../../lib/download";
 import { buildExportSubstitutions } from "../../lib/exportSubstitutions";
-import { documentTypeLabel, formatDateTime } from "../../lib/format";
+import { documentTypeLabel, formatDateTime, statusLabel } from "../../lib/format";
 import { useAuth } from "../../auth/AuthContext";
 import { Badge, Button } from "../ui";
 import { AnonymizationNotice } from "./AnonymizationNotice";
@@ -32,6 +32,8 @@ interface GenerationResultProps {
   llmModelUsed?: string;
   createdAt?: string;
   anonymization?: AnonymizationSummary;
+  /** Открыть форму с исходными данными для повторной генерации. */
+  onEdit?: () => void;
 }
 
 export function GenerationResult({
@@ -44,6 +46,7 @@ export function GenerationResult({
   llmModelUsed,
   createdAt,
   anonymization,
+  onEdit,
 }: GenerationResultProps) {
   const { doctor } = useAuth();
   const [toast, setToast] = useState<string | null>(null);
@@ -97,7 +100,11 @@ export function GenerationResult({
           <Badge tone="accent">
             {documentTypeLabel(documentType, documentTypes)}
           </Badge>
-          {status && <Badge tone={status === "done" ? "success" : "default"}>{status}</Badge>}
+          {status && (
+            <Badge tone={status === "done" ? "success" : "default"}>
+              {statusLabel(status)}
+            </Badge>
+          )}
           {llmModelUsed && <Badge mono>{llmModelUsed}</Badge>}
           {createdAt && <span>{formatDateTime(createdAt)}</span>}
         </div>
@@ -127,6 +134,9 @@ export function GenerationResult({
         >
           Скачать PDF
         </Button>
+        {onEdit && (
+          <Button onClick={onEdit}>Редактировать данные</Button>
+        )}
       </div>
 
       {toast && (

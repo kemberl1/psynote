@@ -52,14 +52,22 @@ func (r *PgxRepository) Close() {
 	}
 }
 
+func marshalAnswers(answers map[string]any) ([]byte, error) {
+	if len(answers) == 0 {
+		return []byte("{}"), nil
+	}
+	b, err := json.Marshal(answers)
+	if err != nil {
+		return nil, fmt.Errorf("store: marshal answers: %w", err)
+	}
+	return b, nil
+}
+
 // SaveGeneration writes the anonymized record atomically (docs/05 §2).
 func (r *PgxRepository) SaveGeneration(ctx context.Context, rec GenerationRecord) (string, error) {
-	answersJSON, err := json.Marshal(rec.AnswersAnonymized)
+	answersJSON, err := marshalAnswers(rec.AnswersAnonymized)
 	if err != nil {
-		return "", fmt.Errorf("store: marshal answers: %w", err)
-	}
-	if len(rec.AnswersAnonymized) == 0 {
-		answersJSON = []byte("{}")
+		return "", err
 	}
 	status := rec.Status
 	if status == "" {
@@ -75,12 +83,12 @@ func (r *PgxRepository) SaveGeneration(ctx context.Context, rec GenerationRecord
 	var requestID string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO generation_request
-			(doctor_id, document_type_code, answers_anonymized, title_safe,
-			 llm_model_used, status, anonymizer_removed_count)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+			(doctor_id, document_type_code, parent_request_id, answers_anonymized,
+			 title_safe, llm_model_used, status, anonymizer_removed_count)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id`,
-		rec.DoctorID, rec.DocumentType, answersJSON, rec.TitleSafe,
-		rec.LLMModelUsed, status, rec.AnonymizerRemovedCount,
+		rec.DoctorID, rec.DocumentType, rec.ParentRequestID, answersJSON,
+		rec.TitleSafe, rec.LLMModelUsed, status, rec.AnonymizerRemovedCount,
 	).Scan(&requestID)
 	if err != nil {
 		return "", fmt.Errorf("store: insert generation_request: %w", err)
@@ -101,7 +109,136 @@ func (r *PgxRepository) SaveGeneration(ctx context.Context, rec GenerationRecord
 	return requestID, nil
 }
 
-// ListGenerations returns the anonymized history list and total count.
+// CompleteGeneration overwrites an existing record with final generation data.
+func (r *PgxRepository) CompleteGeneration(ctx context.Context, id string, doctorID *string, rec GenerationRecord) error {
+	answersJSON, err := marshalAnswers(rec.AnswersAnonymized)
+	if err != nil {
+		return err
+	}
+	status := rec.Status
+	if status == "" {
+		status = "done"
+	}
+	docType := rec.DocumentType
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("store: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var tag interface{ RowsAffected() int64 }
+	if doctorID != nil {
+		tag, err = tx.Exec(ctx, `
+			UPDATE generation_request
+			SET answers_anonymized = $2,
+			    title_safe = $3,
+			    llm_model_used = $4,
+			    status = $5,
+			    anonymizer_removed_count = $6,
+			    document_type_code = CASE WHEN $7 = '' THEN document_type_code ELSE $7 END
+			WHERE id = $1 AND doctor_id = $8`,
+			id, answersJSON, rec.TitleSafe, rec.LLMModelUsed, status,
+			rec.AnonymizerRemovedCount, docType, *doctorID,
+		)
+	} else {
+		tag, err = tx.Exec(ctx, `
+			UPDATE generation_request
+			SET answers_anonymized = $2,
+			    title_safe = $3,
+			    llm_model_used = $4,
+			    status = $5,
+			    anonymizer_removed_count = $6,
+			    document_type_code = CASE WHEN $7 = '' THEN document_type_code ELSE $7 END
+			WHERE id = $1`,
+			id, answersJSON, rec.TitleSafe, rec.LLMModelUsed, status,
+			rec.AnonymizerRemovedCount, docType,
+		)
+	}
+	if err != nil {
+		return fmt.Errorf("store: complete generation_request: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO generated_document (request_id, content_anonymized, tokens_used)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (request_id) DO UPDATE
+		SET content_anonymized = EXCLUDED.content_anonymized,
+		    tokens_used = EXCLUDED.tokens_used`,
+		id, rec.ContentAnonymized, rec.TokensUsed,
+	)
+	if err != nil {
+		return fmt.Errorf("store: upsert generated_document: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("store: commit: %w", err)
+	}
+	return nil
+}
+
+// UpdateGenerationMeta updates title/status/answers without rewriting content.
+func (r *PgxRepository) UpdateGenerationMeta(
+	ctx context.Context, id string, doctorID *string, titleSafe, status string, answers map[string]any,
+) error {
+	answersJSON, err := marshalAnswers(answers)
+	if err != nil {
+		return err
+	}
+
+	var tag interface{ RowsAffected() int64 }
+	if doctorID != nil {
+		tag, err = r.pool.Exec(ctx, `
+			UPDATE generation_request
+			SET title_safe = $2, status = $3, answers_anonymized = $4
+			WHERE id = $1 AND doctor_id = $5`,
+			id, titleSafe, status, answersJSON, *doctorID,
+		)
+	} else {
+		tag, err = r.pool.Exec(ctx, `
+			UPDATE generation_request
+			SET title_safe = $2, status = $3, answers_anonymized = $4
+			WHERE id = $1`,
+			id, titleSafe, status, answersJSON,
+		)
+	}
+	if err != nil {
+		return fmt.Errorf("store: update meta: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteGeneration removes a top-level record; children cascade via FK.
+func (r *PgxRepository) DeleteGeneration(ctx context.Context, id string, doctorID *string) error {
+	var (
+		tag interface{ RowsAffected() int64 }
+		err error
+	)
+	if doctorID != nil {
+		tag, err = r.pool.Exec(ctx,
+			`DELETE FROM generation_request WHERE id = $1 AND doctor_id = $2 AND parent_request_id IS NULL`,
+			id, *doctorID)
+	} else {
+		tag, err = r.pool.Exec(ctx,
+			`DELETE FROM generation_request WHERE id = $1 AND parent_request_id IS NULL`,
+			id)
+	}
+	if err != nil {
+		return fmt.Errorf("store: delete: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListGenerations returns top-level anonymized history + total count.
 func (r *PgxRepository) ListGenerations(ctx context.Context, f ListFilter) ([]HistoryItem, int, error) {
 	limit := f.Limit
 	if limit <= 0 || limit > 200 {
@@ -112,17 +249,18 @@ func (r *PgxRepository) ListGenerations(ctx context.Context, f ListFilter) ([]Hi
 		offset = 0
 	}
 
-	// Optional doctor scoping (Этап 9). NULL filter ⇒ all rows.
 	var total int
 	if f.DoctorID != nil {
-		if err := r.pool.QueryRow(ctx,
-			`SELECT count(*) FROM generation_request WHERE doctor_id = $1`,
+		if err := r.pool.QueryRow(ctx, `
+			SELECT count(*) FROM generation_request
+			WHERE doctor_id = $1 AND parent_request_id IS NULL`,
 			*f.DoctorID).Scan(&total); err != nil {
 			return nil, 0, fmt.Errorf("store: count: %w", err)
 		}
 	} else {
-		if err := r.pool.QueryRow(ctx,
-			`SELECT count(*) FROM generation_request`).Scan(&total); err != nil {
+		if err := r.pool.QueryRow(ctx, `
+			SELECT count(*) FROM generation_request
+			WHERE parent_request_id IS NULL`).Scan(&total); err != nil {
 			return nil, 0, fmt.Errorf("store: count: %w", err)
 		}
 	}
@@ -133,18 +271,21 @@ func (r *PgxRepository) ListGenerations(ctx context.Context, f ListFilter) ([]Hi
 	)
 	if f.DoctorID != nil {
 		rows, err = r.pool.Query(ctx, `
-			SELECT id, document_type_code, COALESCE(title_safe, ''),
-			       COALESCE(llm_model_used, ''), status, created_at
-			FROM generation_request
-			WHERE doctor_id = $1
-			ORDER BY created_at DESC
+			SELECT gr.id, gr.document_type_code, COALESCE(gr.title_safe, ''),
+			       COALESCE(gr.llm_model_used, ''), gr.status, gr.created_at,
+			       (SELECT count(*) FROM generation_request c WHERE c.parent_request_id = gr.id)
+			FROM generation_request gr
+			WHERE gr.doctor_id = $1 AND gr.parent_request_id IS NULL
+			ORDER BY gr.created_at DESC
 			LIMIT $2 OFFSET $3`, *f.DoctorID, limit, offset)
 	} else {
 		rows, err = r.pool.Query(ctx, `
-			SELECT id, document_type_code, COALESCE(title_safe, ''),
-			       COALESCE(llm_model_used, ''), status, created_at
-			FROM generation_request
-			ORDER BY created_at DESC
+			SELECT gr.id, gr.document_type_code, COALESCE(gr.title_safe, ''),
+			       COALESCE(gr.llm_model_used, ''), gr.status, gr.created_at,
+			       (SELECT count(*) FROM generation_request c WHERE c.parent_request_id = gr.id)
+			FROM generation_request gr
+			WHERE gr.parent_request_id IS NULL
+			ORDER BY gr.created_at DESC
 			LIMIT $1 OFFSET $2`, limit, offset)
 	}
 	if err != nil {
@@ -156,7 +297,7 @@ func (r *PgxRepository) ListGenerations(ctx context.Context, f ListFilter) ([]Hi
 	for rows.Next() {
 		var it HistoryItem
 		if err := rows.Scan(&it.RequestID, &it.DocumentType, &it.TitleSafe,
-			&it.LLMModelUsed, &it.Status, &it.CreatedAt); err != nil {
+			&it.LLMModelUsed, &it.Status, &it.CreatedAt, &it.ChildrenCount); err != nil {
 			return nil, 0, fmt.Errorf("store: scan list: %w", err)
 		}
 		items = append(items, it)
@@ -208,7 +349,40 @@ func (r *PgxRepository) GetGeneration(ctx context.Context, id string, doctorID *
 			return nil, fmt.Errorf("store: unmarshal answers: %w", err)
 		}
 	}
+
+	children, err := r.listChildren(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(children) > 0 {
+		d.Children = children
+	}
 	return &d, nil
+}
+
+func (r *PgxRepository) listChildren(ctx context.Context, parentID string) ([]HistoryChild, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT gr.id, gr.document_type_code, COALESCE(gr.title_safe, ''),
+		       gr.status, gr.created_at, COALESCE(gd.content_anonymized, '')
+		FROM generation_request gr
+		LEFT JOIN generated_document gd ON gd.request_id = gr.id
+		WHERE gr.parent_request_id = $1
+		ORDER BY gr.created_at ASC`, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list children: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]HistoryChild, 0)
+	for rows.Next() {
+		var c HistoryChild
+		if err := rows.Scan(&c.RequestID, &c.DocumentType, &c.TitleSafe,
+			&c.Status, &c.CreatedAt, &c.Content); err != nil {
+			return nil, fmt.Errorf("store: scan child: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // Ensure PgxRepository satisfies Repository.

@@ -3,8 +3,9 @@ import type { DocumentType } from "../api/types";
 
 /** Человекочитаемые названия типов документов (fallback, если справочник не загружен). */
 const DOC_TYPE_LABELS: Record<string, string> = {
-  daily: "Ежедневный дневник",
-  exam_10d: "Осмотр (раз в 10 дней)",
+  daily: "Ежедневный осмотр",
+  exam_10d: "Осмотр за 10 дней",
+  batch: "Пакет дневников",
 };
 
 /** Возвращает заголовок типа документа по коду. */
@@ -13,7 +14,40 @@ export function documentTypeLabel(
   types?: DocumentType[],
 ): string {
   const found = types?.find((t) => t.code === code);
-  return found?.title ?? DOC_TYPE_LABELS[code] ?? code;
+  if (found?.title) {
+    // Каталог может ещё отдавать старые длинные названия — нормализуем.
+    if (code === "daily") return "Ежедневный осмотр";
+    if (code === "exam_10d") return "Осмотр за 10 дней";
+    return found.title;
+  }
+  return DOC_TYPE_LABELS[code] ?? code;
+}
+
+/** Короткий бейдж статуса для истории. */
+export function statusLabel(status: string): string {
+  switch (status) {
+    case "pending":
+    case "generating":
+    case "anonymizing":
+    case "retrieving":
+      return "Формируется…";
+    case "done":
+      return "Готово";
+    case "failed":
+    case "blocked_pii":
+      return "Ошибка";
+    default:
+      return status;
+  }
+}
+
+export function isPendingStatus(status: string): boolean {
+  return (
+    status === "pending" ||
+    status === "generating" ||
+    status === "anonymizing" ||
+    status === "retrieving"
+  );
 }
 
 /** Форматирует ISO-дату в локальную «14 июня 2026, 17:42» (ru-RU). */
@@ -37,6 +71,13 @@ export function formatDateShort(iso: string): string {
     day: "numeric",
     month: "short",
   });
+}
+
+/** YYYY-MM-DD → ДД.ММ.ГГГГ (для подписей пакетных дней). */
+export function formatDiaryDate(isoDate: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
+  if (!m) return isoDate;
+  return `${m[3]}.${m[2]}.${m[1]}`;
 }
 
 /** Склонение «N персональных данных» (1 — данное, 2-4 — данных, ...). */

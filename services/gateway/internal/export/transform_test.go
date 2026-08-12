@@ -35,11 +35,17 @@ func TestTransformDaily_CompactNarrative(t *testing.T) {
 	if !strings.HasPrefix(out, "31.08.2025 Сознание не помрачено") {
 		t.Errorf("expected date-prefixed narrative, got: %q", out)
 	}
-	if !strings.Contains(out, "Физикальное исследование, локальный статус (его изменение):") {
-		t.Error("missing physical exam section")
+	if !strings.Contains(out, "Физикальное исследование:") {
+		t.Error("missing physical exam section with short label")
 	}
-	if !strings.Contains(out, "Неврологический статус (его изменение):") {
-		t.Error("missing neuro section with (его изменение)")
+	if strings.Contains(out, "локальный статус (его изменение)") {
+		t.Error("daily export must use short phys label, not template long form")
+	}
+	if !strings.Contains(out, "Неврологический статус:") {
+		t.Error("missing neuro section")
+	}
+	if strings.Contains(out, "Неврологический статус (его изменение)") {
+		t.Error("daily export must use short neuro label")
 	}
 	if !strings.Contains(out, "Врач-психиатр") {
 		t.Error("missing doctor signature line")
@@ -86,7 +92,7 @@ func TestTransformExam10d_MarkdownLabels(t *testing.T) {
 	if !strings.Contains(out, "Жалобы: Активно жалоб не предъявляет") {
 		t.Errorf("markdown labels not parsed, got: %q", out)
 	}
-	if !strings.Contains(out, "Психический статус:") {
+	if !strings.Contains(out, "Психический статус (его изменение):") {
 		t.Error("missing psychiatric section from markdown export")
 	}
 	if !strings.Contains(out, "F50.0") {

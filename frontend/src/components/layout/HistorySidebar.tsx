@@ -1,13 +1,17 @@
 // Левый сайдбар — история запросов врача (docs/08 §4.1).
-// Список GET /requests (обезличенный title_safe + тип + дата); клик открывает
-// прошлый результат (/requests/:id). Кнопка «＋ Новый дневник» вверху.
-// Состояния: загрузка (скелетоны) / пусто (empty-state) / ошибка (баннер).
-import { useMemo, useState } from "react";
+// Список GET /requests; клик открывает /requests/:id. Удаление записи —
+// крестик на строке. Табы «Один день / Период» живут на страницах дневника.
+import { useMemo, useState, type MouseEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { friendlyError } from "../../api/errors";
-import { useHistory } from "../../api/queries";
+import { useDeleteRequest, useHistory } from "../../api/queries";
 import type { HistoryItem } from "../../api/types";
-import { documentTypeLabel, formatDateShort } from "../../lib/format";
+import {
+  documentTypeLabel,
+  formatDateShort,
+  isPendingStatus,
+  statusLabel,
+} from "../../lib/format";
 import { Badge, Banner, Button, EmptyState, Skeleton } from "../ui";
 
 export function HistorySidebar() {
@@ -15,6 +19,7 @@ export function HistorySidebar() {
   const { id: activeId } = useParams();
   const [search, setSearch] = useState("");
   const { data, isPending, isError, error, refetch } = useHistory();
+  const deleteMutation = useDeleteRequest();
 
   const items = data?.items ?? [];
   const filtered = useMemo(() => {
@@ -27,25 +32,24 @@ export function HistorySidebar() {
     );
   }, [items, search]);
 
+  const handleDelete = (item: HistoryItem, e: MouseEvent) => {
+    e.stopPropagation();
+    if (deleteMutation.isPending) return;
+    const label =
+      item.document_type === "batch"
+        ? "Удалить весь пакет дневников из истории?"
+        : "Удалить запись из истории?";
+    if (!window.confirm(label)) return;
+    deleteMutation.mutate(item.request_id, {
+      onSuccess: () => {
+        if (activeId === item.request_id) navigate("/diary");
+      },
+    });
+  };
+
   return (
     <aside className="sidebar" aria-label="История запросов">
       <div className="sidebar__head">
-        <Button
-          variant="primary"
-          block
-          onClick={() => navigate("/diary")}
-          aria-label="Создать новый дневник"
-        >
-          ＋ Новый дневник
-        </Button>
-        <Button
-          variant="secondary"
-          block
-          onClick={() => navigate("/diary/batch")}
-          aria-label="Пакетная генерация за период"
-        >
-          Новые дневники за период
-        </Button>
         <input
           className="sidebar__search"
           type="search"
@@ -101,7 +105,12 @@ export function HistorySidebar() {
             key={item.request_id}
             item={item}
             active={item.request_id === activeId}
+            deleting={
+              deleteMutation.isPending &&
+              deleteMutation.variables === item.request_id
+            }
             onClick={() => navigate(`/requests/${item.request_id}`)}
+            onDelete={(e) => handleDelete(item, e)}
           />
         ))}
       </div>
@@ -112,26 +121,60 @@ export function HistorySidebar() {
 function HistoryRow({
   item,
   active,
+  deleting,
   onClick,
+  onDelete,
 }: {
   item: HistoryItem;
   active: boolean;
+  deleting: boolean;
   onClick: () => void;
+  onDelete: (e: MouseEvent) => void;
 }) {
+  const pending = isPendingStatus(item.status);
+  const typeLabel =
+    item.document_type === "batch"
+      ? item.children_count
+        ? `Пакет · ${item.children_count} дн.`
+        : "Пакет дневников"
+      : documentTypeLabel(item.document_type);
+
   return (
-    <button
-      type="button"
-      className={`history-item${active ? " history-item--active" : ""}`}
-      onClick={onClick}
-      aria-current={active ? "true" : undefined}
+    <div
+      className={`history-item${active ? " history-item--active" : ""}${
+        pending ? " history-item--pending" : ""
+      }`}
     >
-      <span className="history-item__title">{item.title_safe}</span>
-      <span className="history-item__meta">
-        <Badge>{documentTypeLabel(item.document_type)}</Badge>
-        <span className="history-item__dot" aria-hidden="true" />
-        <span>{formatDateShort(item.created_at)}</span>
-      </span>
-    </button>
+      <button
+        type="button"
+        className="history-item__main"
+        onClick={onClick}
+        aria-current={active ? "true" : undefined}
+      >
+        <span className="history-item__title">{item.title_safe}</span>
+        <span className="history-item__meta">
+          <Badge tone={pending ? "accent" : "default"}>{typeLabel}</Badge>
+          {pending && (
+            <>
+              <span className="history-item__dot" aria-hidden="true" />
+              <span className="history-item__status">{statusLabel(item.status)}</span>
+            </>
+          )}
+          <span className="history-item__dot" aria-hidden="true" />
+          <span>{formatDateShort(item.created_at)}</span>
+        </span>
+      </button>
+      <button
+        type="button"
+        className="history-item__delete"
+        onClick={onDelete}
+        disabled={deleting}
+        aria-label="Удалить из истории"
+        title="Удалить"
+      >
+        ×
+      </button>
+    </div>
   );
 }
 

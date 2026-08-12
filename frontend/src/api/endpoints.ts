@@ -13,6 +13,9 @@ import type {
   HistoryItem,
   HistoryListResult,
   LoginRequest,
+  PatchRequestBody,
+  PendingRequest,
+  PendingResult,
   QuestionnaireSchema,
   RegisterRequest,
   RegisterResult,
@@ -59,6 +62,30 @@ export function generate(
   body: GenerateRequest, signal?: AbortSignal,
 ): Promise<GenerateResult> {
   return request<GenerateResult>("/generate", { method: "POST", body, signal });
+}
+
+export function createPending(
+  body: PendingRequest, signal?: AbortSignal,
+): Promise<PendingResult> {
+  return request<PendingResult>("/requests/pending", {
+    method: "POST", body, signal,
+  });
+}
+
+export function patchRequest(
+  id: string, body: PatchRequestBody, signal?: AbortSignal,
+): Promise<{ request_id: string; title_safe: string; status: string }> {
+  return request(`/requests/${encodeURIComponent(id)}`, {
+    method: "PATCH", body, signal,
+  });
+}
+
+export function deleteRequest(
+  id: string, signal?: AbortSignal,
+): Promise<void> {
+  return request<void>(`/requests/${encodeURIComponent(id)}`, {
+    method: "DELETE", signal,
+  });
 }
 
 export async function fetchHistory(

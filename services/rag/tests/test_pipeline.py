@@ -190,7 +190,7 @@ def test_map_answers_daily_formulations() -> None:
     assert "Настроение снижено" in joined
     assert "тревога" in joined and "плаксивость" in joined
     assert mapped.dynamics == "без_динамики"
-    assert "Ежедневный дневник" in mapped.title_safe
+    assert "Ежедневный осмотр" in mapped.title_safe
 
 
 def test_build_messages_daily_has_template_and_samples() -> None:

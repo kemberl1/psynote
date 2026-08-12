@@ -109,6 +109,21 @@ func (r *fakeRepo) SaveGeneration(_ context.Context, rec store.GenerationRecord)
 	}
 	return r.id, nil
 }
+func (r *fakeRepo) CompleteGeneration(_ context.Context, id string, _ *string, rec store.GenerationRecord) error {
+	r.calls++
+	r.saved = rec
+	r.id = id
+	if r.saveErr != nil {
+		return r.saveErr
+	}
+	return nil
+}
+func (r *fakeRepo) UpdateGenerationMeta(_ context.Context, _ string, _ *string, _ string, _ string, _ map[string]any) error {
+	return nil
+}
+func (r *fakeRepo) DeleteGeneration(_ context.Context, _ string, _ *string) error {
+	return nil
+}
 func (r *fakeRepo) ListGenerations(_ context.Context, f store.ListFilter) ([]store.HistoryItem, int, error) {
 	r.gotListDoctorID = f.DoctorID
 	if r.listErr != nil {

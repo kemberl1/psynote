@@ -52,6 +52,7 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-4);
   margin-bottom: var(--space-4);
+  align-items: start;
 }
 @media (max-width: 700px) {
   .batch-dates {
@@ -64,13 +65,27 @@
   }
 }
 .batch-date-field {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto auto auto;
   gap: var(--space-2);
+  align-content: start;
 }
 .batch-date-field__label {
   font-size: var(--fs-sm);
   font-weight: 500;
+  /* Фиксированная высота под 2 строки — инпуты в ряду на одной линии */
+  min-height: 2.6em;
+  line-height: 1.3;
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 0.15em;
+}
+.batch-date-field__input {
+  width: 100%;
+}
+.batch-date-field .field__help {
+  min-height: 2.4em;
 }
 .batch-preview {
   font-size: var(--fs-sm);
@@ -300,33 +315,66 @@
   color: var(--text);
 }
 
-/* Список ответов в просмотре истории (обезличенные answers) */
-.answers {
+/* Список ответов в просмотре истории — убран из UI; стили оставлены unused. */
+
+/* Раскрывающийся список дней пакета */
+.batch-days {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  background: var(--surface);
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+.batch-day {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: var(--space-2);
+  background: var(--surface);
+  overflow: hidden;
 }
-.answers__row {
+.batch-day__head {
+  width: 100%;
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
-  font-size: var(--fs-sm);
+  padding: var(--space-3) var(--space-4);
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
 }
-.answers__row:nth-child(odd) {
+.batch-day__head:hover {
   background: var(--surface-2);
 }
-.answers__key {
-  flex-shrink: 0;
-  min-width: 180px;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
+.batch-day__title {
+  font-size: var(--fs-sm);
+  font-weight: 500;
 }
-.answers__value {
-  color: var(--text);
+.batch-day__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+}
+.batch-day__body {
+  padding: 0 var(--space-4) var(--space-4);
+  border-top: 1px solid var(--border);
+}
+.generating-inline {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-10) var(--space-4);
+  text-align: center;
+}
+.generating-inline__title {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.generating-inline__hint {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  max-width: 420px;
 }

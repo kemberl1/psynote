@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS generation_request (
     id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     doctor_id                UUID REFERENCES doctor(id) ON DELETE SET NULL,
     document_type_code       TEXT NOT NULL REFERENCES document_type(code),
+    -- parent_request_id: дочерние дневники пакетной генерации (docs/08 batch).
+    parent_request_id        UUID REFERENCES generation_request(id) ON DELETE CASCADE,
     answers_anonymized       JSONB NOT NULL DEFAULT '{}'::jsonb,
     title_safe               TEXT,
     llm_model_used           TEXT,
@@ -91,6 +93,9 @@ CREATE TABLE IF NOT EXISTS generation_request (
 );
 CREATE INDEX IF NOT EXISTS idx_genreq_doctor_id ON generation_request(doctor_id);
 CREATE INDEX IF NOT EXISTS idx_genreq_created_at ON generation_request(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_genreq_parent_id
+    ON generation_request(parent_request_id)
+    WHERE parent_request_id IS NOT NULL;
 
 -- ─── generated_document ──────────────────────────────────────────────────────
 -- Результат генерации. content_anonymized — текст с плейсхолдерами (без ПДн).

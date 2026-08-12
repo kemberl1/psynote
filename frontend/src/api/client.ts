@@ -12,7 +12,7 @@ import type { ApiErrorCode, Envelope, TokenPair } from "./types";
 
 export const API_BASE = (import.meta.env.VITE_API_BASE ?? "/api/v1").replace(/\/$/, "");
 
-type Method = "GET" | "POST" | "DELETE";
+type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
 interface RequestOptions {
   method?: Method;

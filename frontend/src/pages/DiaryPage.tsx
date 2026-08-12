@@ -1,18 +1,16 @@
 // DiaryPage (/diary) — поток генерации дневников (docs/08 §5).
-// Шаги: выбор типа документа → опросник (по схеме gateway) → генерация →
-// результат. Этап 6: статичный/реактивный рендер схемы (условная логика —
-// базовая, см. lib/questionnaire), POST /generate, лоадер, обработка ошибок.
+// При старте сразу создаётся запись «Формируется…» в истории; генерация
+// продолжается в фоне — можно уйти на другой экран.
 import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { friendlyError } from "../api/errors";
-import {
-  useDocumentTypes,
-  useGenerate,
-  useQuestionnaire,
-} from "../api/queries";
-import type { AnswerValue, Answers, GenerateResult } from "../api/types";
+import { useDocumentTypes, useQuestionnaire } from "../api/queries";
+import type { AnswerValue, Answers } from "../api/types";
 import { QuestionnaireRenderer } from "../components/questionnaire/QuestionnaireRenderer";
-import { GenerationResult } from "../components/result/GenerationResult";
-import { Banner, Button, EmptyState, Skeleton, Spinner } from "../components/ui";
+import { Banner, Button, EmptyState, Skeleton } from "../components/ui";
+import { startSingleGeneration } from "../lib/generationRunner";
+import type { EditDiaryState } from "../lib/historyTitles";
 import {
   buildDefaults,
   clearHiddenAnswers,
@@ -26,23 +24,43 @@ import "./pages.css";
 const DEFAULT_DOC_TYPE = "daily";
 
 export function DiaryPage() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const editState = (location.state as EditDiaryState | null) ?? null;
+
   const docTypesQuery = useDocumentTypes();
-  const [docType, setDocType] = useState<string>(DEFAULT_DOC_TYPE);
-  const [answers, setAnswers] = useState<Answers>({});
-  const [result, setResult] = useState<GenerateResult | null>(null);
-  // Подсветка незаполненных обязательных после попытки отправки (docs/08 §5.1).
+  const [docType, setDocType] = useState<string>(
+    editState?.documentType && editState.documentType !== "batch"
+      ? editState.documentType
+      : DEFAULT_DOC_TYPE,
+  );
+  const [answers, setAnswers] = useState<Answers>(editState?.answers ?? {});
+  const [editRequestId, setEditRequestId] = useState<string | undefined>(
+    editState?.documentType !== "batch" ? editState?.requestId : undefined,
+  );
   const [showInvalid, setShowInvalid] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<unknown>(null);
 
   const schemaQuery = useQuestionnaire(docType);
-  const generateMutation = useGenerate();
 
-  // При загрузке/смене схемы — выставляем дефолты и сбрасываем результат.
+  // Сброс edit-state из history после применения, чтобы refresh не залипал.
   useEffect(() => {
-    if (schemaQuery.data) {
-      setAnswers(buildDefaults(schemaQuery.data));
-      setResult(null);
+    if (editState) {
+      navigate(location.pathname, { replace: true, state: null });
     }
-  }, [schemaQuery.data]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // При загрузке/смене схемы — дефолты, если нет edit-ответов.
+  useEffect(() => {
+    if (schemaQuery.data && !editRequestId) {
+      setAnswers((prev) =>
+        Object.keys(prev).length > 0 ? prev : buildDefaults(schemaQuery.data!),
+      );
+    }
+  }, [schemaQuery.data, editRequestId]);
 
   const schema = schemaQuery.data;
 
@@ -57,8 +75,6 @@ export function DiaryPage() {
   const handleChange = (id: string, value: AnswerValue) => {
     setAnswers((prev) => {
       if (!schema) return { ...prev, [id]: value };
-      // Меняем ответ и сразу чистим вопросы, ставшие невидимыми (docs/06 §3):
-      // скрытые ответы не должны влиять на генерацию.
       const updated = { ...prev, [id]: value };
       const vis = computeVisibleIds(schema, updated);
       return clearHiddenAnswers(schema, updated, vis);
@@ -69,22 +85,32 @@ export function DiaryPage() {
     if (code === docType) return;
     setDocType(code);
     setAnswers({});
-    setResult(null);
+    setEditRequestId(undefined);
     setShowInvalid(false);
-    generateMutation.reset();
+    setStartError(null);
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!schema || progress === null) return;
     if (progress.missingRequired.length > 0) {
       setShowInvalid(true);
       return;
     }
     const payload = prepareAnswers(schema, answers, visible);
-    generateMutation.mutate(
-      { document_type: docType, answers: payload },
-      { onSuccess: (data) => setResult(data) },
-    );
+    setStarting(true);
+    setStartError(null);
+    try {
+      const requestId = await startSingleGeneration({
+        qc,
+        documentType: docType,
+        answers: payload,
+        requestId: editRequestId,
+      });
+      navigate(`/requests/${requestId}`);
+    } catch (err) {
+      setStartError(err);
+      setStarting(false);
+    }
   };
 
   const invalidIds = useMemo(
@@ -96,60 +122,22 @@ export function DiaryPage() {
   );
 
   const canGenerate =
-    Boolean(schema) && progress !== null && !generateMutation.isPending;
-
-  // ─── Результат ───────────────────────────────────────────────────────────
-  if (result) {
-    return (
-      <>
-        <GenerationResult
-          requestId={result.request_id}
-          documentType={docType}
-          documentTypes={docTypesQuery.data}
-          content={result.content}
-          status={result.status}
-          anonymization={result.anonymization}
-        />
-        <div style={{ marginTop: 24 }}>
-          <Button
-            onClick={() => {
-              setResult(null);
-              generateMutation.reset();
-            }}
-          >
-            ← Заполнить ещё раз
-          </Button>
-        </div>
-      </>
-    );
-  }
-
-  // ─── Генерация идёт ────────────────────────────────────────────────────────
-  if (generateMutation.isPending) {
-    return (
-      <div className="generating">
-        <Spinner size="lg" />
-        <div className="generating__title">Генерируем дневник…</div>
-        <div className="generating__hint">
-          Модель формирует обезличенный текст по вашим ответам. Это может занять
-          до минуты — пожалуйста, подождите.
-        </div>
-      </div>
-    );
-  }
+    Boolean(schema) && progress !== null && !starting;
 
   return (
     <>
       <DiaryNav />
       <div className="page-head">
-        <h1 className="page-head__title">Новый дневник</h1>
+        <h1 className="page-head__title">
+          {editRequestId ? "Редактирование дневника" : "Новый дневник"}
+        </h1>
         <p className="page-head__subtitle">
           Выберите тип документа и заполните короткий опросник — система
-          сгенерирует обезличенный текст.
+          сгенерирует обезличенный текст. После запуска запись сразу появится в
+          истории со статусом «Формируется…».
         </p>
       </div>
 
-      {/* Выбор типа документа */}
       <DocumentTypeSwitcher
         active={docType}
         onSelect={handleSelectType}
@@ -157,14 +145,12 @@ export function DiaryPage() {
         types={docTypesQuery.data}
       />
 
-      {/* Ошибка генерации (PII_DETECTED / LLM_UNAVAILABLE и пр.) */}
-      {generateMutation.isError && (
+      {startError != null && (
         <div className="section">
-          <GenerateError error={generateMutation.error} onRetry={handleGenerate} />
+          <GenerateError error={startError} onRetry={() => void handleGenerate()} />
         </div>
       )}
 
-      {/* Опросник */}
       <div className="section">
         <span className="section__label">Опросник</span>
 
@@ -200,7 +186,6 @@ export function DiaryPage() {
         )}
       </div>
 
-      {/* Нижняя панель: прогресс + submit */}
       {schema && schema.questions.length > 0 && progress && (
         <div className="form-footer">
           <span className="form-footer__progress">
@@ -210,9 +195,10 @@ export function DiaryPage() {
             variant="primary"
             size="lg"
             disabled={!canGenerate}
-            onClick={handleGenerate}
+            loading={starting}
+            onClick={() => void handleGenerate()}
           >
-            Сгенерировать
+            {editRequestId ? "Сгенерировать заново" : "Сгенерировать"}
           </Button>
         </div>
       )}
@@ -220,7 +206,6 @@ export function DiaryPage() {
   );
 }
 
-// ─── DocumentTypeSwitcher (docs/08 §4.3) ──────────────────────────────────────
 function DocumentTypeSwitcher({
   active,
   onSelect,
@@ -237,10 +222,10 @@ function DocumentTypeSwitcher({
   }
   const list =
     types && types.length > 0
-      ? types
+      ? types.filter((t) => t.code !== "batch")
       : [
-          { code: "daily", title: "Ежедневный дневник", is_active: true },
-          { code: "exam_10d", title: "Осмотр (раз в 10 дней)", is_active: true },
+          { code: "daily", title: "Ежедневный осмотр", is_active: true },
+          { code: "exam_10d", title: "Осмотр за 10 дней", is_active: true },
         ];
   return (
     <div className="doctype" role="tablist" aria-label="Тип документа">
@@ -255,7 +240,11 @@ function DocumentTypeSwitcher({
             className={`doctype__btn${t.code === active ? " doctype__btn--active" : ""}`}
             onClick={() => onSelect(t.code)}
           >
-            {t.title}
+            {t.code === "daily"
+              ? "Ежедневный осмотр"
+              : t.code === "exam_10d"
+                ? "Осмотр за 10 дней"
+                : t.title}
           </button>
         ))}
     </div>

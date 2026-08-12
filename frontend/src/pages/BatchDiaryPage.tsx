@@ -1,25 +1,21 @@
 // BatchDiaryPage (/diary/batch) — пакетная генерация дневников за период.
-// Нарративный опросник (один раз) → AI строит полный дневниковый ряд с правильной дугой.
-// Дни 10/20/30… автоматически получают шаблон exam_10d.
-import { useAuth } from "../auth/AuthContext";
-import { useMemo, useState } from "react";
+// Одна запись в истории (пакет) + дочерние дни. Генерация в фоне.
+import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { friendlyError } from "../api/errors";
-import { generate } from "../api/endpoints";
-import type { Answers, ExportFormat, GenerateResult } from "../api/types";
+import { deleteRequest } from "../api/endpoints";
+import type { Answers } from "../api/types";
 import { QuestionnaireRenderer } from "../components/questionnaire/QuestionnaireRenderer";
-import { DocumentView } from "../components/result/DocumentView";
-import { Banner, Button, EmptyState, Spinner } from "../components/ui";
-import { downloadBatchExport } from "../lib/download";
-import { buildExportSubstitutions } from "../lib/exportSubstitutions";
+import { Banner, Button } from "../components/ui";
 import {
   buildBatchPlan,
   buildGenerateAnswers,
-  type BatchDayPlan,
   validateBatchDates,
 } from "../lib/batchDiary";
 import { BATCH_QUESTIONNAIRE } from "../lib/batchQuestionnaire";
-import { documentTypeLabel } from "../lib/format";
+import { startBatchGeneration } from "../lib/generationRunner";
+import type { EditDiaryState } from "../lib/historyTitles";
 import {
   buildDefaults,
   computeProgress,
@@ -29,30 +25,40 @@ import {
 import { DiaryNav } from "./DiaryNav";
 import "./pages.css";
 
-type DayStatus = "pending" | "running" | "done" | "error";
-
-interface DayResult {
-  plan: BatchDayPlan;
-  status: DayStatus;
-  result?: GenerateResult;
-  error?: string;
-}
-
 export function BatchDiaryPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const editState = (location.state as EditDiaryState | null) ?? null;
   const schema = BATCH_QUESTIONNAIRE;
 
-  const [admissionDate, setAdmissionDate] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [estimatedDischargeDate, setEstimatedDischargeDate] = useState("");
-  const [answers, setAnswers] = useState<Answers>(() => buildDefaults(schema));
-  const [directorContext, setDirectorContext] = useState("");
+  const [admissionDate, setAdmissionDate] = useState(
+    editState?.batchMeta?.admission_date ?? "",
+  );
+  const [dateFrom, setDateFrom] = useState(editState?.batchMeta?.date_from ?? "");
+  const [dateTo, setDateTo] = useState(editState?.batchMeta?.date_to ?? "");
+  const [estimatedDischargeDate, setEstimatedDischargeDate] = useState(
+    editState?.batchMeta?.estimated_discharge ?? "",
+  );
+  const [answers, setAnswers] = useState<Answers>(
+    () => editState?.answers ?? buildDefaults(schema),
+  );
+  const [directorContext, setDirectorContext] = useState(
+    editState?.batchMeta?.director_context ?? "",
+  );
+  const [replaceRequestId, setReplaceRequestId] = useState<string | undefined>(
+    editState?.documentType === "batch" ? editState.requestId : undefined,
+  );
   const [showInvalid, setShowInvalid] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<unknown>(null);
 
-  const [running, setRunning] = useState(false);
-  const [dayResults, setDayResults] = useState<DayResult[] | null>(null);
-  const [selectedIdx, setSelectedIdx] = useState(0);
+  useEffect(() => {
+    if (editState) {
+      navigate(location.pathname, { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const visible = useMemo(
     () => computeVisibleIds(schema, answers),
@@ -78,7 +84,15 @@ export function BatchDiaryPage() {
       directorContext,
       estimatedDischargeDate,
     });
-  }, [admissionDate, dateFrom, dateTo, answers, directorContext, estimatedDischargeDate, dateValidation.ok]);
+  }, [
+    admissionDate,
+    dateFrom,
+    dateTo,
+    answers,
+    directorContext,
+    estimatedDischargeDate,
+    dateValidation.ok,
+  ]);
 
   const invalidIds = useMemo(
     () =>
@@ -96,7 +110,7 @@ export function BatchDiaryPage() {
     dateValidation.ok &&
     progress !== null &&
     progress.missingRequired.length === 0 &&
-    !running;
+    !starting;
 
   const handleGenerate = async () => {
     if (!progress || !planPreview) return;
@@ -107,122 +121,84 @@ export function BatchDiaryPage() {
     if (!dateValidation.ok) return;
 
     setShowInvalid(false);
-    setRunning(true);
+    setStarting(true);
+    setStartError(null);
 
     const payload = prepareAnswers(schema, answers, visible);
     const totalDays = planPreview.days.length;
-    const initial: DayResult[] = planPreview.days.map((plan) => ({
-      plan,
-      status: "pending",
+    const days = planPreview.days.map((plan) => ({
+      dayNumber: plan.dayNumber,
+      isoDate: plan.isoDate,
+      documentType: plan.documentType,
+      answers: buildGenerateAnswers(
+        payload,
+        plan.dayNumber,
+        totalDays,
+        plan.isoDate,
+        directorContext,
+        estimatedDischargeDate,
+        plan.documentType,
+      ),
     }));
-    setDayResults(initial);
-    setSelectedIdx(0);
 
-    for (let i = 0; i < planPreview.days.length; i++) {
-      const plan = planPreview.days[i];
-      setDayResults((prev) =>
-        prev?.map((r, idx) =>
-          idx === i ? { ...r, status: "running" } : r,
-        ) ?? null,
-      );
-
-      try {
-        const genAnswers = buildGenerateAnswers(
-          payload,
-          plan.dayNumber,
-          totalDays,
-          plan.isoDate,
-          directorContext,
-          estimatedDischargeDate,
-          plan.documentType,
-        );
-        const result = await generate({
-          document_type: plan.documentType,
-          answers: genAnswers,
-        });
-        setDayResults((prev) =>
-          prev?.map((r, idx) =>
-            idx === i ? { ...r, status: "done", result } : r,
-          ) ?? null,
-        );
-      } catch (err) {
-        const f = friendlyError(err);
-        setDayResults((prev) =>
-          prev?.map((r, idx) =>
-            idx === i
-              ? { ...r, status: "error", error: f.detail || f.title }
-              : r,
-          ) ?? null,
-        );
+    try {
+      // При повторной генерации пакета удаляем старую запись (дети cascade),
+      // чтобы не копились дубликаты дней.
+      if (replaceRequestId) {
+        try {
+          await deleteRequest(replaceRequestId);
+        } catch {
+          /* если уже удалена — продолжаем */
+        }
+        setReplaceRequestId(undefined);
       }
+
+      const parentId = await startBatchGeneration({
+        qc,
+        meta: {
+          admission_date: admissionDate,
+          date_from: dateFrom,
+          date_to: dateTo,
+          estimated_discharge: estimatedDischargeDate,
+          director_context: directorContext,
+        },
+        narrativeAnswers: payload,
+        days,
+      });
+      navigate(`/requests/${parentId}`);
+    } catch (err) {
+      setStartError(err);
+      setStarting(false);
     }
-
-    setRunning(false);
-    void qc.invalidateQueries({ queryKey: ["requests"] });
   };
-
-  const handleReset = () => {
-    setDayResults(null);
-    setSelectedIdx(0);
-  };
-
-  const doneCount =
-    dayResults?.filter((r) => r.status === "done").length ?? 0;
-  const errorCount =
-    dayResults?.filter((r) => r.status === "error").length ?? 0;
-
-  if (dayResults && !running && doneCount + errorCount === dayResults.length) {
-    return (
-      <>
-        <DiaryNav />
-        <BatchResultView
-          results={dayResults}
-          selectedIdx={selectedIdx}
-          onSelect={setSelectedIdx}
-          onReset={handleReset}
-        />
-      </>
-    );
-  }
-
-  if (running && dayResults) {
-    const current = dayResults.find((r) => r.status === "running");
-    const completed = dayResults.filter(
-      (r) => r.status === "done" || r.status === "error",
-    ).length;
-    return (
-      <>
-        <DiaryNav />
-        <div className="generating">
-          <Spinner size="lg" />
-          <div className="generating__title">
-            Генерация дневников за период… {completed} / {dayResults.length}
-          </div>
-          <div className="generating__hint">
-            {current
-              ? `День ${current.plan.dayNumber} — ${documentTypeLabel(current.plan.documentType)}`
-              : "Завершаем последний дневник…"}
-          </div>
-          <BatchProgressList results={dayResults} compact />
-        </div>
-      </>
-    );
-  }
 
   return (
     <>
       <DiaryNav />
 
       <div className="page-head">
-        <h1 className="page-head__title">Сформировать дневники за выбранный период</h1>
+        <h1 className="page-head__title">
+          {replaceRequestId
+            ? "Редактирование пакета"
+            : "Сформировать дневники за выбранный период"}
+        </h1>
         <p className="page-head__subtitle">
           Опишите нарратив периода один раз — AI построит полный ряд дневников
-          с правильной клинической динамикой. Дни 10, 20, 30… автоматически
-          оформятся как расширенный осмотр.
+          с правильной клинической динамикой. В истории появится одна запись
+          пакета; внутри можно раскрыть каждый день.
         </p>
       </div>
 
-      {/* ── Период и поступление ─────────────────────────────────────────── */}
+      {startError != null && (
+        <div className="section">
+          <Banner
+            tone={friendlyError(startError).tone}
+            title={friendlyError(startError).title}
+            text={friendlyError(startError).detail}
+          />
+        </div>
+      )}
+
       <div className="section">
         <span className="section__label">Период и поступление</span>
         <div className="batch-dates">
@@ -260,19 +236,22 @@ export function BatchDiaryPage() {
           />
         </div>
         {datesComplete && !dateValidation.ok && (
-          <Banner tone="warning" title="Проверьте даты" text={dateValidation.message} />
+          <Banner
+            tone="warning"
+            title="Проверьте даты"
+            text={dateValidation.message}
+          />
         )}
         {planPreview && (
           <p className="batch-preview">
             Будет сгенерировано <b>{planPreview.days.length}</b> записей:{" "}
             <b>{planPreview.dailyCount}</b> ежедневных,{" "}
             <b>{planPreview.examCount}</b>{" "}
-            {planPreview.examCount === 1 ? "осмотр" : "осмотров"} (раз в 10 дней).
+            {planPreview.examCount === 1 ? "осмотр" : "осмотров"} за 10 дней.
           </p>
         )}
       </div>
 
-      {/* ── Дополнительный контекст ──────────────────────────────────────────── */}
       <div className="section">
         <span className="section__label">Дополнительный контекст</span>
         <label className="batch-context">
@@ -283,7 +262,7 @@ export function BatchDiaryPage() {
           <textarea
             className="field__textarea batch-context__area"
             rows={4}
-            placeholder="Например: пациент поступил в тяжёлом состоянии, постепенно стабилизировался, к концу периода — устойчивая ремиссия. Или: мать настаивает на выписке, динамика должна быть ускорена."
+            placeholder="Например: пациент поступил в тяжёлом состоянии, постепенно стабилизировался, к концу периода — устойчивая ремиссия."
             value={directorContext}
             onChange={(e) => setDirectorContext(e.target.value)}
           />
@@ -296,7 +275,6 @@ export function BatchDiaryPage() {
         </label>
       </div>
 
-      {/* ── Нарративный опросник ──────────────────────────────────────────── */}
       <div className="section">
         <span className="section__label">Клинические параметры</span>
         <QuestionnaireRenderer
@@ -318,9 +296,10 @@ export function BatchDiaryPage() {
             variant="primary"
             size="lg"
             disabled={!canGenerate}
+            loading={starting}
             onClick={() => void handleGenerate()}
           >
-            Сгенерировать пакет
+            {replaceRequestId ? "Сгенерировать пакет заново" : "Сгенерировать пакет"}
           </Button>
         </div>
       )}
@@ -364,154 +343,13 @@ function DateField({
         onChange={(e) => onChange(e.target.value)}
         required={required}
       />
-      {help && <span className="field__help">{help}</span>}
-    </label>
-  );
-}
-
-function BatchProgressList({
-  results,
-  compact = false,
-}: {
-  results: DayResult[];
-  compact?: boolean;
-}) {
-  return (
-    <ul className={`batch-progress${compact ? " batch-progress--compact" : ""}`}>
-      {results.map((r) => (
-        <li
-          key={r.plan.isoDate}
-          className={`batch-progress__item batch-progress__item--${r.status}`}
-        >
-          <span className="batch-progress__day">День {r.plan.dayNumber}</span>
-          <span className="batch-progress__type">
-            {documentTypeLabel(r.plan.documentType)}
-          </span>
-          <span className="batch-progress__status">
-            {r.status === "pending" && "ожидание"}
-            {r.status === "running" && "…"}
-            {r.status === "done" && "✓"}
-            {r.status === "error" && "✗"}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function BatchResultView({
-  results,
-  selectedIdx,
-  onSelect,
-  onReset,
-}: {
-  results: DayResult[];
-  selectedIdx: number;
-  onSelect: (idx: number) => void;
-  onReset: () => void;
-}) {
-  const { doctor } = useAuth();
-  const done = results.filter((r) => r.status === "done").length;
-  const failed = results.filter((r) => r.status === "error").length;
-  const selected = results[selectedIdx];
-  const [exporting, setExporting] = useState<ExportFormat | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-
-  const doneIds = results
-    .filter((r) => r.status === "done" && r.result?.request_id)
-    .map((r) => r.result!.request_id);
-
-  const canExport = doneIds.length > 0;
-
-  const handleBatchExport = async (format: ExportFormat) => {
-    if (!canExport || exporting) return;
-    setExporting(format);
-    try {
-      await downloadBatchExport({
-        format,
-        request_ids: doneIds,
-        substitutions: buildExportSubstitutions({ doctorName: doctor?.display_name }),
-      });
-      setToast("Файл сохранён");
-    } catch {
-      setToast("Не удалось сформировать файл");
-    } finally {
-      setExporting(null);
-    }
-  };
-
-  return (
-    <>
-      <div className="page-head">
-        <h1 className="page-head__title">Пакет готов</h1>
-        <p className="page-head__subtitle">
-          Сгенерировано {done} из {results.length}
-          {failed > 0 ? `, ошибок: ${failed}` : ""}. Записи сохранены в истории.
-        </p>
-      </div>
-
-      <div className="batch-result">
-        <aside className="batch-result__list" aria-label="Список дней">
-          {results.map((r, idx) => (
-            <button
-              key={r.plan.isoDate}
-              type="button"
-              className={`batch-result__item${
-                idx === selectedIdx ? " batch-result__item--active" : ""
-              } batch-result__item--${r.status}`}
-              onClick={() => onSelect(idx)}
-            >
-              <span>
-                День {r.plan.dayNumber} · {documentTypeLabel(r.plan.documentType)}
-              </span>
-              {r.status === "error" && (
-                <span className="batch-result__err">ошибка</span>
-              )}
-            </button>
-          ))}
-        </aside>
-
-        <div className="batch-result__content">
-          {selected?.status === "done" && selected.result && (
-            <DocumentView content={selected.result.content} />
-          )}
-          {selected?.status === "error" && (
-            <EmptyState
-              icon="⚠"
-              title="Не удалось сгенерировать"
-              text={selected.error ?? "Попробуйте повторить для этого дня вручную."}
-            />
-          )}
-          {selected?.status === "pending" && (
-            <EmptyState title="Не обработано" text="День не был сгенерирован." />
-          )}
-        </div>
-      </div>
-
-      <div style={{ marginTop: 24, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <Button
-          onClick={() => void handleBatchExport("docx")}
-          disabled={!canExport || exporting !== null}
-          loading={exporting === "docx"}
-        >
-          Экспорт в Word
-        </Button>
-        <Button
-          onClick={() => void handleBatchExport("pdf")}
-          disabled={!canExport || exporting !== null}
-          loading={exporting === "pdf"}
-        >
-          Экспорт в PDF
-        </Button>
-        <Button onClick={onReset}>← Новый пакет</Button>
-      </div>
-
-      {toast && (
-        <div className="toast" role="status" style={{ marginTop: 12 }}>
-          <span aria-hidden="true">✓</span>
-          {toast}
-        </div>
+      {help ? (
+        <span className="field__help">{help}</span>
+      ) : (
+        <span className="field__help" aria-hidden="true">
+          &nbsp;
+        </span>
       )}
-    </>
+    </label>
   );
 }
