@@ -1,0 +1,77 @@
+# Пуш в main → Coolify сам выкатывает. Этот workflow только фиксирует
+# факт выката в GitHub: Environment «production» (кнопка View deployment)
+# и релиз со ссылкой на сайт.
+name: Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  deployments: write
+
+env:
+  PROD_URL: ${{ vars.PRODUCTION_URL || 'https://mzvvi52fe6xm9e433yo0mgb4.185.119.57.28.sslip.io' }}
+
+jobs:
+  record:
+    name: Record production deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL || 'https://mzvvi52fe6xm9e433yo0mgb4.185.119.57.28.sslip.io' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if the site already answers
+        id: health
+        env:
+          URL: ${{ env.PROD_URL }}
+        run: |
+          if curl -fsS --max-time 20 "${URL}/api/v1/health" >/dev/null; then
+            echo "live=true" >> "$GITHUB_OUTPUT"
+            echo "Сайт отвечает: ${URL}"
+          else
+            echo "live=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Сейчас /api/v1/health не 200 — Coolify мог ещё собирать. Ссылка на сайт в релизе всё равно есть."
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ env.PROD_URL }}
+          LIVE: ${{ steps.health.outputs.live }}
+        run: |
+          tag="prod-${GITHUB_SHA::7}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "релиз ${tag} уже есть"
+            exit 0
+          fi
+          status="Coolify выкатывает этот коммит."
+          if [ "$LIVE" = "true" ]; then
+            status="Сайт уже отвечает на /api/v1/health."
+          fi
+          {
+            echo "## Куда зайти"
+            echo
+            echo "- Сайт: ${URL}"
+            echo "- Логин: \`admin@aimed.local\`"
+            echo "- Пароль seed: см. [docs/12_deploy_timeweb.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/12_deploy_timeweb.md) (смени после первого входа)"
+            echo
+            echo "${status}"
+            echo
+            echo "Коммит: ${GITHUB_SHA}"
+          } > "${RUNNER_TEMP}/release-notes.md"
+          gh release create "$tag" \
+            --title "Прод ${tag}" \
+            --notes-file "${RUNNER_TEMP}/release-notes.md" \
+            --latest

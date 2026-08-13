@@ -20,6 +20,9 @@
 </p>
 
 <p align="center">
+  <a href="https://mzvvi52fe6xm9e433yo0mgb4.185.119.57.28.sslip.io">Прод</a> ·
+  <a href="https://github.com/kemberl1/psynote/deployments">Деплои</a> ·
+  <a href="https://github.com/kemberl1/psynote/releases">Релизы</a> ·
   <a href="#-архитектура">Архитектура</a> ·
   <a href="#-стек-технологий">Стек</a> ·
   <a href="#-ключевые-фичи">Фичи</a> ·
@@ -185,11 +188,11 @@ docker compose down -v     # + удалить volume-данные (postgres, qdr
 
 ### Прод (врачи, HTTPS, автодеплой из `main`)
 
-Локальный `docker compose` — для разработки. Боевой выкат на Timeweb VPS + Coolify:
+- **Сайт:** [открыть PsyNote](https://mzvvi52fe6xm9e433yo0mgb4.185.119.57.28.sslip.io)
+- **Вход:** `admin@aimed.local` (seed-пароль — в [`docs/12_deploy_timeweb.md`](docs/12_deploy_timeweb.md), смени после первого входа)
+- **Когда выкатилось:** каждый пуш в `main` → Coolify собирает, GitHub пишет [деплой](https://github.com/kemberl1/psynote/deployments) и [релиз](https://github.com/kemberl1/psynote/releases) со ссылкой на сайт
 
-- конфиг: [`docker-compose.prod.yml`](docker-compose.prod.yml)
-- фронт: [`frontend/Dockerfile.prod`](frontend/Dockerfile.prod) + nginx
-- пошагово для новичка: [`docs/12_deploy_timeweb.md`](docs/12_deploy_timeweb.md)
+Локальный `docker compose` — для разработки. Боевой стек: [`docker-compose.prod.yml`](docker-compose.prod.yml), фронт [`frontend/Dockerfile.prod`](frontend/Dockerfile.prod). Пошагово: [`docs/12_deploy_timeweb.md`](docs/12_deploy_timeweb.md).
 
 ### Авто-подбор свободных портов
 

@@ -17,6 +17,19 @@
 
 Пуш в `main` на GitHub → Coolify сам пересобирает и выкатывает.
 
+В GitHub это видно так:
+
+| Где | Что там |
+|---|---|
+| [Сайт](https://mzvvi52fe6xm9e433yo0mgb4.185.119.57.28.sslip.io) | Прод для врача |
+| [Deployments](https://github.com/kemberl1/psynote/deployments) | Когда выкатилось + кнопка **View deployment** |
+| [Releases](https://github.com/kemberl1/psynote/releases) | Релиз на каждый пуш в `main` (тег `prod-<sha>`) со ссылкой и логином |
+
+Логин: `admin@aimed.local`. Пароль seed — ниже в шаге H.
+
+Если сменится домен Coolify — поправь переменную репозитория **`PRODUCTION_URL`**
+(Settings → Secrets and variables → Actions → Variables) и ссылки в README.
+
 ---
 
 ## Перед стартом (чеклист)
