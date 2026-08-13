@@ -216,8 +216,58 @@
 { "meta": {...}, "data": { "status": "ok", "llm": { "enabled": true, "models_available": ["deepseek-v4-flash","deepseek-v4-pro","deepseek-v4-flash"] }, "vector_db": "ok" } }
 ```
 
-### (Будущее) Админка корпуса
-- `POST /api/v1/admin/corpus` — загрузка документа в корпус (анонимизация + ingestion). Роль `admin`. Низкий приоритет.
+### POST /api/v1/admin/documents
+Загрузка документа в корпус (admin). См. существующий admin UI.
+
+---
+
+## 8.1. Чат поддержки
+
+Один диалог на врача. Сообщения из виджета (`sender_role=user`) и ответы из админки (`sender_role=support`).
+
+### GET /api/v1/support/thread
+Свой диалог. Если ещё не писали — `{ status: "none", unread: 0, messages: [] }`.
+
+### POST /api/v1/support/messages
+```jsonc
+{ "body": "Не генерируется осмотр за 10 дней" }
+```
+Создаёт диалог при первом сообщении. → 201 + сообщение.
+
+### POST /api/v1/support/thread/read
+Сбросить непрочитанные у врача.
+
+### GET /api/v1/admin/support/summary
+`{ unread_messages, unread_threads }` — только admin.
+
+### GET /api/v1/admin/support/threads
+Список диалогов (новые/непрочитанные сверху).
+
+### GET /api/v1/admin/support/threads/{id}
+Диалог + сообщения.
+
+### POST /api/v1/admin/support/threads/{id}/messages
+Ответ поддержки. `{ "body": "…" }`
+
+### POST /api/v1/admin/support/threads/{id}/read
+Сбросить непрочитанные у админа.
+
+---
+
+## 8.2. Отзывы на генерации
+
+Один отзыв на пару (дневник, врач): звёзды 1–5, комментарий, цитата.
+
+### GET /api/v1/requests/{id}/feedback
+Свой отзыв: `{ "feedback": {…} | null }`. 404, если дневник чужой.
+
+### PUT /api/v1/requests/{id}/feedback
+```jsonc
+{ "rating": 4, "comment": "тонковато в динамике", "quote": "состояние стабильное…" }
+```
+
+### GET /api/v1/admin/feedback
+Все отзывы с автором и заголовком дневника. Только admin.
 
 ---
 
@@ -240,7 +290,18 @@
 | POST | `/requests/{id}/export` | экспорт docx/pdf/txt | ✅ |
 | POST | `/export/batch` | пакетный экспорт в один файл | ✅ |
 | GET | `/health` | статус | — |
-| POST | `/admin/corpus` *(future)* | загрузка корпуса | ✅ admin |
+| GET | `/support/thread` | свой чат поддержки | ✅ |
+| POST | `/support/messages` | написать в поддержку | ✅ |
+| POST | `/support/thread/read` | прочитано (врач) | ✅ |
+| GET | `/requests/{id}/feedback` | свой отзыв на дневник | ✅ |
+| PUT | `/requests/{id}/feedback` | сохранить отзыв | ✅ |
+| GET | `/admin/documents` | корпус | ✅ admin |
+| POST | `/admin/documents` | загрузка в корпус | ✅ admin |
+| GET | `/admin/support/summary` | непрочитанные чаты | ✅ admin |
+| GET | `/admin/support/threads` | инбокс поддержки | ✅ admin |
+| GET | `/admin/support/threads/{id}` | диалог | ✅ admin |
+| POST | `/admin/support/threads/{id}/messages` | ответить | ✅ admin |
+| GET | `/admin/feedback` | все отзывы | ✅ admin |
 
 ---
 

@@ -4,7 +4,13 @@ import { request, uploadRequest } from "./client";
 import type {
   AdminDocument,
   AdminDocumentListResult,
+  AdminFeedbackItem,
+  AdminFeedbackListResult,
+  AdminSupportThreadDetail,
   AdminUploadResult,
+  FeedbackGetResult,
+  FeedbackUpsertBody,
+  GenerationFeedback,
   DoctorProfile,
   DocumentType,
   GenerateRequest,
@@ -19,6 +25,11 @@ import type {
   QuestionnaireSchema,
   RegisterRequest,
   RegisterResult,
+  SupportMessage,
+  SupportSummary,
+  SupportThreadListItem,
+  SupportThreadListResult,
+  SupportThreadView,
   TokenPair,
 } from "./types";
 
@@ -140,4 +151,101 @@ export function fetchAdminDocument(
   return request<AdminDocument>(
     `/admin/documents/${encodeURIComponent(id)}`, { signal },
   );
+}
+
+// ─── Чат поддержки ─────────────────────────────────────────────────────────
+
+export function fetchSupportThread(signal?: AbortSignal): Promise<SupportThreadView> {
+  return request<SupportThreadView>("/support/thread", { signal });
+}
+
+export function sendSupportMessage(
+  body: string, signal?: AbortSignal,
+): Promise<SupportMessage> {
+  return request<SupportMessage>("/support/messages", {
+    method: "POST", body: { body }, signal,
+  });
+}
+
+export function markSupportRead(signal?: AbortSignal): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>("/support/thread/read", {
+    method: "POST", body: {}, signal,
+  });
+}
+
+export function fetchAdminSupportSummary(signal?: AbortSignal): Promise<SupportSummary> {
+  return request<SupportSummary>("/admin/support/summary", { signal });
+}
+
+export async function fetchAdminSupportThreads(
+  params: { limit?: number; offset?: number } = {},
+  signal?: AbortSignal,
+): Promise<SupportThreadListResult> {
+  let total = 0;
+  const items = await request<SupportThreadListItem[]>(
+    "/admin/support/threads",
+    { query: { limit: params.limit, offset: params.offset }, signal },
+    (env) => { total = env.meta?.total ?? 0; },
+  );
+  const list = items ?? [];
+  return { items: list, total: total || list.length };
+}
+
+export function fetchAdminSupportThread(
+  id: string, signal?: AbortSignal,
+): Promise<AdminSupportThreadDetail> {
+  return request<AdminSupportThreadDetail>(
+    `/admin/support/threads/${encodeURIComponent(id)}`, { signal },
+  );
+}
+
+export function replyAdminSupport(
+  threadId: string, body: string, signal?: AbortSignal,
+): Promise<SupportMessage> {
+  return request<SupportMessage>(
+    `/admin/support/threads/${encodeURIComponent(threadId)}/messages`,
+    { method: "POST", body: { body }, signal },
+  );
+}
+
+export function markAdminSupportRead(
+  threadId: string, signal?: AbortSignal,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    `/admin/support/threads/${encodeURIComponent(threadId)}/read`,
+    { method: "POST", body: {}, signal },
+  );
+}
+
+// ─── Отзывы на генерации ───────────────────────────────────────────────────
+
+export function fetchRequestFeedback(
+  requestId: string, signal?: AbortSignal,
+): Promise<FeedbackGetResult> {
+  return request<FeedbackGetResult>(
+    `/requests/${encodeURIComponent(requestId)}/feedback`, { signal },
+  );
+}
+
+export function upsertRequestFeedback(
+  requestId: string, body: FeedbackUpsertBody, signal?: AbortSignal,
+): Promise<GenerationFeedback> {
+  return request<GenerationFeedback>(
+    `/requests/${encodeURIComponent(requestId)}/feedback`,
+    { method: "PUT", body, signal },
+  );
+}
+
+export async function fetchAdminFeedback(
+  params: { limit?: number; offset?: number } = {},
+  signal?: AbortSignal,
+): Promise<AdminFeedbackListResult> {
+  let total = 0;
+  const items = await request<AdminFeedbackItem[]>(
+    "/admin/feedback",
+    { query: { limit: params.limit, offset: params.offset }, signal },
+    (env) => { total = env.meta?.total ?? 0; },
+  );
+  const list = items ?? [];
+  return { items: list, total: total || list.length };
 }

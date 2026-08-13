@@ -1,9 +1,56 @@
 /* Стили админ-страницы (Этап 10, docs/08 §2 — тёмная тема Cursor). */
 
+.admin-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border, #242428);
+  border-radius: 12px;
+  background: var(--surface, #141416);
+  width: fit-content;
+}
+.admin-tabs__link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary, #a1a1aa);
+  transition: background 160ms ease, color 160ms ease;
+}
+.admin-tabs__link:hover {
+  color: var(--text, #ededed);
+  background: var(--surface-2, #19191c);
+}
+.admin-tabs__link--active {
+  color: var(--text, #ededed);
+  background: var(--surface-3, #202024);
+}
+.admin-tabs__badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ff7676;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+
 .admin-page {
   max-width: 800px;
-  margin: 0 auto;
-  padding: 32px 24px;
+  margin: 0;
+  padding: 8px 0 32px;
 }
 
 .admin-page__title {
@@ -176,4 +223,231 @@
   font-size: 0.75rem;
   color: #ef4444;
   margin-top: 4px;
+}
+
+/* Inbox */
+
+.admin-inbox {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  min-height: 560px;
+  border: 1px solid var(--border, #242428);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface, #141416);
+}
+.admin-inbox__list {
+  border-right: 1px solid var(--border, #242428);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg-elevated, #0e0e10);
+}
+.admin-inbox__list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px 10px;
+}
+.admin-inbox__list-head h2 {
+  font-size: 14px;
+}
+.admin-inbox__count {
+  font-size: 11px;
+  color: var(--text-tertiary, #6b6b73);
+}
+.admin-inbox__loading,
+.admin-inbox__empty {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--text-secondary, #a1a1aa);
+}
+.admin-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border, #242428);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.admin-thread:hover {
+  background: var(--surface-2, #19191c);
+}
+.admin-thread--active {
+  background: var(--surface-2, #19191c);
+}
+.admin-thread__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.admin-thread__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #ededed);
+}
+.admin-thread__unread {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #7c9cff;
+  color: #0a0a0b;
+  font-size: 10px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+.admin-thread__preview {
+  font-size: 12px;
+  color: var(--text-secondary, #a1a1aa);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.admin-thread__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-tertiary, #6b6b73);
+}
+
+.admin-inbox__chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.admin-chat__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border, #242428);
+}
+.admin-chat__name {
+  font-size: 15px;
+  font-weight: 600;
+}
+.admin-chat__email {
+  font-size: 12px;
+  color: var(--text-tertiary, #6b6b73);
+}
+.admin-chat__log {
+  flex: 1;
+  min-height: 280px;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.admin-chat__form {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--border, #242428);
+}
+.admin-chat__input {
+  flex: 1;
+  min-height: 44px;
+  resize: vertical;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text, #ededed);
+  background: var(--bg, #0a0a0b);
+  border: 1px solid var(--border, #242428);
+  border-radius: 8px;
+}
+.admin-chat__input:focus {
+  outline: none;
+  border-color: var(--border-strong, #303036);
+}
+
+/* Feedback list */
+
+.admin-feedback__head h2 {
+  font-size: 1.25rem;
+  margin-bottom: 6px;
+}
+.admin-feedback__head p {
+  font-size: 13px;
+  color: var(--text-secondary, #a1a1aa);
+  line-height: 1.5;
+  max-width: 560px;
+  margin-bottom: 20px;
+}
+.admin-feedback__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.admin-fb-card {
+  padding: 16px 18px;
+  border: 1px solid var(--border, #242428);
+  border-radius: 12px;
+  background: var(--surface, #141416);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.admin-fb-card__top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.admin-fb-card__date {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-tertiary, #6b6b73);
+}
+.admin-fb-card__title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.admin-fb-card__who {
+  font-size: 12px;
+  color: var(--text-secondary, #a1a1aa);
+}
+.admin-fb-card__comment {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text, #ededed);
+}
+.admin-fb-card__quote {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent, #7c9cff);
+  background: var(--accent-soft, rgba(124, 156, 255, 0.12));
+  border-radius: 0 8px 8px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary, #a1a1aa);
+  white-space: pre-wrap;
+}
+.admin-fb-card__muted {
+  font-size: 12px;
+  color: var(--text-tertiary, #6b6b73);
+}
+
+@media (max-width: 880px) {
+  .admin-inbox {
+    grid-template-columns: 1fr;
+  }
+  .admin-inbox__list {
+    max-height: 240px;
+    border-right: none;
+    border-bottom: 1px solid var(--border, #242428);
+  }
 }

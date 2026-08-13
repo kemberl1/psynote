@@ -1,6 +1,7 @@
 // Верхняя панель: брендинг PsyNote + профиль текущего врача и выход (docs/08 §4.3).
 // Этап 10: ссылка на /admin видна только для role=admin.
 import { Link, useNavigate } from "react-router-dom";
+import { useAdminSupportSummary } from "../../api/queries";
 import { useAuth } from "../../auth/AuthContext";
 import { Badge, Button } from "../ui";
 
@@ -19,6 +20,8 @@ export function TopBar() {
     "Врач";
   const initial = name.charAt(0).toUpperCase();
   const isAdmin = doctor?.role === "admin";
+  const supportSummary = useAdminSupportSummary(isAdmin);
+  const unreadThreads = supportSummary.data?.unread_threads ?? 0;
 
   return (
     <header className="topbar">
@@ -39,6 +42,7 @@ export function TopBar() {
           <Link to="/admin" className="topbar__admin-link">
             <Button variant="ghost" size="sm">
               Админка
+              {unreadThreads > 0 ? ` · ${unreadThreads}` : ""}
             </Button>
           </Link>
         )}

@@ -10,6 +10,7 @@ import {
   useRequestDetail,
 } from "../api/queries";
 import type { ExportFormat, HistoryChild } from "../api/types";
+import { GenerationFeedback } from "../components/feedback/GenerationFeedback";
 import { GenerationResult } from "../components/result/GenerationResult";
 import { DocumentView } from "../components/result/DocumentView";
 import { Banner, Badge, Button, Skeleton, Spinner } from "../components/ui";
@@ -195,6 +196,10 @@ export function RequestDetailPage() {
               {toast}
             </div>
           )}
+
+          {data.status === "done" && (
+            <GenerationFeedback requestId={data.request_id} />
+          )}
         </div>
       )}
 
@@ -320,6 +325,9 @@ function BatchDaysList({ children }: { children: HistoryChild[] }) {
                         PDF
                       </Button>
                     </div>
+                    {child.status === "done" && (
+                      <GenerationFeedback requestId={child.request_id} compact />
+                    )}
                   </>
                 )}
                 {!childPending && !child.content && (

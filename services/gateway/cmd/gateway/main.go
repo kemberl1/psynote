@@ -97,13 +97,22 @@ func main() {
 	}
 	adminRAG = rag
 
+	var supportRepo store.SupportRepository
+	var feedbackRepo store.FeedbackRepository
+	if pgRepo != nil {
+		supportRepo = pgRepo
+		feedbackRepo = pgRepo
+	}
+
 	mux := handlers.NewRouter(cfg, handlers.Deps{
-		Anonymizer: anon,
-		RAG:        rag,
-		AdminRAG:   adminRAG,
-		Repo:       repo,
-		AdminRepo:  adminRepo,
-		Tokens:     tokens,
+		Anonymizer:   anon,
+		RAG:          rag,
+		AdminRAG:     adminRAG,
+		Repo:         repo,
+		AdminRepo:    adminRepo,
+		SupportRepo:  supportRepo,
+		FeedbackRepo: feedbackRepo,
+		Tokens:       tokens,
 	})
 
 	srv := &http.Server{

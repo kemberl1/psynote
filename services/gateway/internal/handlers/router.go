@@ -18,12 +18,14 @@ import (
 
 // Deps holds the orchestration dependencies injected into the router.
 type Deps struct {
-	Anonymizer anonymizer.Anonymizer
-	RAG        ragclient.Client
-	AdminRAG   ragclient.AdminIngestClient
-	Repo       store.Repository
-	AdminRepo  store.AdminRepository
-	Tokens     *auth.TokenService
+	Anonymizer   anonymizer.Anonymizer
+	RAG          ragclient.Client
+	AdminRAG     ragclient.AdminIngestClient
+	Repo         store.Repository
+	AdminRepo    store.AdminRepository
+	SupportRepo  store.SupportRepository
+	FeedbackRepo store.FeedbackRepository
+	Tokens       *auth.TokenService
 }
 
 // NewRouter builds the HTTP handler tree.
@@ -122,6 +124,30 @@ func NewRouter(cfg config.Config, deps Deps) http.Handler {
 		mux.HandleFunc("GET "+config.APIPrefix+"/admin/documents", unavail)
 	}
 
+	// ─── Чат поддержки (виджет врача + админ-инбокс)
+	if deps.SupportRepo != nil {
+		mux.HandleFunc("GET "+config.APIPrefix+"/support/thread", protect(newSupportThreadHandler(deps.SupportRepo)))
+		mux.HandleFunc("POST "+config.APIPrefix+"/support/messages", protect(newSupportSendHandler(deps.SupportRepo)))
+		mux.HandleFunc("POST "+config.APIPrefix+"/support/thread/read", protect(newSupportReadHandler(deps.SupportRepo)))
+		mux.HandleFunc("GET "+config.APIPrefix+"/admin/support/summary", protectAdmin(newAdminSupportSummaryHandler(deps.SupportRepo)))
+		mux.HandleFunc("GET "+config.APIPrefix+"/admin/support/threads", protectAdmin(newAdminSupportListHandler(deps.SupportRepo)))
+		mux.HandleFunc("GET "+config.APIPrefix+"/admin/support/threads/{id}", protectAdmin(newAdminSupportDetailHandler(deps.SupportRepo)))
+		mux.HandleFunc("POST "+config.APIPrefix+"/admin/support/threads/{id}/messages", protectAdmin(newAdminSupportReplyHandler(deps.SupportRepo)))
+		mux.HandleFunc("POST "+config.APIPrefix+"/admin/support/threads/{id}/read", protectAdmin(newAdminSupportReadHandler(deps.SupportRepo)))
+	} else {
+		unavail := newUnavailableHandler()
+		mux.HandleFunc("GET "+config.APIPrefix+"/support/thread", unavail)
+		mux.HandleFunc("POST "+config.APIPrefix+"/support/messages", unavail)
+	}
+
+	// ─── Отзывы на генерации
+	if deps.FeedbackRepo != nil && deps.Repo != nil {
+		fd := feedbackDeps{history: deps.Repo, feedback: deps.FeedbackRepo}
+		mux.HandleFunc("GET "+config.APIPrefix+"/requests/{id}/feedback", protect(newFeedbackGetHandler(fd)))
+		mux.HandleFunc("PUT "+config.APIPrefix+"/requests/{id}/feedback", protect(newFeedbackPutHandler(fd)))
+		mux.HandleFunc("GET "+config.APIPrefix+"/admin/feedback", protectAdmin(newAdminFeedbackListHandler(deps.FeedbackRepo)))
+	}
+
 	return withCommonMiddleware(cfg, mux)
 }
 
@@ -148,7 +174,7 @@ func withCommonMiddleware(cfg config.Config, next http.Handler) http.Handler {
 			h := w.Header()
 			h.Set("Access-Control-Allow-Origin", cfg.CORSAllowedOrigin)
 			h.Set("Vary", "Origin")
-		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 			h.Set("Access-Control-Max-Age", "600")
 		}

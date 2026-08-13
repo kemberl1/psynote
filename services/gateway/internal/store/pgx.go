@@ -42,7 +42,12 @@ func NewPgxRepository(ctx context.Context, dsn string) (*PgxRepository, error) {
 		pool.Close()
 		return nil, fmt.Errorf("store: ping: %w", err)
 	}
-	return &PgxRepository{pool: pool}, nil
+	repo := &PgxRepository{pool: pool}
+	if err := repo.EnsureSupportFeedbackSchema(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return repo, nil
 }
 
 // Close releases the connection pool.

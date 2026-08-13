@@ -9,23 +9,43 @@ import {
 import {
     createPending,
     deleteRequest,
+    fetchAdminFeedback,
+    fetchAdminSupportSummary,
+    fetchAdminSupportThread,
+    fetchAdminSupportThreads,
     fetchDocumentTypes,
     fetchHistory,
     fetchQuestionnaire,
     fetchRequestDetail,
+    fetchRequestFeedback,
+    fetchSupportThread,
     generate,
+    markAdminSupportRead,
+    markSupportRead,
     patchRequest,
+    replyAdminSupport,
+    sendSupportMessage,
+    upsertRequestFeedback,
 } from "./endpoints";
 import type {
+    AdminFeedbackListResult,
+    AdminSupportThreadDetail,
     DocumentType,
+    FeedbackGetResult,
+    FeedbackUpsertBody,
     GenerateRequest,
     GenerateResult,
+    GenerationFeedback,
     HistoryDetail,
     HistoryListResult,
     PatchRequestBody,
     PendingRequest,
     PendingResult,
     QuestionnaireSchema,
+    SupportMessage,
+    SupportSummary,
+    SupportThreadListResult,
+    SupportThreadView,
 } from "./types";
 
 /** Централизованные query-ключи (предсказуемая инвалидация). */
@@ -35,6 +55,12 @@ export const queryKeys = {
   history: (limit: number, offset: number) =>
     ["requests", { limit, offset }] as const,
   requestDetail: (id: string) => ["requests", id] as const,
+  supportThread: ["support", "thread"] as const,
+  requestFeedback: (id: string) => ["feedback", id] as const,
+  adminSupportSummary: ["admin", "support", "summary"] as const,
+  adminSupportThreads: ["admin", "support", "threads"] as const,
+  adminSupportThread: (id: string) => ["admin", "support", "thread", id] as const,
+  adminFeedback: ["admin", "feedback"] as const,
 };
 
 function invalidateHistory(qc: ReturnType<typeof useQueryClient>) {
@@ -150,5 +176,116 @@ export function useDeleteRequest() {
       invalidateHistory(qc);
       qc.removeQueries({ queryKey: queryKeys.requestDetail(id) });
     },
+  });
+}
+
+export function useSupportThread(enabled = true): UseQueryResult<SupportThreadView> {
+  return useQuery({
+    queryKey: queryKeys.supportThread,
+    queryFn: ({ signal }) => fetchSupportThread(signal),
+    enabled,
+    refetchInterval: 8000,
+  });
+}
+
+export function useSendSupportMessage() {
+  const qc = useQueryClient();
+  return useMutation<SupportMessage, unknown, string>({
+    mutationFn: (body) => sendSupportMessage(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.supportThread });
+    },
+  });
+}
+
+export function useMarkSupportRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => markSupportRead(),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.supportThread });
+    },
+  });
+}
+
+export function useRequestFeedback(
+  requestId: string | undefined,
+): UseQueryResult<FeedbackGetResult> {
+  return useQuery({
+    queryKey: queryKeys.requestFeedback(requestId ?? ""),
+    queryFn: ({ signal }) => fetchRequestFeedback(requestId!, signal),
+    enabled: Boolean(requestId),
+  });
+}
+
+export function useUpsertFeedback(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation<GenerationFeedback, unknown, FeedbackUpsertBody>({
+    mutationFn: (body) => upsertRequestFeedback(requestId, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.requestFeedback(requestId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.adminFeedback });
+    },
+  });
+}
+
+export function useAdminSupportSummary(enabled = true): UseQueryResult<SupportSummary> {
+  return useQuery({
+    queryKey: queryKeys.adminSupportSummary,
+    queryFn: ({ signal }) => fetchAdminSupportSummary(signal),
+    enabled,
+    refetchInterval: 10000,
+  });
+}
+
+export function useAdminSupportThreads(enabled = true): UseQueryResult<SupportThreadListResult> {
+  return useQuery({
+    queryKey: queryKeys.adminSupportThreads,
+    queryFn: ({ signal }) => fetchAdminSupportThreads({ limit: 80 }, signal),
+    enabled,
+    refetchInterval: 6000,
+  });
+}
+
+export function useAdminSupportThread(
+  id: string | undefined,
+): UseQueryResult<AdminSupportThreadDetail> {
+  return useQuery({
+    queryKey: queryKeys.adminSupportThread(id ?? ""),
+    queryFn: ({ signal }) => fetchAdminSupportThread(id!, signal),
+    enabled: Boolean(id),
+    refetchInterval: 4000,
+  });
+}
+
+export function useReplyAdminSupport(threadId: string) {
+  const qc = useQueryClient();
+  return useMutation<SupportMessage, unknown, string>({
+    mutationFn: (body) => replyAdminSupport(threadId, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.adminSupportThread(threadId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.adminSupportThreads });
+      void qc.invalidateQueries({ queryKey: queryKeys.adminSupportSummary });
+    },
+  });
+}
+
+export function useMarkAdminSupportRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (threadId: string) => markAdminSupportRead(threadId),
+    onSuccess: (_data, threadId) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.adminSupportThread(threadId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.adminSupportThreads });
+      void qc.invalidateQueries({ queryKey: queryKeys.adminSupportSummary });
+    },
+  });
+}
+
+export function useAdminFeedback(enabled = true): UseQueryResult<AdminFeedbackListResult> {
+  return useQuery({
+    queryKey: queryKeys.adminFeedback,
+    queryFn: ({ signal }) => fetchAdminFeedback({ limit: 80 }, signal),
+    enabled,
   });
 }

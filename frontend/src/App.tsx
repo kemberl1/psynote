@@ -5,7 +5,10 @@ import { AdminRoute } from "./auth/AdminRoute";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { AppShell } from "./components/layout/AppShell";
 import { EmptyState } from "./components/ui";
+import { AdminFeedbackPage } from "./pages/AdminFeedbackPage";
+import { AdminLayout } from "./pages/AdminLayout";
 import { AdminPage } from "./pages/AdminPage";
+import { AdminSupportPage } from "./pages/AdminSupportPage";
 import { AuthPage } from "./pages/AuthPage";
 import { BatchDiaryPage } from "./pages/BatchDiaryPage";
 import { DiaryPage } from "./pages/DiaryPage";
@@ -27,6 +30,15 @@ function App() {
           <Route path="diary/batch" element={<BatchDiaryPage />} />
           {/* Просмотр прошлого результата из истории. */}
           <Route path="requests/:id" element={<RequestDetailPage />} />
+          {/* Админка: корпус, поддержка, отзывы. */}
+          <Route element={<AdminRoute />}>
+            <Route path="admin" element={<AdminLayout />}>
+              <Route index element={<AdminPage />} />
+              <Route path="support" element={<AdminSupportPage />} />
+              <Route path="support/:threadId" element={<AdminSupportPage />} />
+              <Route path="feedback" element={<AdminFeedbackPage />} />
+            </Route>
+          </Route>
           {/* Фолбэк. */}
           <Route
             path="*"
@@ -38,15 +50,6 @@ function App() {
               />
             }
           />
-        </Route>
-      </Route>
-
-      {/* Админка: защищена admin-ролей (Этап 10). */}
-      <Route element={<ProtectedRoute />}>
-        <Route element={<AppShell />}>
-          <Route element={<AdminRoute />}>
-            <Route path="admin" element={<AdminPage />} />
-          </Route>
         </Route>
       </Route>
     </Routes>

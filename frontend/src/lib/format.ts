@@ -63,6 +63,29 @@ export function formatDateTime(iso: string): string {
   });
 }
 
+/** Короткое время для чата: «только что», «5 мин», «вчера 18:40», иначе дата. */
+export function formatChatTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const now = Date.now();
+  const diff = now - d.getTime();
+  if (diff < 45_000) return "сейчас";
+  if (diff < 60 * 60 * 1000) return `${Math.max(1, Math.round(diff / 60_000))} мин`;
+  const startToday = new Date();
+  startToday.setHours(0, 0, 0, 0);
+  const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  if (d >= startToday) return time;
+  const startYesterday = new Date(startToday);
+  startYesterday.setDate(startYesterday.getDate() - 1);
+  if (d >= startYesterday) return `вчера ${time}`;
+  return d.toLocaleString("ru-RU", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /** Короткая дата «14 июня» / «14.06.26» для компактного сайдбара. */
 export function formatDateShort(iso: string): string {
   const d = new Date(iso);

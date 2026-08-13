@@ -267,3 +267,85 @@ export interface AdminDocumentListResult {
   items: AdminDocument[];
   total: number;
 }
+
+// ─── Чат поддержки ─────────────────────────────────────────────────────────
+
+export interface SupportMessage {
+  id: string;
+  thread_id: string;
+  sender_id: string;
+  sender_role: "user" | "support" | string;
+  sender_name: string;
+  body: string;
+  created_at: string;
+}
+
+export interface SupportThreadView {
+  thread_id?: string;
+  status: string;
+  unread: number;
+  messages: SupportMessage[];
+}
+
+export interface SupportThreadListItem {
+  thread_id: string;
+  doctor_id: string;
+  doctor_email: string;
+  doctor_name: string;
+  status: string;
+  last_message_at: string;
+  last_message_preview: string;
+  unread_by_admin: number;
+  unread_by_user: number;
+  created_at: string;
+}
+
+export interface SupportThreadListResult {
+  items: SupportThreadListItem[];
+  total: number;
+}
+
+export interface AdminSupportThreadDetail {
+  thread: SupportThreadListItem;
+  messages: SupportMessage[];
+}
+
+export interface SupportSummary {
+  unread_messages: number;
+  unread_threads: number;
+}
+
+// ─── Отзывы на генерации ───────────────────────────────────────────────────
+
+export interface GenerationFeedback {
+  id: string;
+  request_id: string;
+  doctor_id: string;
+  rating: number;
+  comment: string;
+  quote: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FeedbackGetResult {
+  feedback: GenerationFeedback | null;
+}
+
+export interface FeedbackUpsertBody {
+  rating: number;
+  comment?: string;
+  quote?: string;
+}
+
+export interface AdminFeedbackItem extends GenerationFeedback {
+  doctor_email: string;
+  doctor_name: string;
+  title_safe: string;
+  document_type: string;
+}
+
+export interface AdminFeedbackListResult {
+  items: AdminFeedbackItem[];
+  total: number;
+}

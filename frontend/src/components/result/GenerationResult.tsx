@@ -17,6 +17,7 @@ import { buildExportSubstitutions } from "../../lib/exportSubstitutions";
 import { documentTypeLabel, formatDateTime, statusLabel } from "../../lib/format";
 import { useAuth } from "../../auth/AuthContext";
 import { Badge, Button } from "../ui";
+import { GenerationFeedback } from "../feedback/GenerationFeedback";
 import { AnonymizationNotice } from "./AnonymizationNotice";
 import { DocumentView } from "./DocumentView";
 import "./result.css";
@@ -144,6 +145,10 @@ export function GenerationResult({
           <span aria-hidden="true">✓</span>
           {toast}
         </div>
+      )}
+
+      {requestId && status === "done" && content && (
+        <GenerationFeedback requestId={requestId} />
       )}
     </div>
   );
