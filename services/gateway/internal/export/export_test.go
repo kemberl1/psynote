@@ -138,21 +138,27 @@ func TestExportDOCX_TimesNewRoman(t *testing.T) {
 	}
 }
 
-// TestExportDOCX_DailyCompactFormat checks daily export uses narrative, not ОСМОТР template.
-func TestExportDOCX_DailyCompactFormat(t *testing.T) {
+// TestExportDOCX_DailyMatchesTemplate checks Word keeps the same header/sections as UI.
+func TestExportDOCX_DailyMatchesTemplate(t *testing.T) {
 	data, err := New().Export(context.Background(), FormatDOCX, sampleDoc())
 	if err != nil {
 		t.Fatalf("export docx: %v", err)
 	}
 	documentXML := docxDocumentXML(t, data)
-	if strings.Contains(documentXML, "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ") {
-		t.Error("daily docx must not dump full ОСМОТР template header")
+	if !strings.Contains(documentXML, "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ") {
+		t.Error("daily docx must keep ОСМОТР header like UI")
 	}
 	if !strings.Contains(documentXML, "19.09.2025") {
 		t.Error("daily docx should include date from GeneratedAt")
 	}
 	if !strings.Contains(documentXML, "Настроение сниженное") {
 		t.Error("daily docx missing psychiatric narrative")
+	}
+	if !strings.Contains(documentXML, "Психический статус") {
+		t.Error("daily docx must keep section titles")
+	}
+	if strings.Contains(strings.ToLower(documentXML), "без дополнений") {
+		t.Error("empty anamnesis must not appear in docx")
 	}
 }
 
@@ -167,7 +173,7 @@ func TestExportDOCX_BoldSectionLabels(t *testing.T) {
 		t.Error("docx should contain bold runs for narrative/labels")
 	}
 	if !strings.Contains(documentXML, "Физикальное исследование") {
-		t.Error("docx missing inline physical exam section label")
+		t.Error("docx missing physical exam section label")
 	}
 	if !strings.Contains(documentXML, `w:jc w:val="both"`) {
 		t.Error("docx body should use justify alignment (w:jc=both) per corpus сборник")

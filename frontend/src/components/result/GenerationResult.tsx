@@ -12,6 +12,7 @@ import type {
   ExportFormat,
 } from "../../api/types";
 import { copyText } from "../../lib/clipboard";
+import { omitEmptyDiarySections } from "../../lib/diaryMarkup";
 import { downloadExport } from "../../lib/download";
 import { buildExportSubstitutions } from "../../lib/exportSubstitutions";
 import { documentTypeLabel, formatDateTime, statusLabel } from "../../lib/format";
@@ -61,7 +62,7 @@ export function GenerationResult({
   }, [toast]);
 
   const handleCopy = async () => {
-    const ok = await copyText(content);
+    const ok = await copyText(omitEmptyDiarySections(content));
     setToast(ok ? "Текст скопирован" : "Не удалось скопировать");
   };
 

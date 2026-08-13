@@ -151,7 +151,7 @@ func renderTXT(doc Document) []byte {
 	var b strings.Builder
 	b.WriteString(headerLine(doc))
 	b.WriteString("\n\n")
-	b.WriteString(doc.Content)
+	b.WriteString(transformContent(doc, doc.Substitutions))
 	b.WriteString("\n")
 	return []byte(b.String())
 }

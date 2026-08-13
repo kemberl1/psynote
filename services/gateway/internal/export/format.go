@@ -1,10 +1,9 @@
 // Structural parser for the diary body, shared by the DOCX and PDF renderers.
 //
-// Форматирование под корпус (`Документы/02_корпус/…`):
+// Тот же текст, что в UI-предпросмотре (шаблон daily / exam_10d):
 //   - Times New Roman 11pt, justify;
-//   - ежедневный: жирная ДАТА, обычный текст; короткие метки «Физикальное…»;
-//   - осмотр 10д: центр «ОСМОТР», дата/время с подчёркнутыми полями;
-//   - метки секций жирные; подписи врача — центр / подчёркнутое ФИО.
+//   - шапка ИБ / ОСМОТР / дата;
+//   - метки секций жирные; пустые разделы уже вырезаны в transform.
 package export
 
 import (
@@ -127,7 +126,7 @@ func classifyLine(line string) docLine {
 	case isConsultNoteLine(line):
 		return docLine{kind: kindConsultNote, text: line}
 	}
-	if label, value, ok := splitLabelValue(line); ok {
+	if label, value, ok := splitLabelValue(line); ok && isKnownSectionLabel(label) {
 		return docLine{kind: kindLabelValue, label: label, value: value}
 	}
 	return docLine{kind: kindPlain, text: line}
@@ -273,7 +272,7 @@ func parseDocLines(content string) []docLine {
 	return out
 }
 
-// buildDocLines transforms template output into corpus layout, then classifies.
+// buildDocLines fills placeholders, drops empty sections, then classifies.
 func buildDocLines(doc Document) []docLine {
 	content := transformContent(doc, doc.Substitutions)
 	return parseDocLines(content)

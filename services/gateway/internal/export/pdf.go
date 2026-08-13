@@ -1,9 +1,7 @@
 // PDF rendering via github.com/go-pdf/fpdf with embedded Cyrillic TTF (DejaVu).
 //
-// Те же правила, что и в Word (format.go / docx.go):
-//   - ежедневный: жирная дата + обычный текст;
-//   - осмотр: центр заголовка, подчёркнутые поля даты/времени и ФИО;
-//   - жирные метки секций; подпись врача по центру.
+// Те же правила, что в Word (format.go / transform.go):
+//   шапка шаблона, жирные метки секций, пустые разделы уже вырезаны.
 package export
 
 import (

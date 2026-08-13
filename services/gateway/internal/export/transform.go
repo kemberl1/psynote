@@ -1,89 +1,32 @@
-// Transform LLM template output into corpus сборник layout before rendering.
+// Transform generated diary text before Word/PDF/TXT render.
 //
-// Daily diaries: compact narrative (DD.MM.YYYY + prose), not the full ОСМОТР
-// template. Ten-day exams: centred ОСМОТР header + structured sections.
+// Preview in UI and the downloaded file must be the same document
+// (docs/07 §7, docs/08 §5.3): template headers + named sections.
+// Empty filler sections are dropped per generation rules (docs/03,
+// rag/generation.py): no «Жалобы не предъявляет», «Без дополнений»,
+// «Без изменений» without a real finding — and never a value without
+// its section title.
 package export
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
-var (
-	placeholderRE = regexp.MustCompile(`\[[А-ЯA-Z_]+\]`)
-	headerLineRE  = regexp.MustCompile(`(?i)^(иб\s*№|осмотр)`)
-)
-
-// section is one «Метка: значение» block from the generated template.
-type section struct {
-	label string
-	value string
-}
-
-// skipSectionValues — empty/trivial section bodies dropped in compact export.
-var skipSectionValues = map[string]bool{
-	"данных нет":      true,
-	"без дополнений":  true,
-	"не предъявляет":  true,
-	"не предъявляет.": true,
-	"нет":             true,
-	"-":               true,
-	"—":               true,
-}
-
-// dailyNarrativeKeys — sections merged into the opening date-prefixed paragraph.
-var dailyNarrativeKeys = []string{
-	"Психический статус",
-	"Жалобы",
-	"Анамнез заболевания (дополнения к анамнезу)",
-	"Анамнез жизни (дополнения к анамнезу)",
-	"Соматический статус",
-}
-
-// dailyInlineKeys — physical/neuro sections kept as «Метка: значение» lines.
-// Короткие названия — как в заготовках/сборнике (не полные шаблонные).
-var dailyInlineKeys = []struct {
-	src  string
-	dest string
-}{
-	{"Физикальное исследование, локальный статус (его изменение)",
-		"Физикальное исследование"},
-	{"Неврологический статус", "Неврологический статус"},
-	{"Неврологический статус (его изменение)", "Неврологический статус"},
-}
-
-// examSectionOrder — body section order for 10-day exams (corpus reference).
-// display — метка в экспорте; srcs — возможные ключи из LLM-шаблона.
-var examSectionOrder = []struct {
-	display string
-	srcs    []string
-}{
-	{"Жалобы", []string{"Жалобы"}},
-	{"Анамнез заболевания (дополнения к анамнезу)", []string{"Анамнез заболевания (дополнения к анамнезу)"}},
-	{"Анамнез жизни (дополнения к анамнезу)", []string{"Анамнез жизни (дополнения к анамнезу)"}},
-	{"Физикальное исследование, локальный статус (его изменение)", []string{
-		"Физикальное исследование, локальный статус (его изменение)",
-		"Физикальное исследование",
-	}},
-	{"Неврологический статус (его изменение)", []string{
-		"Неврологический статус (его изменение)",
-		"Неврологический статус",
-	}},
-	{"Психический статус (его изменение)", []string{
-		"Психический статус (его изменение)",
-		"Психический статус",
-	}},
-	{"Диагноз", []string{"Диагноз"}},
-	{"Основное заболевание", []string{"Основное заболевание"}},
-	{"Синдром", []string{"Синдром"}},
-	{"Сопутствующие заболевания", []string{"Сопутствующие заболевания"}},
-	{"Дополнительные сведения", []string{"Дополнительные сведения", "Дополнительные сведения о заболевании"}},
-	{"Назначения", []string{"Назначения"}},
-	{"Выполнены медицинские вмешательства", []string{"Выполнены медицинские вмешательства"}},
-	{"План обследования (дополнения к плану)", []string{"План обследования (дополнения к плану)"}},
-	{"Этапный эпикриз", []string{"Этапный эпикриз"}},
+// skipExactValues — whole-section bodies that mean «nothing to write».
+var skipExactValues = map[string]bool{
+	"данных нет":                 true,
+	"без дополнений":             true,
+	"не предъявляет":             true,
+	"жалоб не предъявляет":       true,
+	"нет":                        true,
+	"-":                          true,
+	"—":                          true,
+	"без изменений":              true,
+	"без отрицательной динамики": true,
+	"без особенностей":           true,
 }
 
 // mergeSubstitutions returns client substitutions with server defaults from metadata.
@@ -109,10 +52,9 @@ func applySubstitutionsMap(content string, subs map[string]string) string {
 	}
 	pairs := make([]string, 0, len(subs)*2)
 	for k, v := range subs {
-		if k == "" {
-			continue
+		if k != "" {
+			pairs = append(pairs, k, v)
 		}
-		pairs = append(pairs, k, v)
 	}
 	if len(pairs) == 0 {
 		return content
@@ -120,346 +62,202 @@ func applySubstitutionsMap(content string, subs map[string]string) string {
 	return strings.NewReplacer(pairs...).Replace(content)
 }
 
-// transformContent reshapes generated template text into corpus сборник layout.
+// transformContent keeps the template layout the UI shows, fills
+// placeholders, and drops empty filler sections (docs/03 clinical rules).
 func transformContent(doc Document, subs map[string]string) string {
 	merged := mergeSubstitutions(doc, subs)
 	content := applySubstitutionsMap(doc.Content, merged)
+	return dropEmptySections(content)
+}
 
-	switch doc.DocumentTypeCode {
-	case "daily":
-		return transformDaily(content, doc.GeneratedAt, merged)
-	case "exam_10d":
-		return transformExam10d(content, doc.GeneratedAt, merged)
-	default:
-		return content
-	}
+func normalizeSkipValue(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	v = strings.Map(func(r rune) rune {
+		switch r {
+		case '.', ',', ';', ':', '!', '?', '"', '\'', '«', '»', '(', ')':
+			return -1
+		case '—', '–':
+			return '-'
+		default:
+			if unicode.IsSpace(r) {
+				return ' '
+			}
+			return r
+		}
+	}, v)
+	return strings.Join(strings.Fields(v), " ")
 }
 
 func isSkipSectionValue(v string) bool {
-	v = strings.ToLower(strings.TrimSpace(v))
+	v = normalizeSkipValue(v)
 	if v == "" {
 		return true
 	}
-	return skipSectionValues[v]
+	return skipExactValues[v]
 }
 
-func isTemplateBoilerplate(line string) bool {
-	trim := strings.TrimSpace(line)
-	if trim == "" {
-		return true
-	}
-	upper := strings.ToUpper(trim)
-	if headerLineRE.MatchString(trim) {
-		return true
-	}
-	if strings.HasPrefix(upper, "ОСМОТР") {
-		return true
-	}
-	if isDateTimeLine(trim) {
-		return true
-	}
-	if strings.HasPrefix(trim, "Фамилия, имя, отчество") {
-		return true
-	}
-	if strings.HasPrefix(trim, "Лечащий врач:") || strings.HasPrefix(trim, "Заведующий отделением:") {
-		return true
-	}
-	return false
-}
-
-func isAlreadyCompactDaily(content string) bool {
-	for _, raw := range strings.Split(normalizeNewlines(content), "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" {
-			continue
-		}
-		if datePrefixedRE.MatchString(line) {
-			return true
-		}
-		if strings.HasPrefix(strings.ToUpper(line), "ОСМОТР") {
-			return false
-		}
-	}
-	return false
-}
-
-func parseSections(content string) []section {
-	var out []section
-	for _, raw := range strings.Split(normalizeNewlines(content), "\n") {
-		line := normalizeGeneratedLine(raw)
-		if line == "" || isTemplateBoilerplate(line) {
-			continue
-		}
-		if label, value, ok := splitLabelValue(line); ok {
-			out = append(out, section{label: label, value: value})
-			continue
-		}
-		if len(out) > 0 {
-			last := &out[len(out)-1]
-			if last.value != "" {
-				last.value += " "
-			}
-			last.value += line
-		}
-	}
-	return out
-}
-
-func sectionsMap(sections []section) map[string]string {
-	m := make(map[string]string, len(sections))
-	for _, s := range sections {
-		key := strings.ToLower(strings.TrimSpace(s.label))
-		if existing, ok := m[key]; ok && existing != "" {
-			m[key] = existing + " " + s.value
-		} else {
-			m[key] = s.value
-		}
-	}
-	return m
-}
-
-func sectionValue(m map[string]string, label string) (string, bool) {
-	v, ok := m[strings.ToLower(label)]
-	return v, ok
-}
-
-func transformDaily(content string, date time.Time, subs map[string]string) string {
-	if isAlreadyCompactDaily(content) {
-		return stripRemainingPlaceholders(content, subs)
-	}
-
-	secs := sectionsMap(parseSections(content))
-	d := date
-	if d.IsZero() {
-		d = time.Now()
-	}
-	dateStr := d.Format("02.01.2006")
-	if v := subs["[ДАТА]"]; v != "" && !strings.Contains(v, "[") {
-		dateStr = v
-	}
-
-	var narrative []string
-	for _, key := range dailyNarrativeKeys {
-		if v, ok := sectionValue(secs, key); ok && !isSkipSectionValue(v) {
-			narrative = append(narrative, v)
-		}
-	}
-	if len(narrative) == 0 {
-		// Fallback: first non-empty section with clinical content.
-		for _, s := range parseSections(content) {
-			if !isSkipSectionValue(s.value) && !isDiagnosisSection(s.label) {
-				narrative = append(narrative, s.value)
-				break
-			}
-		}
-	}
-
-	var lines []string
-	if len(narrative) > 0 {
-		lines = append(lines, dateStr+" "+strings.Join(narrative, " "))
-	}
-
-	for _, pair := range dailyInlineKeys {
-		if v, ok := sectionValue(secs, pair.src); ok && !isSkipSectionValue(v) {
-			lines = append(lines, pair.dest+": "+v)
-		}
-	}
-
-	for _, key := range []string{
-		"Дополнительные сведения",
-		"Назначения",
-		"План обследования (дополнения к плану)",
-	} {
-		if v, ok := sectionValue(secs, key); ok && !isSkipSectionValue(v) {
-			lines = append(lines, v)
-		}
-	}
-
-	if v, ok := sectionValue(secs, "Выполнены медицинские вмешательства"); ok && !isSkipSectionValue(v) {
-		lines = append(lines, splitConsultationLines(v)...)
-	}
-
-	if sig := doctorSignatureLine(subs, secs); sig != "" {
-		lines = append(lines, sig)
-	}
-
-	if len(lines) == 0 {
-		return stripRemainingPlaceholders(content, subs)
-	}
-	return strings.Join(lines, "\n")
-}
-
-func transformExam10d(content string, date time.Time, subs map[string]string) string {
-	secs := sectionsMap(parseSections(content))
-	d := date
-	if d.IsZero() {
-		d = time.Now()
-	}
-
-	var lines []string
-	if caseNo := subs["[НОМЕР_ИБ]"]; caseNo != "" && !strings.Contains(caseNo, "[") {
-		lines = append(lines, "ИБ №"+caseNo)
-	}
-	lines = append(lines, "ОСМОТР")
-	lines = append(lines, "лечащим врачом совместно с заведующим отделением")
-	lines = append(lines, formatExamDateTime(d, subs))
-
-	for _, spec := range examSectionOrder {
-		v, ok := sectionValueAny(secs, spec.srcs...)
-		if !ok {
-			if spec.display == "Диагноз" {
-				lines = append(lines, "Диагноз:")
-			}
-			continue
-		}
-		if isSkipSectionValue(v) {
-			if spec.display == "Диагноз" {
-				lines = append(lines, "Диагноз:")
-			}
-			continue
-		}
-		if isConsultBlock(spec.display, v) {
-			lines = append(lines, "Выполнены медицинские вмешательства:")
-			lines = append(lines, splitConsultationLines(v)...)
-			continue
-		}
-		lines = append(lines, spec.display+": "+v)
-	}
-
-	// Подписи как в сборнике: подсказка + подчёркнутое ФИО.
-	doctor := doctorDisplayName(subs, secs)
-	if doctor != "" {
-		lines = append(lines,
-			"Фамилия, имя, отчество (при наличии) врача, должность, специальность, подпись",
-			doctor,
-		)
-	}
-	head := subs["[ФИО_ЗАВ_ОТДЕЛЕНИЕМ]"]
-	if head != "" && !strings.Contains(head, "[") {
-		lines = append(lines,
-			"Фамилия, имя, отчество (при наличии) заведующего отделением, подпись",
-			head,
-		)
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func sectionValueAny(m map[string]string, labels ...string) (string, bool) {
-	for _, label := range labels {
-		if v, ok := sectionValue(m, label); ok {
-			return v, true
-		}
-	}
-	return "", false
-}
-
-func doctorDisplayName(subs map[string]string, secs map[string]string) string {
-	doctor := subs["[ФИО_ВРАЧА]"]
-	if doctor == "" || strings.Contains(doctor, "[") {
-		if v, ok := sectionValue(secs, "Лечащий врач"); ok {
-			doctor = strings.TrimSpace(strings.TrimPrefix(v, ":"))
-		}
-	}
-	if doctor == "" || strings.Contains(doctor, "[") {
-		return ""
-	}
-	return doctor
-}
-
-func isDiagnosisSection(label string) bool {
-	l := strings.ToLower(label)
-	return strings.Contains(l, "диагноз") ||
+func isDiagnosisKeepLabel(label string) bool {
+	l := strings.ToLower(strings.TrimSpace(label))
+	return l == "диагноз" ||
 		strings.Contains(l, "заболеван") ||
+		l == "синдром" ||
 		strings.Contains(l, "осложнен")
 }
 
-func isConsultBlock(label, value string) bool {
-	if label == "Выполнены медицинские вмешательства" {
-		return consultNoteRE.MatchString(value)
+func shouldDropSection(label, value string) bool {
+	l := strings.ToLower(strings.TrimSpace(label))
+	v := strings.ToLower(strings.TrimSpace(value))
+	norm := normalizeSkipValue(value)
+
+	// «Диагноз:» is a structural heading; keep even if the code is on the next line.
+	if l == "диагноз" && norm == "" {
+		return false
+	}
+	if isSkipSectionValue(value) {
+		if isDiagnosisKeepLabel(label) && (norm == "не выявлено" || norm == "-") {
+			return false
+		}
+		if l == "диагноз" {
+			return false
+		}
+		return true
+	}
+
+	if strings.Contains(l, "жалоб") &&
+		(strings.Contains(v, "не предъявля") || strings.Contains(v, "жалоб нет")) {
+		return true
+	}
+	if strings.Contains(l, "анамнез") && strings.Contains(v, "без дополнен") {
+		return true
+	}
+	if strings.Contains(l, "план обследования") &&
+		(strings.Contains(v, "без изменен") || strings.Contains(v, "без дополнен")) {
+		return true
+	}
+	if strings.Contains(l, "физикальное") &&
+		(strings.Contains(v, "без изменен") || strings.Contains(v, "без отрицательной динамики")) {
+		return true
+	}
+	if strings.Contains(l, "соматический") &&
+		(strings.Contains(v, "без изменен") || strings.Contains(v, "без особенностей")) {
+		return true
+	}
+	if strings.Contains(l, "вмешательства") &&
+		strings.Contains(v, "осмотр лечащим врачом") && len([]rune(norm)) < 40 {
+		return true
 	}
 	return false
 }
 
-func splitConsultationLines(v string) []string {
-	re := regexp.MustCompile(`([А-ЯA-Za-z][А-ЯA-Za-z\-]+ от \d{2}\.\d{2}\.\d{2,4}:)`)
-	locs := re.FindAllStringIndex(v, -1)
-	if len(locs) == 0 {
-		return []string{strings.TrimSpace(v)}
+func splitKnownSection(line string) (label, value string, ok bool) {
+	label, value, ok = splitLabelValue(line)
+	if !ok || !isKnownSectionLabel(label) {
+		return "", "", false
 	}
+	return label, value, true
+}
+
+func isOrphanSkipLine(line string) bool {
+	if _, _, ok := splitKnownSection(line); ok {
+		return false
+	}
+	return isSkipSectionValue(line)
+}
+
+func filterSectionBody(body []string) []string {
 	var out []string
-	for i, loc := range locs {
-		end := len(v)
-		if i+1 < len(locs) {
-			end = locs[i+1][0]
+	for _, raw := range body {
+		trim := strings.TrimSpace(raw)
+		if trim == "" {
+			if len(out) > 0 {
+				out = append(out, "")
+			}
+			continue
 		}
-		chunk := strings.TrimSpace(v[loc[0]:end])
-		if chunk != "" {
-			out = append(out, chunk)
+		if isOrphanSkipLine(trim) {
+			continue
 		}
+		out = append(out, raw)
+	}
+	for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
+		out = out[:len(out)-1]
 	}
 	return out
 }
 
-func doctorSignatureLine(subs map[string]string, secs map[string]string) string {
-	doctor := doctorDisplayName(subs, secs)
-	if doctor == "" {
-		return ""
+func combinedSectionValue(rest string, body []string) string {
+	parts := make([]string, 0, 1+len(body))
+	if strings.TrimSpace(rest) != "" {
+		parts = append(parts, strings.TrimSpace(rest))
 	}
-	return formatDoctorSignature(doctor)
-}
-
-func formatDoctorSignature(name string) string {
-	// Как в заготовках Екимова/Фок: роль слева, ФИО справа, абзац по центру.
-	const pad = 69
-	role := "Врач-психиатр"
-	spaces := pad - len([]rune(role))
-	if spaces < 1 {
-		spaces = 1
-	}
-	return role + strings.Repeat(" ", spaces) + name
-}
-
-var russianMonths = [...]string{
-	"", "января", "февраля", "марта", "апреля", "мая", "июня",
-	"июля", "августа", "сентября", "октября", "ноября", "декабря",
-}
-
-func formatExamDateTime(d time.Time, subs map[string]string) string {
-	if d.IsZero() {
-		d = time.Now()
-	}
-	day := d.Day()
-	month := russianMonths[d.Month()]
-	year := d.Year()
-	h, m := d.Hour(), d.Minute()
-	if v := subs["[ДАТА]"]; v != "" && !strings.Contains(v, "[") {
-		if strings.Contains(v, "«") && strings.Contains(v, "время:") {
-			return v
+	for _, l := range body {
+		if t := strings.TrimSpace(l); t != "" {
+			parts = append(parts, t)
 		}
 	}
-	// Формат сборника: «08» декабря 2025 г.  время: 12 час. 14 мин.
-	return fmt.Sprintf("«%02d» %s %d г.  время: %02d час. %02d мин.", day, month, year, h, m)
+	return strings.Join(parts, " ")
 }
 
-func stripRemainingPlaceholders(content string, subs map[string]string) string {
-	out := content
-	for _, ph := range []string{"[ДАТА]", "[ВРЕМЯ]", "[НОМЕР_ИБ]", "[ФИО_ВРАЧА]", "[ФИО_ЗАВ_ОТДЕЛЕНИЕМ]", "[ОСНОВНОЙ_ДИАГНОЗ]"} {
-		if v := subs[ph]; v != "" {
-			out = strings.ReplaceAll(out, ph, v)
+func dropEmptySections(content string) string {
+	var out []string
+	var (
+		hasSec   bool
+		secLabel string
+		secHead  string
+		secRest  string
+		secBody  []string
+	)
+
+	flush := func() {
+		if !hasSec {
+			return
 		}
+		body := filterSectionBody(secBody)
+		value := combinedSectionValue(secRest, body)
+		if shouldDropSection(secLabel, value) {
+			hasSec = false
+			secBody = nil
+			return
+		}
+		out = append(out, secHead)
+		out = append(out, body...)
+		hasSec = false
+		secBody = nil
 	}
-	// Drop lines that still contain unfilled placeholders.
-	var kept []string
-	for _, raw := range strings.Split(normalizeNewlines(out), "\n") {
+
+	for _, raw := range strings.Split(normalizeNewlines(content), "\n") {
 		line := normalizeGeneratedLine(raw)
+		if label, rest, ok := splitKnownSection(line); ok {
+			flush()
+			hasSec = true
+			secLabel = label
+			secRest = rest
+			secHead = line
+			secBody = nil
+			continue
+		}
+		if hasSec {
+			secBody = append(secBody, line)
+			continue
+		}
 		if line == "" {
+			if len(out) > 0 && out[len(out)-1] != "" {
+				out = append(out, "")
+			}
 			continue
 		}
-		if placeholderRE.MatchString(line) {
+		if isOrphanSkipLine(line) {
 			continue
 		}
-		kept = append(kept, line)
+		out = append(out, line)
 	}
-	return strings.Join(kept, "\n")
+	flush()
+
+	for len(out) > 0 && out[0] == "" {
+		out = out[1:]
+	}
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return strings.Join(out, "\n")
 }

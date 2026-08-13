@@ -37,6 +37,8 @@ export interface DayBrief {
   therapyToday: string | null;
   includeFinalState: boolean;
   lengthHint: "short" | "medium" | "exam";
+  /** Понедельник после сб/вс, которые уже есть в этом пакете. */
+  weekendRecap: boolean;
 }
 
 export interface CompileArcInput {
@@ -82,7 +84,7 @@ function splitListish(chunk: string): string[] {
     .filter((s) => s.length > 12);
 }
 
-function classifySentence(s: string): keyof ExtractedFacts | "contrast" {
+function classifySentence(s: string): keyof ExtractedFacts | "contrast" | "skip" {
   const lower = s.toLowerCase();
   if (/выходн|понедельник|вторник|сред[ауы]|четверг|пятниц|суббот|воскресень/.test(lower)) {
     return "timed";
@@ -100,8 +102,11 @@ function classifySentence(s: string): keyof ExtractedFacts | "contrast" {
   if (/остается трудн|нуждается в длительн|нуждается в индивидуальном|альтернативн/.test(lower)) {
     return "residual";
   }
+  if (/надзор|под наблюдением/.test(lower)) {
+    return "skip";
+  }
   if (
-    /когнитивн|надзор|гигиеническ|ест самостоятельно|не взаимодейств|аппетит и сон|режимные моменты/.test(
+    /когнитивн|гигиеническ|ест самостоятельно|не взаимодейств|аппетит и сон|режимные моменты/.test(
       lower,
     )
   ) {
@@ -124,6 +129,7 @@ export function extractFacts(directorContext: string): ExtractedFacts {
 
   for (const raw of splitSentences(directorContext)) {
     const kind = classifySentence(raw);
+    if (kind === "skip") continue;
     if (kind === "contrast") {
       const parts = raw.split(/в дальнейшем|затем|позднее/i);
       const earlyPart = (parts[0] ?? "")
@@ -218,6 +224,30 @@ export function inferSpeechLevel(
   if (/развернут\w* предложен|фразовая речь сформир/.test(blob)) return "expanded";
   if (/F72|выраженн\w* умственн/.test(diagnosis)) return "sounds";
   return "unknown";
+}
+
+function syndromeLockLines(syndrome: string): string[] {
+  if (syndrome === "psychomotor_autoaggression") {
+    return [
+      "Клинический регистр: психомоторной расторможенности с аутоагрессией.",
+      "НЕ пиши штамп «без агрессивных, аутоагрессивных и других опасных тенденций» — он спорит с синдромом.",
+      "Острый аутоагрессивный акт — только если он в наблюдениях СЕГОДНЯ. Иначе не выдумывай самоповреждение и не снимай регистр этой формулой.",
+      "Можно: критика снижена/не выявляется; воля; «возбуждений сегодня не было»; раздражение на коррекцию — если это в наблюдениях.",
+    ];
+  }
+  if (syndrome === "psychomotor_aggression") {
+    return [
+      "Клинический регистр: психомоторной расторможенности с агрессией.",
+      "НЕ пиши ежедневный штамп «без агрессивных тенденций», если регистр — с агрессией. Острый акт — только если он в наблюдениях сегодня.",
+    ];
+  }
+  if (syndrome) {
+    return [
+      `Клинический регистр: ${SYNDROME_LABEL[syndrome] ?? syndrome}. ` +
+        "Лексика регистра нужна, но не ставь острые проявления в каждый день — только если они в наблюдениях сегодня.",
+    ];
+  }
+  return [];
 }
 
 function speechLockLines(level: SpeechLevel): string[] {
@@ -329,6 +359,54 @@ function pickRotated(pool: string[], index: number, count: number): string[] {
   return out;
 }
 
+/** Ключ полевого акта, чтобы простыни и обувь не жили в одном слоте и не копились по дням. */
+export function fieldActKey(text: string): string {
+  const t = text.toLowerCase();
+  if (/простын/.test(t)) return "sheets";
+  if (/обув/.test(t)) return "shoes";
+  if (/хаотичн/.test(t)) return "chaos";
+  if (/каприз|плак/.test(t)) return "cry";
+  if (/раздраж|вербальн\w* коррекц/.test(t)) return "irritable";
+  if (/бездеятел/.test(t)) return "idle";
+  if (/возбужд|агресс/.test(t)) return "agitation";
+  return t.slice(0, 32);
+}
+
+function takeUnused(pool: string[], used: Set<string>, count: number): string[] {
+  const out: string[] = [];
+  for (const item of pool) {
+    if (out.length >= count) break;
+    const k = fieldActKey(item);
+    if (used.has(k)) continue;
+    used.add(k);
+    out.push(item);
+  }
+  return out;
+}
+
+function priorWeekendInPacket(days: ArcDayPlan[], index: number): boolean {
+  if (calendarFor(days[index]?.isoDate ?? "") !== "monday") return false;
+  let sawSat = false;
+  let sawSun = false;
+  for (let j = 0; j < index; j++) {
+    const c = calendarFor(days[j].isoDate);
+    if (c === "saturday") sawSat = true;
+    if (c === "sunday") sawSun = true;
+  }
+  return sawSat && sawSun;
+}
+
+function fieldStopsForDay(observations: string[], includeFinalState: boolean): string[] {
+  const obs = observations.join(" ").toLowerCase();
+  const stops: string[] = [];
+  if (!/простын/.test(obs)) stops.push("простыни / стаскивание белья — не сегодня");
+  if (!/обув/.test(obs)) stops.push("обувь / обирание обуви — не сегодня");
+  if (!includeFinalState && !/двер|за руку/.test(obs)) {
+    stops.push("ведёт к двери / «гулять по отделению» — не сегодня");
+  }
+  return stops;
+}
+
 function parseIso(iso: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
   if (!m) return null;
@@ -384,6 +462,10 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
   const titrationIndex =
     examIndex >= 0 ? examIndex : Math.min(Math.floor(n * 0.4), Math.max(0, n - 1));
 
+  const usedFieldKeys = new Set<string>();
+  const fieldPoolAll = facts.laterBehaviors.filter(isFieldAct);
+  const calmPoolAll = facts.laterBehaviors.filter((s) => !isFieldAct(s));
+
   const briefs: DayBrief[] = days.map((day, index) => {
     const periodPct = n <= 1 ? 100 : Math.round((index / (n - 1)) * 100);
     const phase = phaseFor(periodPct, day.dayNumber);
@@ -398,20 +480,27 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
         ? facts.therapy.join(" ") || null
         : null;
 
-    const fieldPool = facts.laterBehaviors.filter(isFieldAct);
-    const calmPool = facts.laterBehaviors.filter((s) => !isFieldAct(s));
     const obsCount = role === "quiet" ? 1 : role === "exam" ? 3 : 2;
+    const canTakeField =
+      role === "event" &&
+      (phase === "admission" || phase === "field" || phase === "titration");
     const observations: string[] = [];
-    if (phase === "admission") {
+    if (role === "exam") {
+      observations.push(
+        ...fieldPoolAll.slice(0, 2).map((s) => `За период (не новый эпизод сегодня): ${s}`),
+      );
+      observations.push(...pickRotated(calmPoolAll, index, 1));
+    } else if (phase === "admission") {
       observations.push(...pickRotated(facts.early, index, 1));
-      observations.push(...pickRotated(fieldPool, index, Math.max(1, obsCount - 1)));
+      if (canTakeField) observations.push(...takeUnused(fieldPoolAll, usedFieldKeys, 1));
     } else if (phase === "field") {
-      observations.push(...pickRotated(fieldPool, index, obsCount));
+      if (canTakeField) observations.push(...takeUnused(fieldPoolAll, usedFieldKeys, 1));
+      else observations.push(...pickRotated(calmPoolAll, index, 1));
     } else if (phase === "titration") {
-      observations.push(...pickRotated(fieldPool, index + 2, 1));
-      observations.push(...pickRotated(calmPool, index, Math.max(1, obsCount - 1)));
+      if (canTakeField) observations.push(...takeUnused(fieldPoolAll, usedFieldKeys, 1));
+      observations.push(...pickRotated(calmPoolAll, index, Math.max(1, obsCount - 1)));
     } else {
-      observations.push(...pickRotated(calmPool, index, obsCount));
+      observations.push(...pickRotated(calmPoolAll, index, obsCount));
     }
     if (role !== "quiet") {
       observations.push(...pickRotated(facts.traits, index, 1));
@@ -448,6 +537,7 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
       therapyToday,
       includeFinalState,
       lengthHint: role === "exam" ? "exam" : role === "quiet" ? "short" : "medium",
+      weekendRecap: priorWeekendInPacket(days, index),
     };
   });
 
@@ -467,7 +557,8 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     if (briefs[i].phase === "improving" || briefs[i].phase === "residual") {
       extra.push(...facts.laterBehaviors.filter(isFieldAct), ...facts.early);
     }
-    briefs[i].forbidden = unique([...extra, ...others]).slice(0, 16);
+    const stops = fieldStopsForDay(briefs[i].observations, briefs[i].includeFinalState);
+    briefs[i].forbidden = unique([...stops, ...extra, ...others]).slice(0, 18);
   }
 
   return briefs;
@@ -507,15 +598,23 @@ export function formatDayBrief(
     sunday: "воскресенье, выходной",
     monday: "понедельник после выходных",
   };
-  lines.push(`Календарь: ${calendarLabel[brief.calendar]}.`);
+  if (brief.calendar === "monday" && !brief.weekendRecap) {
+    lines.push("Календарь: понедельник (не после сб/вс этого пакета).");
+  } else {
+    lines.push(`Календарь: ${calendarLabel[brief.calendar]}.`);
+  }
   if (brief.calendar === "saturday" || brief.calendar === "sunday") {
     lines.push(
       "Выходной: короткий статус; детали дня — в «Дополнительные сведения». " +
         "Не пиши построения/занятия как в будни. Визиты и прогулки — только если они в наблюдениях сегодня.",
     );
+  } else if (brief.weekendRecap) {
+    lines.push(
+      "Понедельник после сб/вс ЭТОГО пакета: в доп. сведениях 1–2 фразы «за период выходных» — сон, фон, общение, если это следует из портрета. Не выдумывай прогулки, визиты и инциденты, которых нет в нарративе.",
+    );
   } else if (brief.calendar === "monday") {
     lines.push(
-      "Понедельник: в доп. сведениях можно кратко «за период выходных» — без выдуманных инцидентов и без формулы «под наблюдением персонала».",
+      "Сегодня понедельник, но субботы–воскресенья в этом пакете ещё не было — НЕ пиши «за период выходных дней».",
     );
   }
 
@@ -537,10 +636,7 @@ export function formatDayBrief(
 
   const syndrome = batchAnswers.leading_syndrome;
   if (typeof syndrome === "string" && syndrome) {
-    lines.push(
-      `Клинический регистр: ${SYNDROME_LABEL[syndrome] ?? syndrome}. ` +
-        "Лексика регистра нужна, но не ставь острые проявления в каждый день — только если они в наблюдениях сегодня.",
-    );
+    lines.push(...syndromeLockLines(syndrome));
   }
 
   if (estimatedDischargeDate) {
@@ -569,8 +665,8 @@ export function formatDayBrief(
     );
   }
   if (brief.forbidden.length > 0) {
-    lines.push("НЕ повторяй сегодня (уже/ещё не этот день):");
-    for (const f of brief.forbidden.slice(0, 8)) {
+    lines.push("НЕ повторяй сегодня (уже/ещё не этот день). Не перефразируй эти эпизоды:");
+    for (const f of brief.forbidden.slice(0, 12)) {
       lines.push(`— ${f.slice(0, 180)}`);
     }
   }
@@ -589,7 +685,16 @@ export function formatDayBrief(
     );
   }
   lines.push(
-    "Запрещено: одинаковые фразы с соседними днями; «вероятно»; аббревиатура «УО»; «под наблюдением/надзором персонала»; жалобы и «без дополнений» внутри статуса; выдуманные прогулки/визиты.",
+    "Конкретика дня: можно дорисовать быт отделения ИЗ портрета (бездеятелен → в палате/игровой; не взаимодействует → обособлен; полевой → ходит по палате). Это перевод эпикриза, не новые факты.",
+  );
+  lines.push(
+    "Нельзя выдумывать факты, которых нет в контексте: прогулки, визиты, консультации, процедуры, самоповреждение, смену схемы, «выходные» не в тот календарный день.",
+  );
+  lines.push(
+    "Клинические константы (диагноз, уровень речи, интеллект) держи. Штампы «мышление конкретное тугоподвижное», «психопродуктивной не выявлено» — тот же смысл, разные слова.",
+  );
+  lines.push(
+    "Не пиши: одинаковые фразы с соседними днями; «вероятно»; аббревиатура «УО»; «под наблюдением/надзором персонала»; жалобы и «без дополнений» внутри статуса; пустые разделы «Без изменений».",
   );
   return lines.join("\n");
 }

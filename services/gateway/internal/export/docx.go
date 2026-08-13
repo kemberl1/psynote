@@ -1,10 +1,8 @@
 // DOCX rendering via raw OOXML (archive/zip + encoding/xml), Go stdlib only.
 //
-// Форматирование под корпус дневников:
-//   - Times New Roman 11pt; поля ~2,5 см;
-//   - ежедневный: жирная дата, обычный текст; короткие метки;
-//   - осмотр: центр «ОСМОТР», дата/время с underline, подписи с underline;
-//   - метки секций жирные; подпись врача по центру.
+// Форматирование как в UI-предпросмотре (шаблон daily / exam_10d):
+//   - Times New Roman 11pt; поля ~2,5 см; justify;
+//   - шапка ИБ / ОСМОТР / дата; метки секций жирные.
 package export
 
 import (

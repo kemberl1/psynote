@@ -71,6 +71,139 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const SKIP_EXACT = new Set([
+  "данных нет",
+  "без дополнений",
+  "не предъявляет",
+  "жалоб не предъявляет",
+  "нет",
+  "-",
+  "—",
+  "без изменений",
+  "без отрицательной динамики",
+  "без особенностей",
+]);
+
+function normalizeSkipValue(v: string): string {
+  return v
+    .toLowerCase()
+    .replace(/[.,;:!?«»"'()]/g, "")
+    .replace(/[—–]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isSkipValue(v: string): boolean {
+  const n = normalizeSkipValue(v);
+  return n === "" || SKIP_EXACT.has(n);
+}
+
+function isDiagnosisKeepLabel(label: string): boolean {
+  const l = label.toLowerCase();
+  return l === "диагноз" || l.includes("заболеван") || l === "синдром" || l.includes("осложнен");
+}
+
+function shouldDropSection(label: string, value: string): boolean {
+  const l = label.toLowerCase();
+  const v = value.toLowerCase();
+  const n = normalizeSkipValue(value);
+  if (l === "диагноз" && n === "") return false;
+  if (isSkipValue(value)) {
+    if (isDiagnosisKeepLabel(label) && (n === "не выявлено" || n === "-")) return false;
+    if (l === "диагноз") return false;
+    return true;
+  }
+  if (l.includes("жалоб") && (v.includes("не предъявля") || v.includes("жалоб нет"))) return true;
+  if (l.includes("анамнез") && v.includes("без дополнен")) return true;
+  if (
+    l.includes("план обследования") &&
+    (v.includes("без изменен") || v.includes("без дополнен"))
+  ) {
+    return true;
+  }
+  if (
+    l.includes("физикальное") &&
+    (v.includes("без изменен") || v.includes("без отрицательной динамики"))
+  ) {
+    return true;
+  }
+  if (
+    l.includes("соматический") &&
+    (v.includes("без изменен") || v.includes("без особенностей"))
+  ) {
+    return true;
+  }
+  if (
+    l.includes("вмешательства") &&
+    v.includes("осмотр лечащим врачом") &&
+    n.length < 40
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Убрать пустые разделы («Без изменений», «не предъявляет», «без дополнений»)
+ * по правилам оформления из docs/03 и промпта. Тот же текст уходит в Word.
+ */
+export function omitEmptyDiarySections(content: string): string {
+  const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const out: string[] = [];
+  let secLabel = "";
+  let secHead = "";
+  let secRest = "";
+  let secBody: string[] = [];
+  let hasSec = false;
+
+  const flush = () => {
+    if (!hasSec) return;
+    const body = secBody.filter((raw) => {
+      const trim = raw.trim();
+      if (!trim) return true;
+      if (isSkipValue(trim) && !matchSectionLabel(trim)) return false;
+      return true;
+    });
+    while (body.length && !body[body.length - 1].trim()) body.pop();
+    const value = [secRest, ...body.map((l) => l.trim()).filter(Boolean)].join(" ");
+    if (!shouldDropSection(secLabel, value)) {
+      out.push(secHead);
+      out.push(...body);
+    }
+    hasSec = false;
+    secBody = [];
+  };
+
+  for (const raw of lines) {
+    const line = stripWrapStars(raw).replace(/\*\*/g, "").trimEnd();
+    const matched = matchSectionLabel(line.trim());
+    if (matched) {
+      flush();
+      hasSec = true;
+      secLabel = matched.label;
+      secRest = matched.rest;
+      secHead = line.trim();
+      secBody = [];
+      continue;
+    }
+    if (hasSec) {
+      secBody.push(line.trim() === "" ? "" : line);
+      continue;
+    }
+    const trim = line.trim();
+    if (!trim) {
+      if (out.length && out[out.length - 1] !== "") out.push("");
+      continue;
+    }
+    if (isSkipValue(trim) && !matchSectionLabel(trim)) continue;
+    out.push(line);
+  }
+  flush();
+  while (out.length && !out[0]) out.shift();
+  while (out.length && !out[out.length - 1]) out.pop();
+  return out.join("\n");
+}
+
 function parseInlineBold(text: string): DiaryRun[] {
   if (!text) return [];
   const runs: DiaryRun[] = [];

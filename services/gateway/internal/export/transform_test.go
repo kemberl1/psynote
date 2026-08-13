@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestTransformDaily_CompactNarrative(t *testing.T) {
+func TestTransformDaily_KeepsTemplateLikeUI(t *testing.T) {
 	doc := Document{
 		DocumentTypeCode: "daily",
 		GeneratedAt:      time.Date(2025, 8, 31, 14, 30, 0, 0, time.UTC),
@@ -20,38 +20,42 @@ func TestTransformDaily_CompactNarrative(t *testing.T) {
 			"Неврологический статус: Лицо симметричное.\n" +
 			"Диагноз:\n" +
 			"Основное заболевание: F32.10\n" +
+			"План обследования (дополнения к плану): Без изменений\n" +
 			"Лечащий врач: [ФИО_ВРАЧА]",
 		Substitutions: map[string]string{"[ФИО_ВРАЧА]": "Иванова И.И."},
 	}
 
 	out := transformContent(doc, doc.Substitutions)
 
-	if strings.Contains(out, "ОСМОТР") {
-		t.Error("daily export must not contain ОСМОТР header")
+	if !strings.Contains(out, "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ") {
+		t.Error("daily export must keep the same header as UI")
 	}
-	if strings.Contains(out, "[ДАТА]") || strings.Contains(out, "[ФИО_ВРАЧА]") {
-		t.Errorf("placeholders must be filled or removed: %q", out)
+	if !strings.Contains(out, "Психический статус:") {
+		t.Error("psychiatric section must keep its title")
 	}
-	if !strings.HasPrefix(out, "31.08.2025 Сознание не помрачено") {
-		t.Errorf("expected date-prefixed narrative, got: %q", out)
+	if !strings.Contains(out, "31.08.2025") {
+		t.Errorf("date placeholder must be filled: %q", out)
 	}
-	if !strings.Contains(out, "Физикальное исследование:") {
-		t.Error("missing physical exam section with short label")
+	if strings.Contains(out, "[ФИО_ВРАЧА]") {
+		t.Errorf("doctor placeholder must be filled: %q", out)
 	}
-	if strings.Contains(out, "локальный статус (его изменение)") {
-		t.Error("daily export must use short phys label, not template long form")
+	if !strings.Contains(out, "Иванова И.И.") {
+		t.Error("missing substituted doctor name")
 	}
-	if !strings.Contains(out, "Неврологический статус:") {
-		t.Error("missing neuro section")
+	if strings.Contains(strings.ToLower(out), "жалобы") {
+		t.Errorf("empty complaints must be dropped: %q", out)
 	}
-	if strings.Contains(out, "Неврологический статус (его изменение)") {
-		t.Error("daily export must use short neuro label")
+	if strings.Contains(strings.ToLower(out), "без дополнений") {
+		t.Errorf("empty anamnesis must be dropped: %q", out)
 	}
-	if !strings.Contains(out, "Врач-психиатр") {
-		t.Error("missing doctor signature line")
+	if strings.Contains(strings.ToLower(out), "без изменений") {
+		t.Errorf("plan «без изменений» must be dropped: %q", out)
 	}
-	if strings.Contains(out, "F32.10") {
-		t.Error("daily compact export should skip diagnosis block")
+	if !strings.Contains(out, "F32.10") {
+		t.Error("diagnosis must stay")
+	}
+	if !strings.Contains(out, "ИБ №") {
+		t.Error("case-number line must stay like UI")
 	}
 }
 
@@ -69,6 +73,32 @@ func TestTransformDaily_SkipsEmptySections(t *testing.T) {
 	}
 	if !strings.Contains(out, "Контакт сохранён") {
 		t.Errorf("expected psychiatric content: %q", out)
+	}
+	if !strings.Contains(out, "Психический статус:") {
+		t.Error("kept section must retain its title")
+	}
+}
+
+func TestTransformDaily_OrphanBezIzmeneniyDropped(t *testing.T) {
+	doc := Document{
+		DocumentTypeCode: "daily",
+		GeneratedAt:      time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC),
+		Content: "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ\n" +
+			"Психический статус: Сознание ясное.\n" +
+			"План обследования (дополнения к плану):\n" +
+			"Без изменений.\n" +
+			"Без изменений\n",
+	}
+	out := transformContent(doc, nil)
+	low := strings.ToLower(out)
+	if strings.Contains(low, "без изменений") {
+		t.Errorf("orphan «Без изменений» must not appear without a section: %q", out)
+	}
+	if strings.Contains(out, "План обследования") {
+		t.Errorf("empty plan section must be dropped entirely: %q", out)
+	}
+	if !strings.Contains(out, "Психический статус:") {
+		t.Errorf("status must remain: %q", out)
 	}
 }
 
@@ -89,10 +119,13 @@ func TestTransformExam10d_MarkdownLabels(t *testing.T) {
 		Substitutions: map[string]string{"[ФИО_ВРАЧА]": "Иванова И.И."},
 	}
 	out := transformContent(doc, doc.Substitutions)
-	if !strings.Contains(out, "Жалобы: Активно жалоб не предъявляет") {
-		t.Errorf("markdown labels not parsed, got: %q", out)
+	if strings.Contains(out, "**") {
+		t.Errorf("markdown stars must be stripped: %q", out)
 	}
-	if !strings.Contains(out, "Психический статус (его изменение):") {
+	if strings.Contains(out, "Жалобы") {
+		t.Errorf("«не предъявляет» complaints must be dropped: %q", out)
+	}
+	if !strings.Contains(out, "Психический статус:") {
 		t.Error("missing psychiatric section from markdown export")
 	}
 	if !strings.Contains(out, "F50.0") {
@@ -100,6 +133,9 @@ func TestTransformExam10d_MarkdownLabels(t *testing.T) {
 	}
 	if !strings.Contains(out, "отрицательной динамикой") {
 		t.Error("missing epicrisis body from markdown export")
+	}
+	if !strings.Contains(out, "ОСМОТР лечащим врачом совместно с заведующим отделением") {
+		t.Error("exam header must match UI, not a rebuilt corpus title")
 	}
 }
 
@@ -117,44 +153,59 @@ func TestTransformExam10d_StructuredHeader(t *testing.T) {
 		Substitutions: map[string]string{"[НОМЕР_ИБ]": "12345"},
 	}
 	out := transformContent(doc, doc.Substitutions)
-	lines := strings.Split(out, "\n")
-	if len(lines) < 5 {
-		t.Fatalf("expected structured exam, got %q", out)
+	if !strings.Contains(out, "ИБ №12345") {
+		t.Errorf("case number = %q", out)
 	}
-	if lines[0] != "ИБ №12345" {
-		t.Errorf("case number line = %q", lines[0])
+	if !strings.Contains(out, "ОСМОТР лечащим врачом совместно с заведующим отделением") {
+		t.Errorf("title missing in %q", out)
 	}
-	if lines[1] != "ОСМОТР" {
-		t.Errorf("title = %q, want ОСМОТР", lines[1])
+	if !strings.Contains(out, "08.09.2025") {
+		t.Errorf("date placeholder not filled: %q", out)
 	}
-	if lines[2] != "лечащим врачом совместно с заведующим отделением" {
-		t.Errorf("subtitle = %q", lines[2])
-	}
-	if !strings.Contains(lines[3], "сентября 2025") {
-		t.Errorf("date line = %q", lines[3])
+	if !strings.Contains(out, "Жалобы: на сохраняющуюся тревогу") {
+		t.Errorf("real complaints must stay: %q", out)
 	}
 }
 
-func TestBuildDocLines_DailyNoExamHeader(t *testing.T) {
+func TestBuildDocLines_DailyKeepsExamHeader(t *testing.T) {
 	doc := Document{
 		DocumentTypeCode: "daily",
 		GeneratedAt:      time.Date(2025, 8, 31, 0, 0, 0, 0, time.UTC),
 		Content:          sampleContent,
 	}
 	lines := buildDocLines(doc)
+	foundTitle := false
+	foundStatus := false
 	for _, l := range lines {
-		if l.kind == kindTitle || l.kind == kindExamTitle {
-			t.Errorf("daily export must not have exam title, got kind %d text %q", l.kind, l.text)
+		if l.kind == kindTitle && strings.Contains(strings.ToUpper(l.text), "ОСМОТР") {
+			foundTitle = true
+		}
+		if l.kind == kindLabelValue && strings.Contains(l.label, "Психический статус") {
+			foundStatus = true
 		}
 	}
-	foundNarrative := false
-	for _, l := range lines {
-		if l.kind == kindDailyNarrative {
-			foundNarrative = true
-		}
+	if !foundTitle {
+		t.Error("daily export must keep ОСМОТР ЛЕЧАЩИМ ВРАЧОМ like UI")
 	}
-	if !foundNarrative {
-		t.Error("expected kindDailyNarrative in daily export")
+	if !foundStatus {
+		t.Error("expected kindLabelValue for psychiatric status")
+	}
+}
+
+func TestTransformDaily_DropsBoilerplateInterventions(t *testing.T) {
+	doc := Document{
+		DocumentTypeCode: "daily",
+		GeneratedAt:      time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC),
+		Content: "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ\n" +
+			"Психический статус: Сознание ясное.\n" +
+			"Выполнены медицинские вмешательства: Осмотр лечащим врачом.\n",
+	}
+	out := transformContent(doc, nil)
+	if !strings.Contains(out, "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ") {
+		t.Errorf("header must stay: %q", out)
+	}
+	if strings.Contains(out, "вмешательства") {
+		t.Errorf("boilerplate interventions must be dropped: %q", out)
 	}
 }
 
@@ -166,5 +217,12 @@ func TestClassifyLine_ExamTitle(t *testing.T) {
 	l = classifyLine("лечащим врачом совместно с заведующим отделением")
 	if l.kind != kindExamSubtitle {
 		t.Errorf("kind = %d, want kindExamSubtitle", l.kind)
+	}
+}
+
+func TestClassifyLine_UnknownColonStaysPlain(t *testing.T) {
+	l := classifyLine("31.08.2025 время: 14:30")
+	if l.kind == kindLabelValue {
+		t.Errorf("must not treat date line as a section label %q", l.label)
 	}
 }

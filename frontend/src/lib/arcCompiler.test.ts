@@ -34,6 +34,12 @@ describe("extractFacts", () => {
     expect(f.therapy.join(" ")).toMatch(/левомепромазин/i);
     expect(f.laterBehaviors.join(" ")).not.toMatch(/112,5/i);
   });
+
+  it("does not treat staff supervision as a clinical trait", () => {
+    const f = extractFacts(DOCTOR_NARRATIVE);
+    const blob = [...f.early, ...f.laterBehaviors, ...f.traits].join(" ");
+    expect(blob).not.toMatch(/надзор|под наблюдением/i);
+  });
 });
 
 describe("compileArc", () => {
@@ -64,14 +70,84 @@ describe("compileArc", () => {
     }
   });
 
-  it("rotates sheet/shoes observations instead of pasting both every day", () => {
+  it("gives sheets and shoes to at most two daily days each", () => {
     const daily = briefs.filter((b) => b.role !== "exam");
     const withSheets = daily.filter((b) => b.observations.join(" ").includes("простын"));
     const withShoes = daily.filter((b) => b.observations.join(" ").includes("обув"));
     expect(withSheets.length).toBeGreaterThan(0);
     expect(withShoes.length).toBeGreaterThan(0);
-    expect(withSheets.length).toBeLessThan(daily.length);
-    expect(withShoes.length).toBeLessThan(daily.length);
+    expect(withSheets.length).toBeLessThanOrEqual(2);
+    expect(withShoes.length).toBeLessThanOrEqual(2);
+  });
+
+  it("lets the 10-day exam recap field acts as period, not a new episode", () => {
+    const exam = briefs.find((b) => b.role === "exam");
+    expect(exam?.observations.join(" ")).toMatch(/За период \(не новый эпизод сегодня\)/);
+  });
+
+  it("never puts staff supervision into day observations", () => {
+    for (const b of briefs) {
+      expect(b.observations.join(" ")).not.toMatch(/надзор|под наблюдением/i);
+    }
+  });
+
+  it("does not instruct a weekend recap on Monday 27.07 when the packet starts that day", () => {
+    const firstMon = briefs.find((b) => b.isoDate === "2026-07-27");
+    expect(firstMon?.calendar).toBe("monday");
+    expect(firstMon?.weekendRecap).toBe(false);
+    const ans = buildGenerateAnswers(
+      { overall_dynamics: "positive", leading_syndrome: "psychomotor_autoaggression" },
+      firstMon!.dayNumber,
+      days.length,
+      firstMon!.isoDate,
+      DOCTOR_NARRATIVE,
+      "",
+      "daily",
+      firstMon,
+    );
+    const arc = String(ans.__arc_context__);
+    expect(arc).toMatch(/НЕ пиши «за период выходных дней»/);
+    expect(arc).not.toMatch(/Понедельник после сб\/вс ЭТОГО пакета/);
+  });
+
+  it("instructs a grounded weekend recap on Monday 03.08 after sat/sun in the packet", () => {
+    const secondMon = briefs.find((b) => b.isoDate === "2026-08-03");
+    expect(secondMon?.calendar).toBe("monday");
+    expect(secondMon?.weekendRecap).toBe(true);
+    const ans = buildGenerateAnswers(
+      { overall_dynamics: "positive" },
+      secondMon!.dayNumber,
+      days.length,
+      secondMon!.isoDate,
+      DOCTOR_NARRATIVE,
+      "",
+      "daily",
+      secondMon,
+    );
+    const arc = String(ans.__arc_context__);
+    expect(arc).toMatch(/Понедельник после сб\/вс ЭТОГО пакета/);
+    expect(arc).not.toMatch(/НЕ пиши «за период выходных дней»/);
+  });
+
+  it("bans the no-aggression stamp when the leading syndrome is autoaggression", () => {
+    const ans = buildGenerateAnswers(
+      {
+        overall_dynamics: "positive",
+        leading_syndrome: "psychomotor_autoaggression",
+        diagnosis: "F71.18 Умственная отсталость умеренная",
+      },
+      briefs[0].dayNumber,
+      days.length,
+      briefs[0].isoDate,
+      DOCTOR_NARRATIVE,
+      "",
+      "daily",
+      briefs[0],
+    );
+    const arc = String(ans.__arc_context__);
+    expect(arc).toMatch(/НЕ пиши штамп «без агрессивных, аутоагрессивных/);
+    expect(arc).toMatch(/можно дорисовать быт отделения/i);
+    expect(arc).toMatch(/прогулки, визиты/);
   });
 
   it("mentions therapy on exam or titration day, not on every daily", () => {

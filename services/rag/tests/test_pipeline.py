@@ -244,6 +244,20 @@ def test_build_messages_daily_locks_diagnosis_and_plain_markup() -> None:
     assert "вероятно" in system.lower()
 
 
+def test_build_messages_allows_grounded_coloring_not_pure_invention() -> None:
+    mapped = map_answers(DOC_TYPE_DAILY, {"mood": "even"})
+    msgs = build_messages(DOC_TYPE_DAILY, mapped, [])
+    system = next(m.content for m in msgs if m.role == "system")
+    lower = system.lower()
+    assert "дорисовать быт" in lower
+    assert "за период выходных дней" in lower
+    assert "понедельник после субботы" in lower or "после субботы–воскресенья" in lower
+    assert "без агрессивных, аутоагрессивных" in lower
+    assert "пустые разделы" in lower
+    user = next(m.content for m in msgs if m.role == "user")
+    assert "палата" in user.lower() or "игровая" in user.lower()
+
+
 def test_build_messages_exam10d_has_epicrisis() -> None:
     """Промпт exam_10d отличается: есть этапный эпикриз и совместный осмотр."""
     mapped = map_answers(DOC_TYPE_EXAM_10D, {
