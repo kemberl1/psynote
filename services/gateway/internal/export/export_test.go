@@ -148,8 +148,8 @@ func TestExportDOCX_DailyMatchesTemplate(t *testing.T) {
 	if !strings.Contains(documentXML, "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ") {
 		t.Error("daily docx must keep ОСМОТР header like UI")
 	}
-	if !strings.Contains(documentXML, "19.09.2025") {
-		t.Error("daily docx should include date from GeneratedAt")
+	if !strings.Contains(documentXML, "«19» сентября 2025 г.") {
+		t.Error("daily docx should include official date from GeneratedAt")
 	}
 	if !strings.Contains(documentXML, "Настроение сниженное") {
 		t.Error("daily docx missing psychiatric narrative")
@@ -157,8 +157,8 @@ func TestExportDOCX_DailyMatchesTemplate(t *testing.T) {
 	if !strings.Contains(documentXML, "Психический статус") {
 		t.Error("daily docx must keep section titles")
 	}
-	if strings.Contains(strings.ToLower(documentXML), "без дополнений") {
-		t.Error("empty anamnesis must not appear in docx")
+	if !strings.Contains(strings.ToLower(documentXML), "без дополнений") {
+		t.Error("anamnesis «без дополнений» must stay in the MIS form")
 	}
 }
 
@@ -180,37 +180,38 @@ func TestExportDOCX_BoldSectionLabels(t *testing.T) {
 	}
 }
 
-func TestExportPDF_ValidAndCyrillic(t *testing.T) {
-	data, err := New().Export(context.Background(), FormatPDF, sampleDoc())
+func TestExportDOCX_ValuesAfterColonAreNotBold(t *testing.T) {
+	doc := sampleDoc()
+	doc.Content = "Анамнез заболевания (дополнения к анамнезу): без дополнений\n" +
+		"Основное заболевание: F71.18 Сидрос психмоторной расторможенности\n" +
+		"Сопутствующие заболевания: не выявлено\n" +
+		"Дополнительные сведения о заболевании: нет\n"
+	data, err := New().Export(context.Background(), FormatDOCX, doc)
 	if err != nil {
-		t.Fatalf("export pdf: %v", err)
+		t.Fatalf("export docx: %v", err)
 	}
-	if len(data) == 0 {
-		t.Fatal("pdf is empty")
+	xml := docxDocumentXML(t, data)
+	if !strings.Contains(xml, "Синдром психомоторной") {
+		t.Error("docx should fix obvious typo Сидрос/психмоторной")
 	}
-	if !bytes.HasPrefix(data, []byte("%PDF")) {
-		t.Errorf("pdf does not start with %%PDF marker, got %q", data[:min(8, len(data))]) //nolint:gocritic
-	}
-	if !bytes.Contains(data, []byte("%%EOF")) {
-		t.Error("pdf does not contain EOF trailer")
-	}
-	if !bytes.Contains(data, []byte("FontFile2")) {
-		t.Error("pdf does not embed a TrueType font (FontFile2 missing) — Cyrillic would not render")
+	for _, value := range []string{"без дополнений", "не выявлено"} {
+		if runHasBold(xml, value) {
+			t.Errorf("value %q must not be bold after the colon", value)
+		}
 	}
 }
 
-// TestExportPDF_CyrillicDoesNotPanic feeds heavy Cyrillic content to ensure the
-// UTF-8 font path never panics or errors.
-func TestExportPDF_CyrillicDoesNotPanic(t *testing.T) {
-	doc := sampleDoc()
-	doc.Content = strings.Repeat("Психический статус: Пациент спокоен, ориентирован. Жалоб не предъявляет.\n", 200)
-	data, err := New().Export(context.Background(), FormatPDF, doc)
-	if err != nil {
-		t.Fatalf("export pdf (heavy cyrillic): %v", err)
+func runHasBold(documentXML, needle string) bool {
+	idx := strings.Index(documentXML, needle)
+	if idx < 0 {
+		return false
 	}
-	if !bytes.HasPrefix(data, []byte("%PDF")) {
-		t.Error("heavy-cyrillic pdf is not valid")
+	start := strings.LastIndex(documentXML[:idx], "<w:r>")
+	if start < 0 {
+		return false
 	}
+	run := documentXML[start:idx]
+	return strings.Contains(run, "<w:b/>")
 }
 
 func TestExportTXT(t *testing.T) {
@@ -228,7 +229,7 @@ func TestExportTXT(t *testing.T) {
 
 func TestParseFormat(t *testing.T) {
 	cases := map[string]bool{
-		"docx": true, "PDF": true, " txt ": true, "xlsx": false, "": false,
+		"docx": true, "PDF": false, " txt ": true, "xlsx": false, "": false,
 	}
 	for in, ok := range cases {
 		if _, got := ParseFormat(in); got != ok {
@@ -245,7 +246,7 @@ func TestFilenameNoPII(t *testing.T) {
 	}
 	d := sampleDoc()
 	d.DocumentTypeCode = ""
-	if got := Filename(d, FormatPDF); got != "diary_document_2025-09-19.pdf" {
+	if got := Filename(d, FormatDOCX); got != "diary_document_2025-09-19.docx" {
 		t.Errorf("fallback filename=%q", got)
 	}
 }
@@ -254,8 +255,8 @@ func TestContentType(t *testing.T) {
 	if FormatDOCX.ContentType() != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
 		t.Error("docx content-type wrong")
 	}
-	if FormatPDF.ContentType() != "application/pdf" {
-		t.Error("pdf content-type wrong")
+	if FormatTXT.ContentType() != "text/plain; charset=utf-8" {
+		t.Error("txt content-type wrong")
 	}
 }
 

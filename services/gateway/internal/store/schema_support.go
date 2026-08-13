@@ -59,3 +59,19 @@ func (r *PgxRepository) EnsureSupportFeedbackSchema(ctx context.Context) error {
 	}
 	return nil
 }
+
+const doctorProfileDDL = `
+ALTER TABLE doctor ADD COLUMN IF NOT EXISTS full_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE doctor ADD COLUMN IF NOT EXISTS position TEXT NOT NULL DEFAULT '';
+ALTER TABLE doctor ADD COLUMN IF NOT EXISTS head_full_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE doctor ADD COLUMN IF NOT EXISTS head_position TEXT NOT NULL DEFAULT '';
+ALTER TABLE doctor ADD COLUMN IF NOT EXISTS head_institution TEXT NOT NULL DEFAULT '';
+`
+
+// EnsureDoctorProfileSchema adds signature fields on an already-initialized volume.
+func (r *PgxRepository) EnsureDoctorProfileSchema(ctx context.Context) error {
+	if _, err := r.pool.Exec(ctx, doctorProfileDDL); err != nil {
+		return fmt.Errorf("store: ensure doctor profile schema: %w", err)
+	}
+	return nil
+}

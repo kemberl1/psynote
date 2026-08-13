@@ -22,10 +22,14 @@ const SECTION_LABELS = [
   "Осложнение основного заболевания",
   "Сопутствующие заболевания",
   "Основное заболевание",
+  "Дополнительные сведения о заболевании",
   "Дополнительные сведения",
+  "Обоснование диагноза (при наличии дополнительных сведений)",
   "Выполнены медицинские вмешательства",
   "План обследования (дополнения к плану)",
   "План обследования",
+  "План лечения (дополнения к плану)",
+  "План лечения",
   "Этапный эпикриз",
   "Заведующий отделением",
   "Лечащий врач",
@@ -38,6 +42,8 @@ const SECTION_LABELS = [
 const HEADER_LINES = [
   "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ",
   "ОСМОТР лечащим врачом совместно с заведующим отделением",
+  "ОСМОТР",
+  "лечащим врачом совместно с заведующим отделением",
   "Фамилия, имя, отчество (при наличии) врача, должность, специальность, подпись",
   "Фамилия, имя, отчество (при наличии) заведующего отделением, подпись",
 ];
@@ -71,18 +77,7 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-const SKIP_EXACT = new Set([
-  "данных нет",
-  "без дополнений",
-  "не предъявляет",
-  "жалоб не предъявляет",
-  "нет",
-  "-",
-  "—",
-  "без изменений",
-  "без отрицательной динамики",
-  "без особенностей",
-]);
+const SKIP_EXACT = new Set(["данных нет"]);
 
 function normalizeSkipValue(v: string): string {
   return v
@@ -98,54 +93,13 @@ function isSkipValue(v: string): boolean {
   return n === "" || SKIP_EXACT.has(n);
 }
 
-function isDiagnosisKeepLabel(label: string): boolean {
-  const l = label.toLowerCase();
-  return l === "диагноз" || l.includes("заболеван") || l === "синдром" || l.includes("осложнен");
-}
-
-function shouldDropSection(label: string, value: string): boolean {
-  const l = label.toLowerCase();
-  const v = value.toLowerCase();
-  const n = normalizeSkipValue(value);
-  if (l === "диагноз" && n === "") return false;
-  if (isSkipValue(value)) {
-    if (isDiagnosisKeepLabel(label) && (n === "не выявлено" || n === "-")) return false;
-    if (l === "диагноз") return false;
-    return true;
-  }
-  if (l.includes("жалоб") && (v.includes("не предъявля") || v.includes("жалоб нет"))) return true;
-  if (l.includes("анамнез") && v.includes("без дополнен")) return true;
-  if (
-    l.includes("план обследования") &&
-    (v.includes("без изменен") || v.includes("без дополнен"))
-  ) {
-    return true;
-  }
-  if (
-    l.includes("физикальное") &&
-    (v.includes("без изменен") || v.includes("без отрицательной динамики"))
-  ) {
-    return true;
-  }
-  if (
-    l.includes("соматический") &&
-    (v.includes("без изменен") || v.includes("без особенностей"))
-  ) {
-    return true;
-  }
-  if (
-    l.includes("вмешательства") &&
-    v.includes("осмотр лечащим врачом") &&
-    n.length < 40
-  ) {
-    return true;
-  }
-  return false;
+function shouldDropSection(_label: string, value: string): boolean {
+  return normalizeSkipValue(value) === "данных нет";
 }
 
 /**
- * Убрать пустые разделы («Без изменений», «не предъявляет», «без дополнений»)
- * по правилам оформления из docs/03 и промпта. Тот же текст уходит в Word.
+ * Убрать мусор генерации («Данных нет»). Строки бланка МИС
+ * («не предъявляет», «без дополнений») оставляем.
  */
 export function omitEmptyDiarySections(content: string): string {
   const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
@@ -204,6 +158,66 @@ export function omitEmptyDiarySections(content: string): string {
   return out.join("\n");
 }
 
+const DAILY_EXAM_TITLE = "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ";
+
+function isDailyExam(content: string): boolean {
+  return content.toUpperCase().includes(DAILY_EXAM_TITLE);
+}
+
+function isSectionStart(line: string): boolean {
+  return matchSectionLabel(line.trim()) !== null;
+}
+
+function nextNonEmpty(lines: string[], from: number): string | undefined {
+  for (let i = from; i < lines.length; i++) {
+    if (lines[i].trim()) return lines[i];
+  }
+  return undefined;
+}
+
+function isDailyBlankAfter(line: string): boolean {
+  const matched = matchSectionLabel(line.trim());
+  if (!matched) return false;
+  return (
+    matched.label === "Анамнез жизни (дополнения к анамнезу)" ||
+    matched.label === "Неврологический статус"
+  );
+}
+
+/**
+ * В ежедневнике — ровно одна пустая строка после анамнеза жизни
+ * и после неврологического статуса. Между остальными разделами
+ * лишние пустые строки убираем. Осмотр за 10 дней не трогаем.
+ */
+export function normalizeDailySpacing(content: string): string {
+  if (!isDailyExam(content)) return content;
+  const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const compacted: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() !== "") {
+      compacted.push(lines[i]);
+      continue;
+    }
+    const prev = compacted.length ? compacted[compacted.length - 1] : "";
+    const next = nextNonEmpty(lines, i + 1);
+    if (prev && next && isSectionStart(prev) && isSectionStart(next)) {
+      continue;
+    }
+    if (compacted.length && compacted[compacted.length - 1] === "") continue;
+    compacted.push("");
+  }
+
+  const out: string[] = [];
+  for (let i = 0; i < compacted.length; i++) {
+    out.push(compacted[i]);
+    if (!isDailyBlankAfter(compacted[i])) continue;
+    const next = compacted[i + 1];
+    if (next !== undefined && next.trim() === "") continue;
+    out.push("");
+  }
+  return out.join("\n");
+}
+
 function parseInlineBold(text: string): DiaryRun[] {
   if (!text) return [];
   const runs: DiaryRun[] = [];
@@ -235,8 +249,8 @@ function parseLine(line: string): DiaryRun[] {
     if (leadingWs) runs.push({ kind: "text", text: leadingWs });
     runs.push({ kind: "bold", text: `${section.label}:` });
     if (section.rest) {
-      runs.push({ kind: "text", text: " " });
-      runs.push(...parseInlineBold(section.rest));
+      const value = section.rest.replace(/\*\*/g, "");
+      if (value) runs.push({ kind: "text", text: ` ${value}` });
     }
     return runs;
   }

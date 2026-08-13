@@ -100,7 +100,7 @@ export function RequestDetailPage() {
         request_ids: doneChildIds,
         substitutions: buildExportSubstitutions({
           createdAt: data?.created_at,
-          doctorName: doctor?.display_name,
+          doctor,
         }),
       });
       setToast("Файл сохранён");
@@ -154,43 +154,47 @@ export function RequestDetailPage() {
       )}
 
       {data && pending && (
-        <div className="generating-inline">
-          <Spinner size="lg" />
-          <div className="generating-inline__title">{data.title_safe}</div>
-          <div className="generating-inline__hint">
-            {jobAlive
-              ? "Генерация идёт в этой вкладке. Можно открыть другой раздел — запись обновится сама."
-              : "Похоже, генерация оборвалась (обновили страницу или перезапустился сервер). Готовые дни сохранятся — можно продолжить."}
-          </div>
-          {!jobAlive && (
-            <div className="generating-inline__actions">
-              <Button
-                variant="primary"
-                loading={resuming}
-                disabled={resuming}
-                onClick={() => {
-                  if (!id) return;
-                  setResuming(true);
-                  const run = isBatch
-                    ? resumeBatchGeneration({ qc, detail: data })
-                    : startSingleGeneration({
-                        qc,
-                        documentType: data.document_type,
-                        answers: data.answers_anonymized ?? {},
-                        requestId: data.request_id,
-                      });
-                  void run.finally(() => setResuming(false));
-                }}
-              >
-                Продолжить генерацию
-              </Button>
-              <Button onClick={handleEdit}>Изменить данные</Button>
+        <>
+          <div className="generating-inline">
+            <div className="generating-inline__row">
+              <Spinner size="lg" />
+              <div className="generating-inline__title">{data.title_safe}</div>
             </div>
-          )}
+            <div className="generating-inline__hint">
+              {jobAlive
+                ? "Генерация идёт в этой вкладке. Можно открыть другой раздел — запись обновится сама."
+                : "Похоже, генерация оборвалась (обновили страницу или перезапустился сервер). Готовые дни сохранятся — можно продолжить."}
+            </div>
+            {!jobAlive && (
+              <div className="generating-inline__actions">
+                <Button
+                  variant="primary"
+                  loading={resuming}
+                  disabled={resuming}
+                  onClick={() => {
+                    if (!id) return;
+                    setResuming(true);
+                    const run = isBatch
+                      ? resumeBatchGeneration({ qc, detail: data })
+                      : startSingleGeneration({
+                          qc,
+                          documentType: data.document_type,
+                          answers: data.answers_anonymized ?? {},
+                          requestId: data.request_id,
+                        });
+                    void run.finally(() => setResuming(false));
+                  }}
+                >
+                  Продолжить генерацию
+                </Button>
+                <Button onClick={handleEdit}>Изменить данные</Button>
+              </div>
+            )}
+          </div>
           {isBatch && children.length > 0 && (
             <BatchDaysList children={children} />
           )}
-        </div>
+        </>
       )}
 
       {data && !pending && isBatch && (
@@ -214,13 +218,6 @@ export function RequestDetailPage() {
               loading={exporting === "docx"}
             >
               Экспорт в Word
-            </Button>
-            <Button
-              onClick={() => void handleBatchExport("pdf")}
-              disabled={doneChildIds.length === 0 || exporting !== null}
-              loading={exporting === "pdf"}
-            >
-              Экспорт в PDF
             </Button>
             <Button onClick={handleEdit}>Редактировать данные</Button>
             <Button
@@ -305,7 +302,7 @@ function BatchDaysList({ children }: { children: HistoryChild[] }) {
         substitutions: buildExportSubstitutions({
           title: child.title_safe,
           createdAt: child.created_at,
-          doctorName: doctor?.display_name,
+          doctor,
         }),
       });
       setToast("Файл сохранён");
@@ -345,7 +342,7 @@ function BatchDaysList({ children }: { children: HistoryChild[] }) {
             {expanded && (
               <div className="batch-day__body">
                 {childPending && (
-                  <p className="generating-inline__hint">Ещё формируется…</p>
+                  <p className="batch-day__pending">Ещё формируется…</p>
                 )}
                 {!childPending && child.content && (
                   <>
@@ -353,6 +350,7 @@ function BatchDaysList({ children }: { children: HistoryChild[] }) {
                       content={child.content}
                       title={child.title_safe}
                       createdAt={child.created_at}
+                      doctor={doctor}
                     />
                     <div className="result__actions" style={{ marginTop: 12 }}>
                       <Button
@@ -363,14 +361,6 @@ function BatchDaysList({ children }: { children: HistoryChild[] }) {
                       >
                         Word
                       </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => void handleDayExport(child, "pdf")}
-                        disabled={!canExport || exportingId !== null}
-                        loading={exportingId === `${child.request_id}:pdf`}
-                      >
-                        PDF
-                      </Button>
                     </div>
                     {child.status === "done" && (
                       <GenerationFeedback requestId={child.request_id} compact />
@@ -378,7 +368,7 @@ function BatchDaysList({ children }: { children: HistoryChild[] }) {
                   </>
                 )}
                 {!childPending && !child.content && (
-                  <p className="generating-inline__hint">
+                  <p className="batch-day__pending">
                     Текст для этого дня отсутствует.
                   </p>
                 )}

@@ -1,6 +1,6 @@
 // Package export is the gateway's document export service (docs/02 §4 «роль Go:
 // экспорт документов», docs/07 §7 POST /requests/{id}/export). It renders the
-// ANONYMIZED diary text into a downloadable Word (.docx) or PDF file.
+// ANONYMIZED diary text into a downloadable Word (.docx) file.
 //
 // ПРИВАТНОСТЬ (docs/05 §1, docs/09): экспортируется ТОЛЬКО обезличенный текст
 // (тот, что лежит в content_anonymized / отдан /generate). Подстановки реальных
@@ -13,10 +13,6 @@
 //     (archive/zip + encoding/xml). Сторонних зависимостей нет — это надёжнее
 //     и проще лицензионно, чем подключать docx-библиотеку (unioffice требует
 //     лицензию для части функций — отвергнут). Лицензия: Go stdlib (BSD-3).
-//   - .pdf: github.com/go-pdf/fpdf — живой форк архивированного jung-kurt/gofpdf,
-//     лицензия MIT/BSD-3 (свободная). Кириллица — встроенный TTF DejaVuSans
-//     (см. pdf.go, font_embed.go), лицензия Bitstream Vera / DejaVu (свободная,
-//     разрешает встраивание и коммерческое использование).
 package export
 
 import (
@@ -26,12 +22,11 @@ import (
 	"time"
 )
 
-// Format enumerates supported export formats (docs/07 §7: docx | pdf | txt).
+// Format enumerates supported export formats (docs/07 §7: docx | txt).
 type Format string
 
 const (
 	FormatDOCX Format = "docx"
-	FormatPDF  Format = "pdf"
 	FormatTXT  Format = "txt"
 )
 
@@ -40,8 +35,6 @@ func ParseFormat(s string) (Format, bool) {
 	switch Format(strings.ToLower(strings.TrimSpace(s))) {
 	case FormatDOCX:
 		return FormatDOCX, true
-	case FormatPDF:
-		return FormatPDF, true
 	case FormatTXT:
 		return FormatTXT, true
 	default:
@@ -54,8 +47,6 @@ func (f Format) ContentType() string {
 	switch f {
 	case FormatDOCX:
 		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-	case FormatPDF:
-		return "application/pdf"
 	case FormatTXT:
 		return "text/plain; charset=utf-8"
 	default:
@@ -77,7 +68,7 @@ type Document struct {
 	// Answers — обезличенные ответы (diary_date и т.п.) для штампа осмотра.
 	Answers map[string]any
 	// Substitutions — плейсхолдеры от клиента (ФИО врача и т.п.).
-	// [ДАТА] и [ВРЕМЯ] считает сервер: дата осмотра, время всегда 10:00.
+	// [ДАТА] и [ВРЕМЯ] считает сервер: дата осмотра, время 10 час. 00 мин.
 	Substitutions map[string]string
 }
 
@@ -88,7 +79,7 @@ type Exporter interface {
 }
 
 // renderer is the concrete Exporter used in production. It is stateless and
-// safe for concurrent use; the PDF font is loaded lazily once (см. pdf.go).
+// safe for concurrent use.
 type renderer struct{}
 
 // New returns the production Exporter.
@@ -107,8 +98,6 @@ func (renderer) ExportBatch(_ context.Context, format Format, docs []Document) (
 	switch format {
 	case FormatDOCX:
 		return renderDOCXBatch(docs)
-	case FormatPDF:
-		return renderPDFBatch(docs)
 	case FormatTXT:
 		return renderTXTBatch(docs), nil
 	default:

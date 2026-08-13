@@ -1,0 +1,69 @@
+/* Настройки аккаунта: две карточки подписи врача и заведующего. */
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 640px;
+}
+
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.settings-card__title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.settings-card__hint {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+}
+
+.settings__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.settings__saved {
+  font-size: var(--fs-sm);
+  color: var(--success);
+  font-weight: 500;
+}
+
+.settings-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-subtle, var(--bg));
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+  color: var(--text);
+}
+
+.settings-preview__label {
+  font-size: var(--fs-xs, 0.75rem);
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-top: var(--space-2);
+}
+
+.settings-preview__label:first-child {
+  margin-top: 0;
+}

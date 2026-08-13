@@ -43,7 +43,9 @@ func (r *PgxRepository) CreateDoctor(ctx context.Context, email, passwordHash, d
 func (r *PgxRepository) GetDoctorByEmail(ctx context.Context, email string) (*Doctor, error) {
 	return r.scanDoctor(ctx, `
 		SELECT id, email, password_hash, display_name, role, is_active,
-		       created_at, last_login_at
+		       created_at, last_login_at,
+		       COALESCE(full_name, ''), COALESCE(position, ''), COALESCE(head_full_name, ''),
+		       COALESCE(head_position, ''), COALESCE(head_institution, '')
 		FROM doctor WHERE email = $1`, email)
 }
 
@@ -51,7 +53,9 @@ func (r *PgxRepository) GetDoctorByEmail(ctx context.Context, email string) (*Do
 func (r *PgxRepository) GetDoctorByID(ctx context.Context, id string) (*Doctor, error) {
 	return r.scanDoctor(ctx, `
 		SELECT id, email, password_hash, display_name, role, is_active,
-		       created_at, last_login_at
+		       created_at, last_login_at,
+		       COALESCE(full_name, ''), COALESCE(position, ''), COALESCE(head_full_name, ''),
+		       COALESCE(head_position, ''), COALESCE(head_institution, '')
 		FROM doctor WHERE id = $1`, id)
 }
 
@@ -61,6 +65,8 @@ func (r *PgxRepository) scanDoctor(ctx context.Context, query string, arg any) (
 	err := r.pool.QueryRow(ctx, query, arg).Scan(
 		&d.ID, &d.Email, &d.PasswordHash, &d.DisplayName, &d.Role,
 		&d.IsActive, &d.CreatedAt, &d.LastLoginAt,
+		&d.FullName, &d.Position, &d.HeadFullName,
+		&d.HeadPosition, &d.HeadInstitution,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -76,6 +82,29 @@ func (r *PgxRepository) TouchLastLogin(ctx context.Context, id string) error {
 	_, err := r.pool.Exec(ctx, `UPDATE doctor SET last_login_at = now() WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("store: touch last_login: %w", err)
+	}
+	return nil
+}
+
+// UpdateDoctorProfile stores signature fields used in the MIS footer.
+// Non-empty full_name also becomes display_name (top bar / fallback).
+func (r *PgxRepository) UpdateDoctorProfile(ctx context.Context, id string, p SignatureProfile) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE doctor
+		SET full_name = $2,
+		    position = $3,
+		    head_full_name = $4,
+		    head_position = $5,
+		    head_institution = $6,
+		    display_name = CASE WHEN $2 <> '' THEN $2 ELSE display_name END
+		WHERE id = $1`,
+		id, p.FullName, p.Position, p.HeadFullName, p.HeadPosition, p.HeadInstitution,
+	)
+	if err != nil {
+		return fmt.Errorf("store: update doctor profile: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

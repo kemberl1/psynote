@@ -3,7 +3,7 @@
 // Role of this service (see docs/02_system_architecture.md §4):
 //   - API-Gateway: "front door" for all frontend requests.
 //   - Anonymization gate: strips PII before anything is stored / sent to the LLM.
-//   - Export service: builds Word/PDF documents.
+//   - Export service: builds Word documents.
 //   - Orchestration: coordinates RAG (Python) and the OpenAI-compatible LLM with fallback.
 //
 // Этап 10: wiring admin deps (AdminRepository, AdminRAG) for document upload.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { omitEmptyDiarySections, parseDiaryMarkup } from "./diaryMarkup";
+import { omitEmptyDiarySections, normalizeDailySpacing, parseDiaryMarkup } from "./diaryMarkup";
 
 function kinds(content: string) {
   return parseDiaryMarkup(content).map((r) => [r.kind, r.text] as const);
@@ -39,6 +39,39 @@ describe("parseDiaryMarkup", () => {
     expect(runs).toContainEqual(["placeholder", "[ДАТА]"]);
   });
 
+  it("does not bold values after a section colon", () => {
+    const runs = kinds(
+      "Анамнез заболевания (дополнения к анамнезу): **без дополнений**\n" +
+        "Основное заболевание: F71.18 синдром",
+    );
+    expect(runs).toContainEqual([
+      "bold",
+      "Анамнез заболевания (дополнения к анамнезу):",
+    ]);
+    expect(runs).toContainEqual(["bold", "Основное заболевание:"]);
+    expect(runs.some(([k, t]) => k === "bold" && t.includes("без дополнений"))).toBe(
+      false,
+    );
+    expect(runs.some(([k, t]) => k === "text" && t.includes("без дополнений"))).toBe(
+      true,
+    );
+    expect(runs.some(([k, t]) => k === "bold" && t.includes("F71.18"))).toBe(false);
+  });
+
+  it("bolds MIS diagnosis-adjacent labels", () => {
+    const runs = kinds(
+      "Дополнительные сведения о заболевании: нет\n" +
+        "Обоснование диагноза (при наличии дополнительных сведений): не требуется\n" +
+        "План лечения (дополнения к плану): без дополнений",
+    );
+    expect(runs).toContainEqual(["bold", "Дополнительные сведения о заболевании:"]);
+    expect(runs).toContainEqual([
+      "bold",
+      "Обоснование диагноза (при наличии дополнительных сведений):",
+    ]);
+    expect(runs).toContainEqual(["bold", "План лечения (дополнения к плану):"]);
+  });
+
   it("leaves unmatched asterisks as text", () => {
     const runs = kinds("температура 36*7");
     expect(runs.every(([k]) => k !== "bold")).toBe(true);
@@ -47,24 +80,59 @@ describe("parseDiaryMarkup", () => {
 });
 
 describe("omitEmptyDiarySections", () => {
-  it("omits empty filler sections and orphan «Без изменений»", () => {
+  it("keeps MIS defaults and drops «Данных нет»", () => {
     const text = omitEmptyDiarySections(
       [
         "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ",
-        "Жалобы: Не предъявляет (ввиду особенностей речевого развития).",
+        "Жалобы: не предъявляет",
         "Анамнез заболевания (дополнения к анамнезу): Без дополнений.",
         "Психический статус: Сознание ясное.",
-        "План обследования (дополнения к плану):",
-        "Без изменений.",
-        "Без изменений",
+        "План обследования (дополнения к плану): без дополнений",
+        "Жалобы: Данных нет",
       ].join("\n"),
     );
     expect(text).toContain("Психический статус:");
     expect(text).toContain("Сознание ясное.");
-    expect(text.toLowerCase()).not.toContain("жалобы");
-    expect(text.toLowerCase()).not.toContain("без дополнений");
-    expect(text.toLowerCase()).not.toContain("без изменений");
-    expect(text).not.toContain("План обследования");
+    expect(text.toLowerCase()).toContain("жалобы: не предъявляет");
+    expect(text.toLowerCase()).toContain("без дополнений");
+    expect(text).toContain("План обследования");
+    expect(text).not.toContain("Данных нет");
     expect(text).toContain("ОСМОТР ЛЕЧАЩИМ ВРАЧОМ");
+  });
+});
+
+describe("normalizeDailySpacing", () => {
+  it("keeps one blank after anamnesis and neurological status only", () => {
+    const text = normalizeDailySpacing(
+      [
+        "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ",
+        "Жалобы: не предъявляет",
+        "",
+        "Анамнез заболевания (дополнения к анамнезу): без дополнений",
+        "Анамнез жизни (дополнения к анамнезу): без дополнений",
+        "Физикальное исследование, локальный статус (его изменение): Т 36,6",
+        "Психический статус: Сознание ясное.",
+        "Неврологический статус: без острой неврологической симптоматики",
+        "Диагноз:",
+      ].join("\n"),
+    );
+    expect(text).toContain(
+      "Анамнез жизни (дополнения к анамнезу): без дополнений\n\nФизикальное",
+    );
+    expect(text).toContain(
+      "Неврологический статус: без острой неврологической симптоматики\n\nДиагноз:",
+    );
+    expect(text).not.toContain("Жалобы: не предъявляет\n\nАнамнез заболевания");
+  });
+
+  it("does not change 10-day spacing", () => {
+    const src = [
+      "ОСМОТР",
+      "лечащим врачом совместно с заведующим отделением",
+      "Анамнез жизни (дополнения к анамнезу): без дополнений",
+      "Неврологический статус (его изменение): без острой неврологической симптоматики",
+      "Диагноз:",
+    ].join("\n");
+    expect(normalizeDailySpacing(src)).toBe(src);
   });
 });

@@ -1,6 +1,6 @@
 // Package handlers — document export endpoint (docs/07 §7).
 //
-//	POST /api/v1/requests/{id}/export   body: { "format": "docx|pdf|txt",
+//	POST /api/v1/requests/{id}/export   body: { "format": "docx|txt",
 //	                                            "substitutions": { "[ДАТА]": "…" } }
 //	→ binary file (Content-Disposition: attachment; filename=diary_<type>_<date>.<ext>)
 //
@@ -53,7 +53,7 @@ func newExportHandler(repo store.Repository, exporter export.Exporter) http.Hand
 		format, ok := export.ParseFormat(req.Format)
 		if !ok {
 			writeError(w, http.StatusBadRequest, "BAD_REQUEST",
-				"неизвестный формат экспорта (ожидается docx, pdf или txt)")
+				"неизвестный формат экспорта (ожидается docx или txt)")
 			return
 		}
 

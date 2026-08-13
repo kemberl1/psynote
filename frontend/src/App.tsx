@@ -13,6 +13,7 @@ import { AuthPage } from "./pages/AuthPage";
 import { BatchDiaryPage } from "./pages/BatchDiaryPage";
 import { DiaryPage } from "./pages/DiaryPage";
 import { RequestDetailPage } from "./pages/RequestDetailPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
 function App() {
   return (
@@ -30,6 +31,7 @@ function App() {
           <Route path="diary/batch" element={<BatchDiaryPage />} />
           {/* Просмотр прошлого результата из истории. */}
           <Route path="requests/:id" element={<RequestDetailPage />} />
+          <Route path="settings" element={<SettingsPage />} />
           {/* Админка: корпус, поддержка, отзывы. */}
           <Route element={<AdminRoute />}>
             <Route path="admin" element={<AdminLayout />}>

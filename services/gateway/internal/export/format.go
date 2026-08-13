@@ -1,9 +1,9 @@
-// Structural parser for the diary body, shared by the DOCX and PDF renderers.
+// Structural parser for the diary body, used by the DOCX renderer.
 //
 // Тот же текст, что в UI-предпросмотре (шаблон daily / exam_10d):
 //   - Times New Roman 11pt, justify;
 //   - шапка ИБ / ОСМОТР / дата;
-//   - метки секций жирные; пустые разделы уже вырезаны в transform.
+//   - метки секций жирные; строки бланка МИС сохраняются.
 package export
 
 import (
@@ -42,6 +42,7 @@ const (
 	kindLabelValue                       // «Метка: значение» → жирная метка
 	kindConsultNote                      // консультации → слева
 	kindDoctorSignature                  // подпись врача → по центру
+	kindBlank                            // пустая строка бланка
 )
 
 // textSpan is one formatted run inside a paragraph.
@@ -82,6 +83,8 @@ var knownSectionLabels = map[string]bool{
 	"сопутствующие заболевания":              true,
 	"синдром":                                true,
 	"дополнительные сведения":                true,
+	"дополнительные сведения о заболевании":  true,
+	"обоснование диагноза (при наличии дополнительных сведений)": true,
 	"назначения":                             true,
 	"выполнены медицинские вмешательства":    true,
 	"план обследования (дополнения к плану)": true,
@@ -172,15 +175,6 @@ func splitLabelValue(line string) (label, value string, ok bool) {
 	return label, value, true
 }
 
-// isDiagnosisLikeLabel — в корпусе значения диагноза/синдрома часто жирные.
-func isDiagnosisLikeLabel(label string) bool {
-	l := strings.ToLower(strings.TrimSpace(label))
-	return l == "диагноз" ||
-		strings.Contains(l, "заболеван") ||
-		l == "синдром" ||
-		strings.Contains(l, "осложнен")
-}
-
 // enrichSpans adds mixed bold/underline runs for kinds that need them.
 func enrichSpans(l docLine) docLine {
 	switch l.kind {
@@ -253,11 +247,16 @@ func doctorSignatureSpans(text string) []textSpan {
 // parseDocLines splits the body into classified lines.
 func parseDocLines(content string) []docLine {
 	norm := normalizeNewlines(content)
+	keepBlanks := strings.Contains(strings.ToUpper(norm), "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ")
 	var out []docLine
 	prevCaption := false
 	for _, raw := range strings.Split(norm, "\n") {
 		line := normalizeGeneratedLine(raw)
 		if line == "" {
+			if keepBlanks && (len(out) == 0 || out[len(out)-1].kind != kindBlank) {
+				out = append(out, docLine{kind: kindBlank})
+			}
+			prevCaption = false
 			continue
 		}
 		l := classifyLine(line)
@@ -268,6 +267,12 @@ func parseDocLines(content string) []docLine {
 		}
 		prevCaption = l.kind == kindSignatureCaption
 		out = append(out, enrichSpans(l))
+	}
+	for len(out) > 0 && out[0].kind == kindBlank {
+		out = out[1:]
+	}
+	for len(out) > 0 && out[len(out)-1].kind == kindBlank {
+		out = out[:len(out)-1]
 	}
 	return out
 }

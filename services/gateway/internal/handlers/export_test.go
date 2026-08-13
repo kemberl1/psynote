@@ -18,7 +18,7 @@ func exportDetail() *store.HistoryDetail {
 		RequestID:    "r1",
 		DocumentType: "daily",
 		TitleSafe:    "Ежедневный дневник · сниженное настроение",
-		Content:      "Настроение сниженное.\n\nНазначения на [ДАТА].",
+		Content:      "Настроение сниженное.\n\nНазначения на [ДАТА].\nЛечащий врач: [ФИО_ВРАЧА]",
 		Status:       "done",
 		CreatedAt:    time.Date(2025, 9, 19, 8, 0, 0, 0, time.UTC),
 	}
@@ -56,13 +56,12 @@ func TestExportHandler_DOCX(t *testing.T) {
 	}
 }
 
-func TestExportHandler_PDF_Substitutions(t *testing.T) {
+func TestExportHandler_DOCX_Substitutions(t *testing.T) {
 	repo := &fakeRepo{detail: exportDetail()}
 	h := newExportHandler(repo, export.New())
 
-	// substitutions are applied in memory; the resulting file must be a valid PDF.
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/requests/r1/export",
-		strings.NewReader(`{"format":"pdf","substitutions":{"[ДАТА]":"19.09.2025"}}`))
+		strings.NewReader(`{"format":"docx","substitutions":{"[ФИО_ВРАЧА]":"Врач Т."}}`))
 	req.SetPathValue("id", "r1")
 	req = withDoctor(req, "doc-1")
 	rec := httptest.NewRecorder()
@@ -71,11 +70,31 @@ func TestExportHandler_PDF_Substitutions(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if ct := rec.Header().Get("Content-Type"); ct != "application/pdf" {
-		t.Errorf("Content-Type=%q", ct)
+	body := rec.Body.Bytes()
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatalf("docx body is not a valid zip: %v", err)
 	}
-	if !bytes.HasPrefix(rec.Body.Bytes(), []byte("%PDF")) {
-		t.Error("pdf body does not start with %PDF")
+	var documentXML string
+	for _, f := range zr.File {
+		if f.Name != "word/document.xml" {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("open document.xml: %v", err)
+		}
+		buf := new(bytes.Buffer)
+		_, _ = buf.ReadFrom(rc)
+		_ = rc.Close()
+		documentXML = buf.String()
+		break
+	}
+	if documentXML == "" {
+		t.Fatal("word/document.xml missing")
+	}
+	if !strings.Contains(documentXML, "Врач Т.") {
+		t.Error("docx substitutions were not applied")
 	}
 }
 

@@ -234,6 +234,36 @@ func TestMe_ReturnsProfile(t *testing.T) {
 	}
 }
 
+func TestPatchMe_UpdatesSignatureFields(t *testing.T) {
+	d, _ := testAuthDeps(t)
+	tokens := loginAndGetTokens(t, d, "sig@example.com")
+	h := requireAuth(d.tokens, newPatchMeHandler(d.repo))
+	body := `{"full_name":"Иванов Иван Иванович","position":"врач-психиатр детский","head_full_name":"Петрова А.С.","head_position":"Врач-психиатр детский","head_institution":"ОПО№1, отделение №2"}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/auth/me", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	rec := httptest.NewRecorder()
+	h(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch me status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var env struct {
+		Data meData `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	if env.Data.FullName != "Иванов Иван Иванович" || env.Data.Position != "врач-психиатр детский" {
+		t.Errorf("profile not saved: %+v", env.Data)
+	}
+	if env.Data.HeadFullName != "Петрова А.С." {
+		t.Errorf("head name not saved: %+v", env.Data)
+	}
+	if env.Data.HeadPosition != "Врач-психиатр детский" || env.Data.HeadInstitution != "ОПО№1, отделение №2" {
+		t.Errorf("head workplace not saved: %+v", env.Data)
+	}
+	if env.Data.DisplayName != "Иванов Иван Иванович" {
+		t.Errorf("display_name should follow full_name, got %q", env.Data.DisplayName)
+	}
+}
+
 // ─── middleware ──────────────────────────────────────────────────────────────
 
 func TestRequireAuth_NoToken(t *testing.T) {

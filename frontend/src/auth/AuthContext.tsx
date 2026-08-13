@@ -20,6 +20,7 @@ import {
     fetchMe,
     login as loginRequest,
     logout as logoutRequest,
+    patchMe,
     register as registerRequest,
 } from "../api/endpoints";
 import {
@@ -28,7 +29,7 @@ import {
     onSessionEnded,
     setTokens,
 } from "../api/session";
-import type { DoctorProfile } from "../api/types";
+import type { DoctorProfile, PatchMeRequest } from "../api/types";
 
 interface AuthContextValue {
   doctor: DoctorProfile | null;
@@ -42,6 +43,7 @@ interface AuthContextValue {
     displayName: string,
   ) => Promise<void>;
   logout: () => Promise<void>;
+  updateProfile: (patch: PatchMeRequest) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -111,6 +113,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const updateProfile = useCallback(async (patch: PatchMeRequest) => {
+    const me = await patchMe(patch);
+    setDoctor(me);
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       doctor,
@@ -119,8 +126,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       register,
       logout,
+      updateProfile,
     }),
-    [doctor, initializing, login, register, logout],
+    [doctor, initializing, login, register, logout, updateProfile],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

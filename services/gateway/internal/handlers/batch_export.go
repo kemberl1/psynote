@@ -1,6 +1,6 @@
 // Package handlers — batch document export (docs/07 §7).
 //
-//	POST /api/v1/export/batch   body: { "format": "docx|pdf|txt",
+//	POST /api/v1/export/batch   body: { "format": "docx|txt",
 //	                                   "request_ids": ["uuid", ...],
 //	                                   "substitutions": { "[ДАТА]": "…" } }
 //	→ one combined binary file
@@ -36,7 +36,7 @@ func newBatchExportHandler(repo store.Repository, exporter export.Exporter) http
 		format, ok := export.ParseFormat(req.Format)
 		if !ok {
 			writeError(w, http.StatusBadRequest, "BAD_REQUEST",
-				"неизвестный формат экспорта (ожидается docx, pdf или txt)")
+				"неизвестный формат экспорта (ожидается docx или txt)")
 			return
 		}
 

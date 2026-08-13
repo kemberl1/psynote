@@ -47,6 +47,10 @@ func NewPgxRepository(ctx context.Context, dsn string) (*PgxRepository, error) {
 		pool.Close()
 		return nil, err
 	}
+	if err := repo.EnsureDoctorProfileSchema(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
 	return repo, nil
 }
 

@@ -98,10 +98,24 @@ type Doctor struct {
 	Email        string
 	PasswordHash string
 	DisplayName  string
-	Role         string
+	FullName         string
+	Position         string
+	HeadFullName     string
+	HeadPosition     string
+	HeadInstitution  string
+	Role             string
 	IsActive     bool
 	CreatedAt    time.Time
 	LastLoginAt  *time.Time
+}
+
+// SignatureProfile is the MIS footer fields from account settings.
+type SignatureProfile struct {
+	FullName         string
+	Position         string
+	HeadFullName     string
+	HeadPosition     string
+	HeadInstitution  string
 }
 
 // Session is a refresh-token record (docs/05 §2.2 «session», docs/09 §1.3).
@@ -150,6 +164,8 @@ type Repository interface {
 	GetDoctorByEmail(ctx context.Context, email string) (*Doctor, error)
 	// GetDoctorByID looks a doctor up by id (/me). ErrNotFound if absent.
 	GetDoctorByID(ctx context.Context, id string) (*Doctor, error)
+	// UpdateDoctorProfile saves signature fields (FIO/position/head) for /auth/me.
+	UpdateDoctorProfile(ctx context.Context, id string, p SignatureProfile) error
 	// TouchLastLogin updates doctor.last_login_at to now (best-effort on login).
 	TouchLastLogin(ctx context.Context, id string) error
 

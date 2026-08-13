@@ -1,36 +1,36 @@
-// Transform generated diary text before Word/PDF/TXT render.
+// Transform generated diary text before Word/TXT render.
 //
 // Preview in UI and the downloaded file must be the same document
-// (docs/07 §7, docs/08 §5.3): template headers + named sections.
-// Empty filler sections are dropped per generation rules (docs/03,
-// rag/generation.py): no «Жалобы не предъявляет», «Без дополнений»,
-// «Без изменений» without a real finding — and never a value without
-// its section title.
+// (docs/07 §7, docs/08 §5.3): MIS exam template headers + named sections.
+// Official defaults («не предъявляет», «без дополнений») stay in the form.
 package export
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
 	"unicode"
 )
 
-const diaryExamTime = "10:00"
+const diaryExamHour = 10
+const diaryExamMinute = 0
 
-var titleDateRE = regexp.MustCompile(`(\d{2}\.\d{2}\.\d{4})`)
+var ruMonthsGenitive = [...]string{
+	"", "января", "февраля", "марта", "апреля", "мая", "июня",
+	"июля", "августа", "сентября", "октября", "ноября", "декабря",
+}
 
-// skipExactValues — whole-section bodies that mean «nothing to write».
+var titleDateRE = regexp.MustCompile(`(\d{2})\.(\d{2})\.(\d{4})`)
+
+// numericDateTimeRE matches «13.08.2026 время: 10:45» (old generated header).
+var numericDateTimeRE = regexp.MustCompile(
+	`^(\d{2})\.(\d{2})\.(\d{4})\s+время:\s+(\d{1,2}):(\d{2})\s*$`,
+)
+
+// skipExactValues — значения, которых нет в бланке МИС (мусор генерации).
 var skipExactValues = map[string]bool{
-	"данных нет":                 true,
-	"без дополнений":             true,
-	"не предъявляет":             true,
-	"жалоб не предъявляет":       true,
-	"нет":                        true,
-	"-":                          true,
-	"—":                          true,
-	"без изменений":              true,
-	"без отрицательной динамики": true,
-	"без особенностей":           true,
+	"данных нет": true,
 }
 
 func answerString(answers map[string]any, key string) string {
@@ -48,25 +48,45 @@ func answerString(answers map[string]any, key string) string {
 	return strings.TrimSpace(s)
 }
 
-// DiaryStamp is the header date/time for a diary: the examination day, always 10:00.
+func officialDate(t time.Time) string {
+	return fmt.Sprintf("«%02d» %s %d г.", t.Day(), ruMonthsGenitive[t.Month()], t.Year())
+}
+
+func officialTime(hour, minute int) string {
+	return fmt.Sprintf("%02d час. %02d мин.", hour, minute)
+}
+
+func parseDMY(s string) (time.Time, bool) {
+	m := titleDateRE.FindStringSubmatch(s)
+	if len(m) < 4 {
+		return time.Time{}, false
+	}
+	t, err := time.Parse("02.01.2006", m[1]+"."+m[2]+"."+m[3])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// DiaryStamp is the header date/time for a diary: examination day, 10 час. 00 мин.
 func DiaryStamp(title string, answers map[string]any, generatedAt time.Time) (date string, clock string) {
-	clock = diaryExamTime
+	clock = officialTime(diaryExamHour, diaryExamMinute)
 	if iso := answerString(answers, "diary_date"); iso != "" {
 		if t, err := time.Parse("2006-01-02", iso); err == nil {
-			return t.Format("02.01.2006"), clock
+			return officialDate(t), clock
 		}
-		if titleDateRE.MatchString(iso) {
-			return iso, clock
+		if t, ok := parseDMY(iso); ok {
+			return officialDate(t), clock
 		}
 	}
-	if m := titleDateRE.FindStringSubmatch(title); len(m) > 1 {
-		return m[1], clock
+	if t, ok := parseDMY(title); ok {
+		return officialDate(t), clock
 	}
 	d := generatedAt
 	if d.IsZero() {
 		d = time.Now()
 	}
-	return d.Format("02.01.2006"), clock
+	return officialDate(d), clock
 }
 
 // mergeSubstitutions fills [ДАТА]/[ВРЕМЯ] from the examination day (not generate-now)
@@ -102,11 +122,152 @@ func applySubstitutionsMap(content string, subs map[string]string) string {
 }
 
 // transformContent keeps the template layout the UI shows, fills
-// placeholders, and drops empty filler sections (docs/03 clinical rules).
+// placeholders, and rewrites a numeric date header into the MIS form.
 func transformContent(doc Document, subs map[string]string) string {
+	content := rewriteNumericDateHeaders(doc.Content)
+	content = rewriteHeadSignatureCaption(content)
+	content = rewriteSignaturePlaceholders(content)
 	merged := mergeSubstitutions(doc, subs)
-	content := applySubstitutionsMap(doc.Content, merged)
-	return dropEmptySections(content)
+	content = applySubstitutionsMap(content, merged)
+	content = strings.ReplaceAll(content, "[ДОЛЖНОСТЬ_ВРАЧА]", "")
+	content = tidySignatureCommas(content)
+	content = fixObviousTypos(content)
+	content = dropEmptySections(content)
+	return normalizeDailySpacing(content)
+}
+
+const doctorSignatureCaption = "Фамилия, имя, отчество (при наличии) врача, должность, специальность, подпись"
+const headSignatureCaption = "Фамилия, имя, отчество (при наличии) заведующего отделением, подпись"
+
+func rewriteHeadSignatureCaption(content string) string {
+	old := doctorSignatureCaption + "\n[ФИО_ЗАВ_ОТДЕЛЕНИЕМ]"
+	neu := headSignatureCaption + "\n[ФИО_ЗАВ_ОТДЕЛЕНИЕМ]"
+	return strings.ReplaceAll(content, old, neu)
+}
+
+var dailyDoctorFooterRE = regexp.MustCompile(`(?m)^Лечащий врач:?\s*\[ФИО_ВРАЧА\]\s*$`)
+
+const dailyDoctorLine = "Лечащий врач, [ДОЛЖНОСТЬ_ВРАЧА], [ФИО_ВРАЧА]"
+
+func rewriteSignaturePlaceholders(content string) string {
+	content = normalizeNewlines(content)
+	replacement := "[ФИО_ВРАЧА], [ДОЛЖНОСТЬ_ВРАЧА]"
+	if isDailyExam(content) {
+		replacement = dailyDoctorLine
+	}
+	content = dailyDoctorFooterRE.ReplaceAllString(content, replacement)
+	doctorWithPos := doctorSignatureCaption + "\n[ФИО_ВРАЧА], [ДОЛЖНОСТЬ_ВРАЧА]"
+	doctorOnly := doctorSignatureCaption + "\n[ФИО_ВРАЧА]"
+	if !strings.Contains(content, "[ФИО_ВРАЧА], [ДОЛЖНОСТЬ_ВРАЧА]") {
+		content = strings.ReplaceAll(content, doctorOnly, doctorWithPos)
+	}
+	return content
+}
+
+var emptyCommaRE = regexp.MustCompile(`,\s*,`)
+
+func tidySignatureCommas(content string) string {
+	lines := strings.Split(normalizeNewlines(content), "\n")
+	for i, line := range lines {
+		out := line
+		for emptyCommaRE.MatchString(out) {
+			out = emptyCommaRE.ReplaceAllString(out, ",")
+		}
+		if !strings.Contains(out, ":") {
+			out = strings.TrimSpace(strings.Trim(out, ","))
+			out = strings.Join(strings.Fields(out), " ")
+		}
+		lines[i] = out
+	}
+	return strings.Join(lines, "\n")
+}
+
+func isDailyExam(content string) bool {
+	return strings.Contains(strings.ToUpper(content), "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ")
+}
+
+func nextNonEmptyLine(lines []string, from int) string {
+	for i := from; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) != "" {
+			return lines[i]
+		}
+	}
+	return ""
+}
+
+func isDailyBlankAfterLabel(label string) bool {
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "анамнез жизни (дополнения к анамнезу)", "неврологический статус":
+		return true
+	default:
+		return false
+	}
+}
+
+// normalizeDailySpacing inserts the two MIS blank lines in the daily exam
+// and drops extra empty lines between other sections. exam_10d is unchanged.
+func normalizeDailySpacing(content string) string {
+	if !isDailyExam(content) {
+		return content
+	}
+	lines := strings.Split(normalizeNewlines(content), "\n")
+	compacted := make([]string, 0, len(lines))
+	for i, raw := range lines {
+		if strings.TrimSpace(raw) != "" {
+			compacted = append(compacted, raw)
+			continue
+		}
+		prev := ""
+		if n := len(compacted); n > 0 {
+			prev = compacted[n-1]
+		}
+		next := nextNonEmptyLine(lines, i+1)
+		if prev != "" && next != "" {
+			if _, _, prevSec := splitKnownSection(prev); prevSec {
+				if _, _, nextSec := splitKnownSection(next); nextSec {
+					continue
+				}
+			}
+		}
+		if len(compacted) > 0 && compacted[len(compacted)-1] == "" {
+			continue
+		}
+		compacted = append(compacted, "")
+	}
+
+	out := make([]string, 0, len(compacted)+2)
+	for i, line := range compacted {
+		out = append(out, line)
+		label, _, ok := splitKnownSection(line)
+		if !ok || !isDailyBlankAfterLabel(label) {
+			continue
+		}
+		if i+1 < len(compacted) && strings.TrimSpace(compacted[i+1]) == "" {
+			continue
+		}
+		out = append(out, "")
+	}
+	return strings.Join(out, "\n")
+}
+
+func rewriteNumericDateHeaders(content string) string {
+	lines := strings.Split(normalizeNewlines(content), "\n")
+	for i, raw := range lines {
+		line := strings.TrimSpace(strings.ReplaceAll(raw, "**", ""))
+		m := numericDateTimeRE.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		t, err := time.Parse("02.01.2006", m[1]+"."+m[2]+"."+m[3])
+		if err != nil {
+			continue
+		}
+		hour, minute := diaryExamHour, diaryExamMinute
+		fmt.Sscanf(m[4], "%d", &hour)
+		fmt.Sscanf(m[5], "%d", &minute)
+		lines[i] = officialDate(t) + " время: " + officialTime(hour, minute)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func normalizeSkipValue(v string) string {
@@ -135,56 +296,13 @@ func isSkipSectionValue(v string) bool {
 	return skipExactValues[v]
 }
 
-func isDiagnosisKeepLabel(label string) bool {
-	l := strings.ToLower(strings.TrimSpace(label))
-	return l == "диагноз" ||
-		strings.Contains(l, "заболеван") ||
-		l == "синдром" ||
-		strings.Contains(l, "осложнен")
-}
-
 func shouldDropSection(label, value string) bool {
-	l := strings.ToLower(strings.TrimSpace(label))
-	v := strings.ToLower(strings.TrimSpace(value))
-	norm := normalizeSkipValue(value)
-
-	// «Диагноз:» is a structural heading; keep even if the code is on the next line.
-	if l == "диагноз" && norm == "" {
-		return false
-	}
-	if isSkipSectionValue(value) {
-		if isDiagnosisKeepLabel(label) && (norm == "не выявлено" || norm == "-") {
-			return false
-		}
-		if l == "диагноз" {
-			return false
-		}
+	// Бланк МИС держит все строки, включая «не предъявляет» / «без дополнений».
+	// Вырезаем только мусор генерации («данных нет»).
+	if normalizeSkipValue(value) == "данных нет" {
 		return true
 	}
-
-	if strings.Contains(l, "жалоб") &&
-		(strings.Contains(v, "не предъявля") || strings.Contains(v, "жалоб нет")) {
-		return true
-	}
-	if strings.Contains(l, "анамнез") && strings.Contains(v, "без дополнен") {
-		return true
-	}
-	if strings.Contains(l, "план обследования") &&
-		(strings.Contains(v, "без изменен") || strings.Contains(v, "без дополнен")) {
-		return true
-	}
-	if strings.Contains(l, "физикальное") &&
-		(strings.Contains(v, "без изменен") || strings.Contains(v, "без отрицательной динамики")) {
-		return true
-	}
-	if strings.Contains(l, "соматический") &&
-		(strings.Contains(v, "без изменен") || strings.Contains(v, "без особенностей")) {
-		return true
-	}
-	if strings.Contains(l, "вмешательства") &&
-		strings.Contains(v, "осмотр лечащим врачом") && len([]rune(norm)) < 40 {
-		return true
-	}
+	_ = label
 	return false
 }
 

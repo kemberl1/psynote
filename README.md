@@ -71,7 +71,7 @@ PsyNote совмещает:
 │              API-Gateway  (Go 1.23 · net/http)                       │
 │  ┌──────────┐ ┌──────────────┐ ┌────────┐ ┌────────┐ ┌───────────┐ │
 │  │   Auth   │ │ Anonymizer   │ │ Export │ │  RAG   │ │  Catalog  │ │
-│  │  (JWT)   │ │ (PII-gate)   │ │DOCX/PDF│ │Orchest.│ │(question- │ │
+│  │  (JWT)   │ │ (PII-gate)   │ │  DOCX  │ │Orchest.│ │(question- │ │
 │  │          │ │ 5 стадий     │ │        │ │        │ │  naires)  │ │
 │  └──────────┘ └──────────────┘ └────────┘ └────┬───┘ └───────────┘ │
 └─────────────────────────────────────────────────┼────────────────────┘
@@ -105,7 +105,7 @@ PsyNote совмещает:
 
 | Компонент | Технология | Роль |
 |---|---|---|
-| **API-Gateway** | Go 1.23 (`net/http`) | Маршрутизация, аутентификация (JWT HS256), анонимизация PII, оркестрация RAG↔LLM, экспорт DOCX/PDF |
+| **API-Gateway** | Go 1.23 (`net/http`) | Маршрутизация, аутентификация (JWT HS256), анонимизация PII, оркестрация RAG↔LLM, экспорт DOCX |
 | **Анонимизатор** | Go (in-process) | 5-стадийный пайплайн замены ПДн: стоп-слова → FIO-детектор → словари учреждений → regex-паттерны → NER (Natasha, опц.) |
 | **RAG-сервис** | Python 3.12, FastAPI | Чанкинг корпуса, локальные эмбеддинги (e5-large), векторный поиск (Qdrant), сборка промптов, генерация через LLM |
 | **Frontend** | React 19, Vite 6, TypeScript 5.7 | Динамический опросник, рабочая область дневников, история запросов, экспорт, тёмная тема в стиле Cursor |
@@ -125,7 +125,7 @@ PsyNote совмещает:
 | 🤖 **RAG-генерация дневников** | ✅ Этап 3–4 | Retrieval из Qdrant (few-shot) + шаблон + LLM → структурированный дневник |
 | 🔒 **Многоуровневая анонимизация** | ✅ Этап 1 | 5 стадий: словари ФИО, regex дат/адресов, словари учреждений, NER, fail-closed гейт |
 | 🔄 **LLM-фолбэк** | ✅ Этап 4 | Автоматический fallback моделей: `large → medium → small` при ошибках/таймаутах |
-| 📄 **Экспорт Word/PDF** | ✅ Этап 6 | DOCX и PDF в формате корпусного сборника; одиночный и пакетный экспорт |
+| 📄 **Экспорт Word** | ✅ Этап 6 | DOCX в формате корпусного сборника; одиночный и пакетный экспорт |
 | 🔐 **Аутентификация (JWT)** | ✅ Этап 5 | Access + Refresh токены, bcrypt-хеши паролей, middleware авторизации |
 | 👤 **Админ-панель** | ✅ Этап 5 | Управление врачами, просмотр статистики использования |
 | 📋 **История запросов** | ✅ Этап 5 | Сохранение и просмотр ранее сгенерированных дневников |
@@ -297,7 +297,7 @@ PsyNote/
 │   │   │   ├── auth/                # JWT, bcrypt-пароли
 │   │   │   ├── catalog/             # Управление опросниками (каталог)
 │   │   │   ├── config/              # Конфигурация из ENV
-│   │   │   ├── export/              # DOCX (gofpdf) + PDF-генерация
+│   │   │   ├── export/              # DOCX-генерация (OOXML)
 │   │   │   ├── handlers/            # HTTP-хендлеры + middleware
 │   │   │   ├── llm/                 # OpenAI-совместимый LLM-клиент
 │   │   │   ├── ragclient/           # Клиент RAG-сервиса
@@ -350,7 +350,7 @@ PsyNote/
 |---|---|---|
 | [`anonymizer/`](services/gateway/internal/anonymizer/) | 5-стадийный PII-гейт: словари ФИО/учреждений, regex-детекторы дат/адресов, FIO-детектор (морфология), NER-интеграция (Natasha) | Высокая производительность текстовых операций, `go:embed` для встраивания словарей в бинарь |
 | [`auth/`](services/gateway/internal/auth/) | JWT (HS256), bcrypt-хеширование паролей, access/refresh токены | `golang.org/x/crypto` — стандартный пакет Go для криптографии |
-| [`export/`](services/gateway/internal/export/) | Генерация DOCX (XML) и PDF (`go-pdf/fpdf`) с встроенными шрифтами DejaVu | Прямая работа с бинарными форматами без внешних зависимостей |
+| [`export/`](services/gateway/internal/export/) | Генерация DOCX (XML) | Прямая сборка OOXML без внешних зависимостей |
 | [`handlers/`](services/gateway/internal/handlers/) | HTTP-хендлеры: `/api/v1/generate`, `/api/v1/auth/*`, `/api/v1/export/*`, `/api/v1/anonymize`, admin-эндпоинты, middleware (CORS, auth, admin) | `net/http` — стандартная библиотека, zero external deps |
 | [`ragclient/`](services/gateway/internal/ragclient/) | Клиент RAG-сервиса: проксирование генерации, ingestion, admin-операции | Контролируемые таймауты, retry-логика |
 | [`store/`](services/gateway/internal/store/) | PostgreSQL-хранилище через `pgx/v5`: пользователи, сессии, история запросов, admin-учётки | pgx — самый быстрый pg-драйвер для Go |
@@ -361,7 +361,6 @@ PsyNote/
 
 ```
 go 1.23
-github.com/go-pdf/fpdf v0.9.0     # PDF-генерация
 github.com/jackc/pgx/v5 v5.7.1     # PostgreSQL driver
 golang.org/x/crypto v0.27.0        # bcrypt
 ```
@@ -399,7 +398,7 @@ cd services/gateway && go test ./... -v -count=1
 # - anonymizer:  fio, gate, stage-3.1, stage-3.2
 # - auth:        JWT, password hashing
 # - handlers:    auth, anonymize, export, generate, history, admin
-# - export:      format, DOCX/PDF
+# - export:      format, DOCX
 # - catalog:     questionnaire catalog
 # - ragclient:   RAG client mocking
 ```
@@ -437,7 +436,7 @@ cd frontend && npm test
 | 3 | LLM-генерация дневников с фолбэк `large→medium→small` | ✅ Завершён |
 | 4 | Динамический опросник и страница дневников (frontend) | ✅ Завершён |
 | 5 | Аутентификация (JWT) и история запросов | ✅ Завершён |
-| 6 | Экспорт Word/PDF | ✅ Завершён |
+| 6 | Экспорт Word | ✅ Завершён |
 | 7 | Полировка UI в стиле Cursor, тёмная тема | ✅ Завершён |
 | 8 | Админ-панель (управление врачами, статистика) | ✅ Завершён |
 | 9 | Расширение каталога документов (первички, эпикризы, выписки) | 🔲 Планируется |

@@ -30,6 +30,7 @@ from app.generation import build_messages, build_query_text
 from app.llm_client import LLMClient, LLMResult, OpenAICompatibleClient
 from app.questionnaire import iter_free_text, map_answers
 from app.templates import SUPPORTED_DOC_TYPES, DOC_TYPE_DAILY
+from app.typos import fix_obvious_typos
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +204,7 @@ class DiaryGenerator:
                     result.usage.get("total_tokens"))
 
         return GenerationResult(
-            content=result.content,
+            content=fix_obvious_typos(result.content),
             model_used=result.model,
             tokens_used=int(result.usage.get("total_tokens", 0) or 0),
             chunks_used=len(samples),

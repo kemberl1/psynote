@@ -33,11 +33,11 @@ func TestTransformDaily_KeepsTemplateLikeUI(t *testing.T) {
 	if !strings.Contains(out, "Психический статус:") {
 		t.Error("psychiatric section must keep its title")
 	}
-	if !strings.Contains(out, "31.08.2025") {
-		t.Errorf("date placeholder must be filled: %q", out)
+	if !strings.Contains(out, "«31» августа 2025 г.") {
+		t.Errorf("official date must be filled: %q", out)
 	}
-	if !strings.Contains(out, "время: 10:00") {
-		t.Errorf("exam time must be 10:00, got: %q", out)
+	if !strings.Contains(out, "время: 10 час. 00 мин.") {
+		t.Errorf("exam time must be 10 час. 00 мин., got: %q", out)
 	}
 	if strings.Contains(out, "14:30") {
 		t.Errorf("must not use generation clock: %q", out)
@@ -48,14 +48,11 @@ func TestTransformDaily_KeepsTemplateLikeUI(t *testing.T) {
 	if !strings.Contains(out, "Иванова И.И.") {
 		t.Error("missing substituted doctor name")
 	}
-	if strings.Contains(strings.ToLower(out), "жалобы") {
-		t.Errorf("empty complaints must be dropped: %q", out)
+	if !strings.Contains(strings.ToLower(out), "жалобы") {
+		t.Errorf("complaints line must stay in the MIS form: %q", out)
 	}
-	if strings.Contains(strings.ToLower(out), "без дополнений") {
-		t.Errorf("empty anamnesis must be dropped: %q", out)
-	}
-	if strings.Contains(strings.ToLower(out), "без изменений") {
-		t.Errorf("plan «без изменений» must be dropped: %q", out)
+	if !strings.Contains(strings.ToLower(out), "без дополнений") {
+		t.Errorf("anamnesis «без дополнений» must stay: %q", out)
 	}
 	if !strings.Contains(out, "F32.10") {
 		t.Error("diagnosis must stay")
@@ -85,23 +82,21 @@ func TestTransformDaily_SkipsEmptySections(t *testing.T) {
 	}
 }
 
-func TestTransformDaily_OrphanBezIzmeneniyDropped(t *testing.T) {
+func TestTransformDaily_KeepsPlanDefaults(t *testing.T) {
 	doc := Document{
 		DocumentTypeCode: "daily",
 		GeneratedAt:      time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC),
 		Content: "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ\n" +
 			"Психический статус: Сознание ясное.\n" +
-			"План обследования (дополнения к плану):\n" +
-			"Без изменений.\n" +
-			"Без изменений\n",
+			"План обследования (дополнения к плану): без дополнений\n" +
+			"План лечения (дополнения к плану): без дополнений\n",
 	}
 	out := transformContent(doc, nil)
-	low := strings.ToLower(out)
-	if strings.Contains(low, "без изменений") {
-		t.Errorf("orphan «Без изменений» must not appear without a section: %q", out)
+	if !strings.Contains(out, "План обследования") {
+		t.Errorf("exam plan line must stay: %q", out)
 	}
-	if strings.Contains(out, "План обследования") {
-		t.Errorf("empty plan section must be dropped entirely: %q", out)
+	if !strings.Contains(out, "План лечения") {
+		t.Errorf("treatment plan line must stay: %q", out)
 	}
 	if !strings.Contains(out, "Психический статус:") {
 		t.Errorf("status must remain: %q", out)
@@ -128,8 +123,8 @@ func TestTransformExam10d_MarkdownLabels(t *testing.T) {
 	if strings.Contains(out, "**") {
 		t.Errorf("markdown stars must be stripped: %q", out)
 	}
-	if strings.Contains(out, "Жалобы") {
-		t.Errorf("«не предъявляет» complaints must be dropped: %q", out)
+	if !strings.Contains(out, "Жалобы") {
+		t.Errorf("complaints line must stay in the MIS form: %q", out)
 	}
 	if !strings.Contains(out, "Психический статус:") {
 		t.Error("missing psychiatric section from markdown export")
@@ -165,8 +160,8 @@ func TestTransformExam10d_StructuredHeader(t *testing.T) {
 	if !strings.Contains(out, "ОСМОТР лечащим врачом совместно с заведующим отделением") {
 		t.Errorf("title missing in %q", out)
 	}
-	if !strings.Contains(out, "08.09.2025") {
-		t.Errorf("date placeholder not filled: %q", out)
+	if !strings.Contains(out, "«08» сентября 2025 г.") {
+		t.Errorf("official date not filled: %q", out)
 	}
 	if !strings.Contains(out, "Жалобы: на сохраняющуюся тревогу") {
 		t.Errorf("real complaints must stay: %q", out)
@@ -198,20 +193,37 @@ func TestBuildDocLines_DailyKeepsExamHeader(t *testing.T) {
 	}
 }
 
-func TestTransformDaily_DropsBoilerplateInterventions(t *testing.T) {
+func TestTransformDaily_KeepsInterventionsLine(t *testing.T) {
 	doc := Document{
 		DocumentTypeCode: "daily",
 		GeneratedAt:      time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC),
 		Content: "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ\n" +
 			"Психический статус: Сознание ясное.\n" +
-			"Выполнены медицинские вмешательства: Осмотр лечащим врачом.\n",
+			"Выполнены медицинские вмешательства: осмотр врачом-психиатром детским.\n",
 	}
 	out := transformContent(doc, nil)
 	if !strings.Contains(out, "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ") {
 		t.Errorf("header must stay: %q", out)
 	}
-	if strings.Contains(out, "вмешательства") {
-		t.Errorf("boilerplate interventions must be dropped: %q", out)
+	if !strings.Contains(out, "вмешательства") {
+		t.Errorf("interventions line must stay: %q", out)
+	}
+}
+
+func TestTransformDaily_RewritesNumericDateHeader(t *testing.T) {
+	doc := Document{
+		DocumentTypeCode: "daily",
+		GeneratedAt:      time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC),
+		Content: "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ\n" +
+			"13.08.2026 время: 10:45\n" +
+			"Психический статус: Сознание ясное.\n",
+	}
+	out := transformContent(doc, nil)
+	if !strings.Contains(out, "«13» августа 2026 г. время: 10 час. 45 мин.") {
+		t.Errorf("numeric header must become MIS date: %q", out)
+	}
+	if strings.Contains(out, "13.08.2026 время: 10:45") {
+		t.Errorf("old numeric header must not remain: %q", out)
 	}
 }
 
@@ -239,11 +251,11 @@ func TestDiaryStamp_PrefersTitleDateAndFixedTime(t *testing.T) {
 		nil,
 		time.Date(2026, 8, 13, 14, 30, 0, 0, time.UTC),
 	)
-	if date != "27.07.2026" {
-		t.Errorf("date = %q, want 27.07.2026 from title", date)
+	if date != "«27» июля 2026 г." {
+		t.Errorf("date = %q, want «27» июля 2026 г. from title", date)
 	}
-	if clock != "10:00" {
-		t.Errorf("clock = %q, want 10:00", clock)
+	if clock != "10 час. 00 мин." {
+		t.Errorf("clock = %q, want 10 час. 00 мин.", clock)
 	}
 
 	date, clock = DiaryStamp(
@@ -251,8 +263,8 @@ func TestDiaryStamp_PrefersTitleDateAndFixedTime(t *testing.T) {
 		map[string]any{"diary_date": "2026-08-01"},
 		time.Date(2026, 8, 13, 9, 1, 0, 0, time.UTC),
 	)
-	if date != "01.08.2026" || clock != "10:00" {
-		t.Errorf("got %s %s, want 01.08.2026 10:00", date, clock)
+	if date != "«01» августа 2026 г." || clock != "10 час. 00 мин." {
+		t.Errorf("got %s %s, want «01» августа 2026 г. 10 час. 00 мин.", date, clock)
 	}
 
 	doc := Document{
@@ -266,13 +278,87 @@ func TestDiaryStamp_PrefersTitleDateAndFixedTime(t *testing.T) {
 		},
 	}
 	out := transformContent(doc, doc.Substitutions)
-	if !strings.Contains(out, "30.07.2026 время: 10:00") {
-		t.Errorf("batch day must keep its own date at 10:00: %q", out)
+	if !strings.Contains(out, "«30» июля 2026 г. время: 10 час. 00 мин.") {
+		t.Errorf("batch day must keep its own official date: %q", out)
 	}
 	if strings.Contains(out, "13.08.2026") || strings.Contains(out, "11:05") {
 		t.Errorf("must ignore client generate-now stamp: %q", out)
 	}
 	if !strings.Contains(out, "Врач Т.") {
 		t.Errorf("doctor name still applies: %q", out)
+	}
+}
+
+func TestTransform_FixesObviousTypos(t *testing.T) {
+	doc := Document{
+		GeneratedAt: time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC),
+		Content:     "Основное заболевание: F71.18 Сидрос психмоторной расторможенности",
+	}
+	out := transformContent(doc, nil)
+	if strings.Contains(out, "Сидрос") || strings.Contains(out, "психмоторной") {
+		t.Errorf("obvious typos must be fixed: %q", out)
+	}
+	if !strings.Contains(out, "Синдром психомоторной") {
+		t.Errorf("want Синдром психомоторной, got %q", out)
+	}
+
+	complaints := transformContent(Document{
+		GeneratedAt: time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC),
+		Content:     "Жалобы: самостоятельно не предъявляет",
+	}, nil)
+	if strings.Contains(complaints, "самостоятельно") {
+		t.Errorf("complaints must not keep «самостоятельно»: %q", complaints)
+	}
+	if !strings.Contains(complaints, "Жалобы: не предъявляет") {
+		t.Errorf("want Жалобы: не предъявляет, got %q", complaints)
+	}
+}
+
+func TestTransformDaily_SignatureOrderAndSpacing(t *testing.T) {
+	doc := Document{
+		DocumentTypeCode: "daily",
+		GeneratedAt:      time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC),
+		Content: "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ\n" +
+			"Жалобы: не предъявляет\n" +
+			"\n" +
+			"Анамнез заболевания (дополнения к анамнезу): без дополнений\n" +
+			"Анамнез жизни (дополнения к анамнезу): без дополнений\n" +
+			"Физикальное исследование, локальный статус (его изменение): Т 36,6\n" +
+			"Неврологический статус: без острой неврологической симптоматики\n" +
+			"Диагноз:\n" +
+			"Лечащий врач: [ФИО_ВРАЧА]",
+		Substitutions: map[string]string{
+			"[ФИО_ВРАЧА]":       "Иванов Иван Иванович",
+			"[ДОЛЖНОСТЬ_ВРАЧА]": "врач-психиатр детский",
+		},
+	}
+	out := transformContent(doc, doc.Substitutions)
+	if !strings.Contains(out, "Лечащий врач, врач-психиатр детский, Иванов Иван Иванович") {
+		t.Errorf("daily signature order: %q", out)
+	}
+	if strings.Contains(out, "Жалобы: не предъявляет\n\nАнамнез заболевания") {
+		t.Errorf("extra blank between unrelated sections: %q", out)
+	}
+	if !strings.Contains(out, "Анамнез жизни (дополнения к анамнезу): без дополнений\n\nФизикальное") {
+		t.Errorf("blank after анамнез жизни: %q", out)
+	}
+	if !strings.Contains(out, "Неврологический статус: без острой неврологической симптоматики\n\nДиагноз:") {
+		t.Errorf("blank after неврологический статус: %q", out)
+	}
+}
+
+func TestTransformExam10d_DoesNotInsertDailyBlanks(t *testing.T) {
+	doc := Document{
+		DocumentTypeCode: "exam_10d",
+		GeneratedAt:      time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC),
+		Content: "ОСМОТР\n" +
+			"лечащим врачом совместно с заведующим отделением\n" +
+			"Анамнез жизни (дополнения к анамнезу): без дополнений\n" +
+			"Неврологический статус (его изменение): без острой неврологической симптоматики\n" +
+			"Диагноз:\n",
+	}
+	out := transformContent(doc, nil)
+	if strings.Contains(out, "без дополнений\n\nНеврологический") {
+		t.Errorf("10-day must not get daily anamnesis blank: %q", out)
 	}
 }

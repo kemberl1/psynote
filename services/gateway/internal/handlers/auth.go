@@ -4,7 +4,8 @@
 //	POST /api/v1/auth/login     {email,password}              → 200 {access_token,refresh_token,expires_in}
 //	POST /api/v1/auth/refresh   {refresh_token}               → 200 {access_token,refresh_token,expires_in}
 //	POST /api/v1/auth/logout    {refresh_token}               → 204 (отзыв сессии)
-//	GET  /api/v1/auth/me                                      → 200 {doctor_id,email,display_name,role}
+//	GET  /api/v1/auth/me                                      → 200 {doctor_id,email,display_name,full_name,position,head_full_name,head_position,head_institution,role}
+//	PATCH /api/v1/auth/me                                     → 200 тот же профиль
 //
 // Все ответы — конверт {meta,data|error} (docs/07 §1). Коды: 400 валидация,
 // 401 неверный логин/пароль или токен, 409 занятый email.
@@ -21,6 +22,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aimed/gateway/internal/auth"
 	"github.com/aimed/gateway/internal/store"
@@ -69,11 +71,27 @@ type logoutRequest struct {
 }
 
 type meData struct {
-	DoctorID    string `json:"doctor_id"`
-	Email       string `json:"email"`
-	DisplayName string `json:"display_name"`
-	Role        string `json:"role"`
+	DoctorID     string `json:"doctor_id"`
+	Email        string `json:"email"`
+	DisplayName  string `json:"display_name"`
+	FullName         string `json:"full_name"`
+	Position         string `json:"position"`
+	HeadFullName     string `json:"head_full_name"`
+	HeadPosition     string `json:"head_position"`
+	HeadInstitution  string `json:"head_institution"`
+	Role             string `json:"role"`
 }
+
+type patchMeRequest struct {
+	FullName         *string `json:"full_name"`
+	Position         *string `json:"position"`
+	HeadFullName     *string `json:"head_full_name"`
+	HeadPosition     *string `json:"head_position"`
+	HeadInstitution  *string `json:"head_institution"`
+}
+
+const maxProfileFieldRunes = 240
+const maxInstitutionRunes = 400
 
 // ─── handlers ─────────────────────────────────────────────────────────────────
 
@@ -237,14 +255,103 @@ func newMeHandler(repo store.Repository) http.HandlerFunc {
 		}
 		writeEnvelope(w, http.StatusOK, envelope{
 			Meta: meta{TS: nowRFC3339()},
-			Data: meData{
-				DoctorID:    doc.ID,
-				Email:       doc.Email,
-				DisplayName: doc.DisplayName,
-				Role:        doc.Role,
-			},
+			Data: profileFromDoctor(doc),
 		})
 	}
+}
+
+// newPatchMeHandler — PATCH /auth/me. Подпись врача и заведующего для бланка.
+func newPatchMeHandler(repo store.Repository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		doctorID, ok := doctorIDFromContext(r.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "требуется авторизация")
+			return
+		}
+		var req patchMeRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "невалидное тело запроса")
+			return
+		}
+		doc, err := repo.GetDoctorByID(r.Context(), doctorID)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "аккаунт не найден")
+			return
+		}
+		fullName := doc.FullName
+		position := doc.Position
+		headName := doc.HeadFullName
+		headPosition := doc.HeadPosition
+		headInstitution := doc.HeadInstitution
+		if req.FullName != nil {
+			fullName = strings.TrimSpace(*req.FullName)
+		}
+		if req.Position != nil {
+			position = strings.TrimSpace(*req.Position)
+		}
+		if req.HeadFullName != nil {
+			headName = strings.TrimSpace(*req.HeadFullName)
+		}
+		if req.HeadPosition != nil {
+			headPosition = strings.TrimSpace(*req.HeadPosition)
+		}
+		if req.HeadInstitution != nil {
+			headInstitution = strings.TrimSpace(*req.HeadInstitution)
+		}
+		if err := validateProfileField(fullName, maxProfileFieldRunes); err != nil ||
+			validateProfileField(position, maxProfileFieldRunes) != nil ||
+			validateProfileField(headName, maxProfileFieldRunes) != nil ||
+			validateProfileField(headPosition, maxProfileFieldRunes) != nil ||
+			validateProfileField(headInstitution, maxInstitutionRunes) != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "поле слишком длинное")
+			return
+		}
+		if err := repo.UpdateDoctorProfile(r.Context(), doctorID, store.SignatureProfile{
+			FullName:        fullName,
+			Position:        position,
+			HeadFullName:    headName,
+			HeadPosition:    headPosition,
+			HeadInstitution: headInstitution,
+		}); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "аккаунт не найден")
+				return
+			}
+			slog.Error("patch me: update failed", "error_type", "store")
+			writeError(w, http.StatusInternalServerError, "INTERNAL", "не удалось сохранить настройки")
+			return
+		}
+		updated, err := repo.GetDoctorByID(r.Context(), doctorID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL", "не удалось прочитать профиль")
+			return
+		}
+		writeEnvelope(w, http.StatusOK, envelope{
+			Meta: meta{TS: nowRFC3339()},
+			Data: profileFromDoctor(updated),
+		})
+	}
+}
+
+func profileFromDoctor(doc *store.Doctor) meData {
+	return meData{
+		DoctorID:     doc.ID,
+		Email:        doc.Email,
+		DisplayName:  doc.DisplayName,
+		FullName:        doc.FullName,
+		Position:        doc.Position,
+		HeadFullName:    doc.HeadFullName,
+		HeadPosition:    doc.HeadPosition,
+		HeadInstitution: doc.HeadInstitution,
+		Role:            doc.Role,
+	}
+}
+
+func validateProfileField(s string, max int) error {
+	if utf8.RuneCountInString(s) > max {
+		return errors.New("too long")
+	}
+	return nil
 }
 
 // issueTokenPair mints an access JWT + a fresh opaque refresh token, persisting

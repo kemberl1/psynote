@@ -249,6 +249,9 @@ def test_build_messages_daily_locks_diagnosis_and_plain_markup() -> None:
     assert "не противоречь" in system.lower() or "не противоречь" in system
     assert "под наблюдением" in system.lower()
     assert "вероятно" in system.lower()
+    assert "Соматический статус:" in system
+    assert "План лечения (дополнения к плану):" in system
+    assert "Обоснование диагноза (при наличии дополнительных сведений):" in system
 
 
 def test_build_messages_allows_grounded_coloring_not_pure_invention() -> None:
@@ -260,7 +263,7 @@ def test_build_messages_allows_grounded_coloring_not_pure_invention() -> None:
     assert "за период выходных дней" in lower
     assert "понедельник после субботы" in lower or "после субботы–воскресенья" in lower
     assert "без агрессивных, аутоагрессивных" in lower
-    assert "пустые разделы" in lower
+    assert "каркас" in system.lower() or "шаблон" in system.lower()
     user = next(m.content for m in msgs if m.role == "user")
     assert "палата" in user.lower() or "игровая" in user.lower()
 
@@ -277,6 +280,9 @@ def test_build_messages_exam10d_has_epicrisis() -> None:
     assert "Этапный эпикриз:" in system
     assert "ЭТАПНЫЙ ЭПИКРИЗ" in system
     assert "заведующим отделением" in system
+    assert "ОСМОТР\nлечащим врачом совместно с заведующим отделением" in system
+    assert "Психический статус (его изменение):" in system
+    assert "Синдром:" in system
 
 
 def test_build_query_text_includes_syndrome() -> None:

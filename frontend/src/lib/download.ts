@@ -10,7 +10,6 @@ import type { BatchExportRequest, ExportFormat, ExportRequest } from "../api/typ
 /** MIME-типы по формату (для фолбэка имени файла). */
 const EXT_BY_FORMAT: Record<ExportFormat, string> = {
   docx: "docx",
-  pdf: "pdf",
   txt: "txt",
 };
 

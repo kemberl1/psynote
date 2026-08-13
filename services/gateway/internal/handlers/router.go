@@ -68,6 +68,7 @@ func NewRouter(cfg config.Config, deps Deps) http.Handler {
 		mux.HandleFunc("POST "+config.APIPrefix+"/auth/refresh", newRefreshHandler(ad))
 		mux.HandleFunc("POST "+config.APIPrefix+"/auth/logout", newLogoutHandler(ad))
 		mux.HandleFunc("GET "+config.APIPrefix+"/auth/me", protect(newMeHandler(deps.Repo)))
+		mux.HandleFunc("PATCH "+config.APIPrefix+"/auth/me", protect(newPatchMeHandler(deps.Repo)))
 	} else {
 		unavail := newUnavailableHandler()
 		mux.HandleFunc("POST "+config.APIPrefix+"/auth/register", unavail)
@@ -75,6 +76,7 @@ func NewRouter(cfg config.Config, deps Deps) http.Handler {
 		mux.HandleFunc("POST "+config.APIPrefix+"/auth/refresh", unavail)
 		mux.HandleFunc("POST "+config.APIPrefix+"/auth/logout", unavail)
 		mux.HandleFunc("GET "+config.APIPrefix+"/auth/me", unavail)
+		mux.HandleFunc("PATCH "+config.APIPrefix+"/auth/me", unavail)
 	}
 
 	// ─── Справочники и схема опросника (docs/07 §3)

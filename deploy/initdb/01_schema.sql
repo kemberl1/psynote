@@ -25,6 +25,11 @@ CREATE TABLE IF NOT EXISTS doctor (
     email         TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     display_name  TEXT NOT NULL,
+    full_name     TEXT NOT NULL DEFAULT '',
+    position      TEXT NOT NULL DEFAULT '',
+    head_full_name TEXT NOT NULL DEFAULT '',
+    head_position TEXT NOT NULL DEFAULT '',
+    head_institution TEXT NOT NULL DEFAULT '',
     role          TEXT NOT NULL DEFAULT 'doctor',  -- 'doctor' | 'admin'
     is_active     BOOLEAN NOT NULL DEFAULT TRUE,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),

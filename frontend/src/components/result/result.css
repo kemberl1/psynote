@@ -37,6 +37,7 @@
   white-space: pre-wrap;
   word-break: break-word;
   overflow-x: auto;
+  text-align: left;
 }
 
 /* Подсветка плейсхолдеров [ДАТА], [ФИО_ВРАЧА] (docs/08 §5.3). */

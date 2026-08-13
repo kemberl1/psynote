@@ -75,7 +75,7 @@ type Schema struct {
 // schemaVersion is the canonical version of the static schema served here.
 // (docs/07 §3 returns meta.version = this.) Bumped to 2 on Stage 7 (полное
 // дерево условных вопросов + «свой вариант» для multiselect + группы).
-const schemaVersion = 2
+const schemaVersion = 3
 
 // Группы опросника (docs/08 §5.1 — «Состояние · Поведение · Сон/Аппетит · …»).
 const (
@@ -298,7 +298,6 @@ func dailyQuestions() []Question {
 			Required: true, AllowCustom: true, Default: "none", Group: grpTherapy,
 			Options: []Option{
 				{Value: "none", Label: "не предъявляет", Prompt: "Жалобы не предъявляет."},
-				{Value: "cannot_formulate", Label: "самостоятельно не формирует", Prompt: "Жалобы самостоятельно не формирует."},
 				{Value: "present", Label: "есть жалобы", Prompt: "Предъявляет жалобы."},
 			},
 			Conditional: []Conditional{{IfValue: "present", Show: []string{"complaints_detail"}}},
@@ -318,9 +317,23 @@ func dailyQuestions() []Question {
 			Conditional: []Conditional{{IfValue: "present", Show: []string{"anamnesis_detail"}}},
 		},
 		{
-			ID: "anamnesis_detail", Label: "Дополнения к анамнезу", Type: "text",
+			ID: "anamnesis_detail", Label: "Дополнения к анамнезу заболевания", Type: "text",
 			Required: false, AllowCustom: true, Group: grpTherapy,
-			Help: "Опишите дополнения к анамнезу (без персональных данных).",
+			Help: "Опишите дополнения к анамнезу заболевания (без персональных данных).",
+		},
+		{
+			ID: "anamnesis_life", Label: "Анамнез жизни (дополнения)", Type: "select",
+			Required: false, AllowCustom: true, Default: "no_additions", Group: grpTherapy,
+			Options: []Option{
+				{Value: "no_additions", Label: "без дополнений", Prompt: "Анамнез жизни: без дополнений."},
+				{Value: "present", Label: "есть дополнения", Prompt: "Имеются дополнения к анамнезу жизни."},
+			},
+			Conditional: []Conditional{{IfValue: "present", Show: []string{"anamnesis_life_detail"}}},
+		},
+		{
+			ID: "anamnesis_life_detail", Label: "Дополнения к анамнезу жизни", Type: "text",
+			Required: false, AllowCustom: true, Group: grpTherapy,
+			Help: "Опишите дополнения к анамнезу жизни (без персональных данных).",
 		},
 
 		// ─── Группа «События дня» ────────────────────────────────────────────
@@ -339,7 +352,7 @@ func dailyQuestions() []Question {
 				{IfValue: "therapy_correction", Show: []string{"events_detail"}},
 				{IfValue: "somatic", Show: []string{"events_detail"}},
 				{IfValue: "examination", Show: []string{"events_detail"}},
-				{IfValue: "weekend_duty", Show: []string{"events_detail", "additional_info"}},
+				{IfValue: "weekend_duty", Show: []string{"events_detail"}},
 				{IfValue: "relative_visit", Show: []string{"events_detail"}},
 			},
 		},
@@ -349,9 +362,19 @@ func dailyQuestions() []Question {
 			Help: "Изменение дозы, результаты обследований и т.п. (без персональных данных).",
 		},
 		{
-			ID: "additional_info", Label: "Дополнительные сведения", Type: "text",
+			ID: "additional_info", Label: "Дополнительные сведения о заболевании", Type: "select",
+			Required: false, AllowCustom: true, Default: "none", Group: grpEvents,
+			Help: "Строка бланка под диагнозом. Наблюдения выходного — в психический статус, не сюда.",
+			Options: []Option{
+				{Value: "none", Label: "нет", Prompt: "Дополнительные сведения о заболевании: нет."},
+				{Value: "present", Label: "есть сведения", Prompt: "Имеются дополнительные сведения о заболевании."},
+			},
+			Conditional: []Conditional{{IfValue: "present", Show: []string{"additional_info_detail"}}},
+		},
+		{
+			ID: "additional_info_detail", Label: "Дополнительные сведения о заболевании (текст)", Type: "text",
 			Required: false, AllowCustom: true, Group: grpEvents,
-			Help: "Выходной день или блок «за период выходных» в понедельник (без персональных данных).",
+			Help: "Кратко, без персональных данных.",
 		},
 		{
 			ID: "exam_plan", Label: "План обследования", Type: "select",
@@ -368,13 +391,46 @@ func dailyQuestions() []Question {
 			Help: "В связи с чем проведена корректировка (без персональных данных).",
 		},
 		{
+			ID: "treatment_plan", Label: "План лечения", Type: "select",
+			Required: false, AllowCustom: true, Default: "no_change", Group: grpEvents,
+			Options: []Option{
+				{Value: "no_change", Label: "без дополнений", Prompt: "План лечения: без дополнений."},
+				{Value: "adjusted", Label: "была корректировка", Prompt: "План лечения: в связи с изменением состояния проведена корректировка."},
+			},
+			Conditional: []Conditional{{IfValue: "adjusted", Show: []string{"treatment_plan_detail"}}},
+		},
+		{
+			ID: "treatment_plan_detail", Label: "Причина корректировки плана лечения", Type: "text",
+			Required: false, AllowCustom: true, Group: grpEvents,
+			Help: "В связи с чем проведена корректировка (без персональных данных).",
+		},
+		{
 			ID: "prescriptions", Label: "Назначения", Type: "select",
 			Required: false, AllowCustom: true, Default: "see_list", Group: grpEvents,
-			Help: "Только препараты. Режим отделения в назначения не включаем.",
+			Help: "По умолчанию «см. лист назначений». Режим отделения в назначения не включаем.",
 			Options: []Option{
-				{Value: "see_list", Label: "препараты по листу назначений", Prompt: "Назначения: лекарственная терапия согласно листу назначений (только препараты, без режима отделения)."},
-				{Value: "no_change", Label: "без изменений (только препараты)", Prompt: "Назначения без изменений (только препараты, без режима отделения)."},
+				{Value: "see_list", Label: "см. лист назначений", Prompt: "Назначения: см. лист назначений."},
+				{Value: "no_change", Label: "без изменений (только препараты)", Prompt: "Назначения: см. лист назначений."},
 			},
+		},
+		{
+			ID: "diagnosis_justification", Label: "Обоснование диагноза", Type: "select",
+			Required: false, AllowCustom: true, Default: "not_required", Group: grpDiagnosis,
+			Options: []Option{
+				{Value: "not_required", Label: "не требуется", Prompt: "Обоснование диагноза: не требуется."},
+				{Value: "present", Label: "есть дополнительные сведения", Prompt: "Обоснование диагноза имеется."},
+			},
+			Conditional: []Conditional{{IfValue: "present", Show: []string{"diagnosis_justification_detail"}}},
+		},
+		{
+			ID: "diagnosis_justification_detail", Label: "Обоснование диагноза (текст)", Type: "text",
+			Required: false, AllowCustom: true, Group: grpDiagnosis,
+			Help: "Кратко, без персональных данных.",
+		},
+		{
+			ID: "diagnosis", Label: "Основное заболевание (МКБ-10)", Type: "text",
+			Required: false, AllowCustom: true, Group: grpDiagnosis,
+			Help: "Код и название по МКБ-10 (напр. F84.0). Без персональных данных.",
 		},
 	}
 }
@@ -491,11 +547,6 @@ func examQuestions() []Question {
 		},
 
 		// ─── Диагноз ─────────────────────────────────────────────────────────
-		{
-			ID: "diagnosis", Label: "Основное заболевание (МКБ-10)", Type: "text",
-			Required: false, AllowCustom: true, Group: grpDiagnosis,
-			Help: "Код и название по МКБ-10 (напр. F84.0). Без персональных данных.",
-		},
 		{
 			ID: "syndrome", Label: "Синдром", Type: "select",
 			Required: false, AllowCustom: true, Group: grpDiagnosis,

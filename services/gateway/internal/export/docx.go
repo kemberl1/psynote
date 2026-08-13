@@ -128,6 +128,8 @@ func docxParagraph(l docLine) string {
 		return paragraphXML(l.text, paraOpts{align: "left", sizeHalfPt: szBody, spaceAfter: 40})
 	case kindDoctorSignature:
 		return paragraphXML(l.text, paraOpts{align: "center", sizeHalfPt: szSignature, spaceBefore: 80, spaceAfter: 120})
+	case kindBlank:
+		return paragraphXML("", paraOpts{align: "both", sizeHalfPt: szBody, spaceAfter: 0})
 	case kindDailyNarrative:
 		return paragraphSpans(l.spans, paraOpts{align: "both", sizeHalfPt: szBody, spaceAfter: 40}, l.text)
 	case kindLabelValue:
@@ -244,12 +246,11 @@ func paragraphLabelValue(label, value string, o paraOpts) string {
 	b.WriteString("<w:p>")
 	b.WriteString(paragraphPr(o))
 	labelText := label + ":"
-	valueBold := isDiagnosisLikeLabel(label)
 	if value == "" {
 		b.WriteString(runXML(labelText, runOpts{bold: true, sizeHalfPt: o.sizeHalfPt}))
 	} else {
 		b.WriteString(runXML(labelText, runOpts{bold: true, sizeHalfPt: o.sizeHalfPt}))
-		b.WriteString(runXML(" "+value, runOpts{bold: valueBold, sizeHalfPt: o.sizeHalfPt}))
+		b.WriteString(runXML(" "+value, runOpts{sizeHalfPt: o.sizeHalfPt}))
 	}
 	b.WriteString("</w:p>")
 	return b.String()

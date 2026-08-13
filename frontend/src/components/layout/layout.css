@@ -67,7 +67,13 @@
   border-radius: var(--radius-full);
   border: 1px solid var(--border);
   background: var(--surface);
-  cursor: default;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+.profile:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
 }
 .profile__avatar {
   width: 26px;

@@ -178,6 +178,22 @@ func (r *fakeRepo) GetDoctorByID(_ context.Context, id string) (*store.Doctor, e
 }
 func (r *fakeRepo) TouchLastLogin(_ context.Context, _ string) error { return nil }
 
+func (r *fakeRepo) UpdateDoctorProfile(_ context.Context, id string, p store.SignatureProfile) error {
+	d, ok := r.doctorsByID[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	d.FullName = p.FullName
+	d.Position = p.Position
+	d.HeadFullName = p.HeadFullName
+	d.HeadPosition = p.HeadPosition
+	d.HeadInstitution = p.HeadInstitution
+	if p.FullName != "" {
+		d.DisplayName = p.FullName
+	}
+	return nil
+}
+
 func (r *fakeRepo) CreateSession(_ context.Context, doctorID, refreshTokenHash string, expiresAt time.Time) (string, error) {
 	if r.sessionsByHash == nil {
 		r.sessionsByHash = map[string]*store.Session{}

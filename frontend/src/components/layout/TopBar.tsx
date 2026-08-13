@@ -15,6 +15,7 @@ export function TopBar() {
   }
 
   const name =
+    doctor?.full_name?.trim() ||
     doctor?.display_name?.trim() ||
     doctor?.email?.split("@")[0] ||
     "Врач";
@@ -46,13 +47,17 @@ export function TopBar() {
             </Button>
           </Link>
         )}
-        <div className="profile" title={doctor?.email ?? "Профиль врача"}>
+        <Link
+          to="/settings"
+          className="profile"
+          title="Настройки аккаунта"
+        >
           <span className="profile__avatar" aria-hidden="true">
             {initial}
           </span>
           <span className="profile__name">{name}</span>
           {isAdmin && <Badge tone="accent" mono>admin</Badge>}
-        </div>
+        </Link>
         <Button variant="ghost" size="sm" onClick={onLogout} aria-label="Выйти из аккаунта">
           Выйти
         </Button>

@@ -1,7 +1,7 @@
 // GenerationResult — экран результата генерации (docs/08 §5.3).
 // Показывает: метаданные (модель/дата), плашку анонимизации, документ в
 // моношрифте с подсветкой плейсхолдеров и панель действий.
-// Этап 8: «Копировать текст» + рабочие «Скачать Word/PDF» (экспорт через
+// Этап 8: «Копировать текст» + «Скачать Word» (экспорт через
 // gateway, docs/07 §7). Кнопки экспорта активны при наличии requestId
 // (свежий результат уже сохранён /generate; в истории — request_id из записи).
 import { useEffect, useState } from "react";
@@ -12,9 +12,8 @@ import type {
   ExportFormat,
 } from "../../api/types";
 import { copyText } from "../../lib/clipboard";
-import { omitEmptyDiarySections } from "../../lib/diaryMarkup";
 import { downloadExport } from "../../lib/download";
-import { applyDiaryStamp, buildExportSubstitutions } from "../../lib/exportSubstitutions";
+import { buildExportSubstitutions, prepareDiaryPreview } from "../../lib/exportSubstitutions";
 import { documentTypeLabel, formatDateTime, statusLabel } from "../../lib/format";
 import { useAuth } from "../../auth/AuthContext";
 import { Badge, Button } from "../ui";
@@ -63,9 +62,7 @@ export function GenerationResult({
 
   const handleCopy = async () => {
     const ok = await copyText(
-      omitEmptyDiarySections(
-        applyDiaryStamp(content, { title, createdAt }),
-      ),
+      prepareDiaryPreview(content, { title, createdAt, doctor }),
     );
     setToast(ok ? "Текст скопирован" : "Не удалось скопировать");
   };
@@ -79,7 +76,7 @@ export function GenerationResult({
         substitutions: buildExportSubstitutions({
           title,
           createdAt,
-          doctorName: doctor?.display_name,
+          doctor,
         }),
       });
       setToast("Файл сохранён");
@@ -119,7 +116,7 @@ export function GenerationResult({
 
       {anonymization && <AnonymizationNotice summary={anonymization} />}
 
-      <DocumentView content={content} title={title} createdAt={createdAt} />
+      <DocumentView content={content} title={title} createdAt={createdAt} doctor={doctor} />
 
       <div className="result__actions">
         <Button variant="primary" onClick={handleCopy}>
@@ -132,14 +129,6 @@ export function GenerationResult({
           title={exportTitle}
         >
           Скачать Word
-        </Button>
-        <Button
-          onClick={() => void handleExport("pdf")}
-          disabled={exportDisabled || exporting !== null}
-          loading={exporting === "pdf"}
-          title={exportTitle}
-        >
-          Скачать PDF
         </Button>
         {onEdit && (
           <Button onClick={onEdit}>Редактировать данные</Button>

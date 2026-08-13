@@ -68,7 +68,20 @@ export interface DoctorProfile {
   doctor_id: string;
   email: string;
   display_name: string;
+  full_name: string;
+  position: string;
+  head_full_name: string;
+  head_position: string;
+  head_institution: string;
   role: string;
+}
+
+export interface PatchMeRequest {
+  full_name?: string;
+  position?: string;
+  head_full_name?: string;
+  head_position?: string;
+  head_institution?: string;
 }
 
 // ─── Справочники и схема опросника (docs/07 §3, docs/06) ───────────────────
@@ -220,7 +233,7 @@ export interface HistoryListResult {
 
 // ─── Экспорт (docs/07 §7) ──────────────────────────────────────────────────
 
-export type ExportFormat = "docx" | "pdf" | "txt";
+export type ExportFormat = "docx" | "txt";
 
 export interface ExportRequest {
   format: ExportFormat;

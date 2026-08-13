@@ -19,6 +19,7 @@ import type {
   HistoryItem,
   HistoryListResult,
   LoginRequest,
+  PatchMeRequest,
   PatchRequestBody,
   PendingRequest,
   PendingResult,
@@ -55,6 +56,13 @@ export function logout(refreshToken: string): Promise<void> {
 
 export function fetchMe(signal?: AbortSignal): Promise<DoctorProfile> {
   return request<DoctorProfile>("/auth/me", { signal });
+}
+
+export function patchMe(
+  body: PatchMeRequest,
+  signal?: AbortSignal,
+): Promise<DoctorProfile> {
+  return request<DoctorProfile>("/auth/me", { method: "PATCH", body, signal });
 }
 
 export function fetchDocumentTypes(signal?: AbortSignal): Promise<DocumentType[]> {
