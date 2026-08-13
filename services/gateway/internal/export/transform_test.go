@@ -36,6 +36,12 @@ func TestTransformDaily_KeepsTemplateLikeUI(t *testing.T) {
 	if !strings.Contains(out, "31.08.2025") {
 		t.Errorf("date placeholder must be filled: %q", out)
 	}
+	if !strings.Contains(out, "время: 10:00") {
+		t.Errorf("exam time must be 10:00, got: %q", out)
+	}
+	if strings.Contains(out, "14:30") {
+		t.Errorf("must not use generation clock: %q", out)
+	}
 	if strings.Contains(out, "[ФИО_ВРАЧА]") {
 		t.Errorf("doctor placeholder must be filled: %q", out)
 	}
@@ -224,5 +230,49 @@ func TestClassifyLine_UnknownColonStaysPlain(t *testing.T) {
 	l := classifyLine("31.08.2025 время: 14:30")
 	if l.kind == kindLabelValue {
 		t.Errorf("must not treat date line as a section label %q", l.label)
+	}
+}
+
+func TestDiaryStamp_PrefersTitleDateAndFixedTime(t *testing.T) {
+	date, clock := DiaryStamp(
+		"День 8 · 27.07.2026 · Ежедневный осмотр",
+		nil,
+		time.Date(2026, 8, 13, 14, 30, 0, 0, time.UTC),
+	)
+	if date != "27.07.2026" {
+		t.Errorf("date = %q, want 27.07.2026 from title", date)
+	}
+	if clock != "10:00" {
+		t.Errorf("clock = %q, want 10:00", clock)
+	}
+
+	date, clock = DiaryStamp(
+		"Ежедневный осмотр",
+		map[string]any{"diary_date": "2026-08-01"},
+		time.Date(2026, 8, 13, 9, 1, 0, 0, time.UTC),
+	)
+	if date != "01.08.2026" || clock != "10:00" {
+		t.Errorf("got %s %s, want 01.08.2026 10:00", date, clock)
+	}
+
+	doc := Document{
+		Title:       "День 11 · 30.07.2026 · Ежедневный осмотр",
+		GeneratedAt: time.Date(2026, 8, 13, 11, 0, 0, 0, time.UTC),
+		Content:     "[ДАТА] время: [ВРЕМЯ]\nЛечащий врач: [ФИО_ВРАЧА]",
+		Substitutions: map[string]string{
+			"[ДАТА]":     "13.08.2026",
+			"[ВРЕМЯ]":    "11:05",
+			"[ФИО_ВРАЧА]": "Врач Т.",
+		},
+	}
+	out := transformContent(doc, doc.Substitutions)
+	if !strings.Contains(out, "30.07.2026 время: 10:00") {
+		t.Errorf("batch day must keep its own date at 10:00: %q", out)
+	}
+	if strings.Contains(out, "13.08.2026") || strings.Contains(out, "11:05") {
+		t.Errorf("must ignore client generate-now stamp: %q", out)
+	}
+	if !strings.Contains(out, "Врач Т.") {
+		t.Errorf("doctor name still applies: %q", out)
 	}
 }

@@ -303,6 +303,7 @@ function BatchDaysList({ children }: { children: HistoryChild[] }) {
       await downloadExport(child.request_id, {
         format,
         substitutions: buildExportSubstitutions({
+          title: child.title_safe,
           createdAt: child.created_at,
           doctorName: doctor?.display_name,
         }),
@@ -348,7 +349,11 @@ function BatchDaysList({ children }: { children: HistoryChild[] }) {
                 )}
                 {!childPending && child.content && (
                   <>
-                    <DocumentView content={child.content} />
+                    <DocumentView
+                      content={child.content}
+                      title={child.title_safe}
+                      createdAt={child.created_at}
+                    />
                     <div className="result__actions" style={{ marginTop: 12 }}>
                       <Button
                         size="sm"

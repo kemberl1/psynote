@@ -104,6 +104,9 @@ func TestOptionsAndConditionalValues(t *testing.T) {
 func TestDailyConditionalTree(t *testing.T) {
 	s, _ := Questionnaire("daily")
 	ids := collectIDs(s)
+	if _, ok := ids["patient_sex"]; !ok {
+		t.Error("daily: missing patient_sex")
+	}
 
 	type want struct {
 		parent, value, child string

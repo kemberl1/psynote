@@ -70,11 +70,14 @@ type Document struct {
 	Title string
 	// DocumentTypeCode — код типа (daily | exam_10d), используется в имени файла.
 	DocumentTypeCode string
-	// GeneratedAt — дата генерации для шапки и имени файла.
+	// GeneratedAt — дата генерации (fallback для [ДАТА], если нет даты осмотра).
 	GeneratedAt time.Time
 	// Content — обезличенный текст дневника с плейсхолдерами ([ДАТА], …).
 	Content string
-	// Substitutions — плейсхолдеры от клиента; дефолты ([ДАТА], [ВРЕМЯ]) из GeneratedAt.
+	// Answers — обезличенные ответы (diary_date и т.п.) для штампа осмотра.
+	Answers map[string]any
+	// Substitutions — плейсхолдеры от клиента (ФИО врача и т.п.).
+	// [ДАТА] и [ВРЕМЯ] считает сервер: дата осмотра, время всегда 10:00.
 	Substitutions map[string]string
 }
 

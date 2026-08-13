@@ -99,6 +99,21 @@ describe("buildGenerateAnswers", () => {
     expect(ans.dynamics).toBe("no_change");
   });
 
+  it("stamps diary_date and patient_sex onto each day", () => {
+    const ans = buildGenerateAnswers(
+      { overall_dynamics: "positive", patient_sex: "female" },
+      8,
+      12,
+      "2026-07-27",
+      "",
+      "",
+      "daily",
+    );
+    expect(ans.diary_date).toBe("2026-07-27");
+    expect(ans.patient_sex).toBe("female");
+    expect(String(ans.__arc_context__)).toMatch(/девочка/);
+  });
+
   it("passes diagnosis through to daily answers", () => {
     const ans = buildGenerateAnswers(
       { diagnosis: "F71.18 Умственная отсталость умеренная" },

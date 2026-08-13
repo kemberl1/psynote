@@ -14,7 +14,7 @@ import type {
 import { copyText } from "../../lib/clipboard";
 import { omitEmptyDiarySections } from "../../lib/diaryMarkup";
 import { downloadExport } from "../../lib/download";
-import { buildExportSubstitutions } from "../../lib/exportSubstitutions";
+import { applyDiaryStamp, buildExportSubstitutions } from "../../lib/exportSubstitutions";
 import { documentTypeLabel, formatDateTime, statusLabel } from "../../lib/format";
 import { useAuth } from "../../auth/AuthContext";
 import { Badge, Button } from "../ui";
@@ -62,7 +62,11 @@ export function GenerationResult({
   }, [toast]);
 
   const handleCopy = async () => {
-    const ok = await copyText(omitEmptyDiarySections(content));
+    const ok = await copyText(
+      omitEmptyDiarySections(
+        applyDiaryStamp(content, { title, createdAt }),
+      ),
+    );
     setToast(ok ? "Текст скопирован" : "Не удалось скопировать");
   };
 
@@ -73,6 +77,7 @@ export function GenerationResult({
       await downloadExport(requestId, {
         format,
         substitutions: buildExportSubstitutions({
+          title,
           createdAt,
           doctorName: doctor?.display_name,
         }),
@@ -114,7 +119,7 @@ export function GenerationResult({
 
       {anonymization && <AnonymizationNotice summary={anonymization} />}
 
-      <DocumentView content={content} />
+      <DocumentView content={content} title={title} createdAt={createdAt} />
 
       <div className="result__actions">
         <Button variant="primary" onClick={handleCopy}>

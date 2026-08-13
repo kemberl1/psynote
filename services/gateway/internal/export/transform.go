@@ -9,11 +9,15 @@
 package export
 
 import (
-	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
 )
+
+const diaryExamTime = "10:00"
+
+var titleDateRE = regexp.MustCompile(`(\d{2}\.\d{2}\.\d{4})`)
 
 // skipExactValues — whole-section bodies that mean «nothing to write».
 var skipExactValues = map[string]bool{
@@ -29,19 +33,54 @@ var skipExactValues = map[string]bool{
 	"без особенностей":           true,
 }
 
-// mergeSubstitutions returns client substitutions with server defaults from metadata.
-func mergeSubstitutions(doc Document, client map[string]string) map[string]string {
-	out := make(map[string]string)
-	d := doc.GeneratedAt
+func answerString(answers map[string]any, key string) string {
+	if answers == nil {
+		return ""
+	}
+	raw, ok := answers[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
+}
+
+// DiaryStamp is the header date/time for a diary: the examination day, always 10:00.
+func DiaryStamp(title string, answers map[string]any, generatedAt time.Time) (date string, clock string) {
+	clock = diaryExamTime
+	if iso := answerString(answers, "diary_date"); iso != "" {
+		if t, err := time.Parse("2006-01-02", iso); err == nil {
+			return t.Format("02.01.2006"), clock
+		}
+		if titleDateRE.MatchString(iso) {
+			return iso, clock
+		}
+	}
+	if m := titleDateRE.FindStringSubmatch(title); len(m) > 1 {
+		return m[1], clock
+	}
+	d := generatedAt
 	if d.IsZero() {
 		d = time.Now()
 	}
-	out["[ДАТА]"] = d.Format("02.01.2006")
-	out["[ВРЕМЯ]"] = fmt.Sprintf("%02d:%02d", d.Hour(), d.Minute())
+	return d.Format("02.01.2006"), clock
+}
+
+// mergeSubstitutions fills [ДАТА]/[ВРЕМЯ] from the examination day (not generate-now)
+// and applies other client placeholders (doctor name, case number).
+func mergeSubstitutions(doc Document, client map[string]string) map[string]string {
+	out := make(map[string]string)
+	date, clock := DiaryStamp(doc.Title, doc.Answers, doc.GeneratedAt)
+	out["[ДАТА]"] = date
+	out["[ВРЕМЯ]"] = clock
 	for k, v := range client {
-		if k != "" && v != "" {
-			out[k] = v
+		if k == "" || v == "" || k == "[ДАТА]" || k == "[ВРЕМЯ]" {
+			continue
 		}
+		out[k] = v
 	}
 	return out
 }

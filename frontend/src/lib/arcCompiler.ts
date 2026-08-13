@@ -250,6 +250,20 @@ function syndromeLockLines(syndrome: string): string[] {
   return [];
 }
 
+function sexLockLines(sex: unknown): string[] {
+  if (sex === "female") {
+    return [
+      "Пациент — девочка. Согласуй род во всём тексте: она, упорядочена, беспокойна, получала замечания, капризничала. Не пиши «он/упорядочен».",
+    ];
+  }
+  if (sex === "male") {
+    return [
+      "Пациент — мальчик. Согласуй род во всём тексте: он, упорядочен, беспокоен, получал замечания, капризничал. Не пиши «она/упорядочена».",
+    ];
+  }
+  return [];
+}
+
 function speechLockLines(level: SpeechLevel): string[] {
   const lines = [
     "Речь и контакт должны быть согласованы: если ребёнок не говорит словами — не приписывай словесные ответы, жалобы, пререкания, повышение голоса, «не раскрывает переживания».",
@@ -633,6 +647,7 @@ export function formatDayBrief(
     );
   }
   lines.push(...speechLockLines(brief.speechLevel));
+  lines.push(...sexLockLines(batchAnswers.patient_sex));
 
   const syndrome = batchAnswers.leading_syndrome;
   if (typeof syndrome === "string" && syndrome) {

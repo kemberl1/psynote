@@ -5,9 +5,22 @@ import type { QuestionnaireSchema } from "../api/types";
 
 export const BATCH_QUESTIONNAIRE: QuestionnaireSchema = {
   document_type: "batch",
-  version: 2,
+  version: 3,
   questions: [
     // ── Клинический старт ─────────────────────────────────────────────────────
+    {
+      id: "patient_sex",
+      label: "Пол",
+      type: "select",
+      required: true,
+      allow_custom: false,
+      group: "Клинический старт",
+      help: "Нужен, чтобы согласовать род в тексте (он/она, упорядочен/упорядочена)",
+      options: [
+        { value: "male", label: "м (мальчик)" },
+        { value: "female", label: "ж (девочка)" },
+      ],
+    },
     {
       id: "leading_syndrome",
       label: "Ведущий синдром при поступлении",

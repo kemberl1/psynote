@@ -130,6 +130,15 @@ func dailyQuestions() []Question {
 	return []Question{
 		// ─── Группа «Состояние» ──────────────────────────────────────────────
 		{
+			ID: "patient_sex", Label: "Пол", Type: "select",
+			Required: true, AllowCustom: false, Group: grpState,
+			Help: "Согласование рода в тексте дневника (он/она).",
+			Options: []Option{
+				{Value: "male", Label: "м (мальчик)", Prompt: "Пациент — мальчик. Согласуй грамматический род: он, упорядочен, беспокоен, получал замечания."},
+				{Value: "female", Label: "ж (девочка)", Prompt: "Пациент — девочка. Согласуй грамматический род: она, упорядочена, беспокойна, получала замечания."},
+			},
+		},
+		{
 			ID: "dynamics", Label: "Динамика состояния", Type: "select",
 			Required: true, AllowCustom: true, Default: "no_change", Group: grpState,
 			Options: []Option{

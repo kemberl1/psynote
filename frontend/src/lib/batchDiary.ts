@@ -416,6 +416,10 @@ export function buildGenerateAnswers(
   if (diagnosisStr) {
     withBrief.diagnosis = diagnosisStr;
   }
+  withBrief.diary_date = isoDate;
+  if (typeof batchAnswers.patient_sex === "string" && batchAnswers.patient_sex) {
+    withBrief.patient_sex = batchAnswers.patient_sex;
+  }
 
   if (docType === "exam_10d") {
     const interventions: string[] = [];

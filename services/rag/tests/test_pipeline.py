@@ -193,6 +193,13 @@ def test_map_answers_daily_formulations() -> None:
     assert "Ежедневный осмотр" in mapped.title_safe
 
 
+def test_map_answers_patient_sex_grammar() -> None:
+    mapped = map_answers(DOC_TYPE_DAILY, {"patient_sex": "female", "mood": "even"})
+    joined = " ".join(mapped.prompt_lines)
+    assert "девочка" in joined
+    assert "упорядочена" in joined
+
+
 def test_build_messages_daily_has_template_and_samples() -> None:
     """Промпт daily содержит каркас шаблона, few-shot и ответы."""
     mapped = map_answers(DOC_TYPE_DAILY, {"mood": "lowered"})

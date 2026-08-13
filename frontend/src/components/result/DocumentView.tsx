@@ -2,13 +2,18 @@
 // и подсветкой плейсхолдеров вида [ДАТА], [ФИО_ВРАЧА] (docs/08 §5.3).
 import { Fragment, type ReactNode } from "react";
 import { parseDiaryMarkup, omitEmptyDiarySections } from "../../lib/diaryMarkup";
+import { applyDiaryStamp } from "../../lib/exportSubstitutions";
 
 interface DocumentViewProps {
   content: string;
+  title?: string;
+  diaryDate?: string;
+  createdAt?: string;
 }
 
-export function DocumentView({ content }: DocumentViewProps) {
-  return <div className="document">{renderDiaryContent(omitEmptyDiarySections(content))}</div>;
+export function DocumentView({ content, title, diaryDate, createdAt }: DocumentViewProps) {
+  const stamped = applyDiaryStamp(content, { title, diaryDate, createdAt });
+  return <div className="document">{renderDiaryContent(omitEmptyDiarySections(stamped))}</div>;
 }
 
 function renderDiaryContent(text: string): ReactNode[] {

@@ -80,6 +80,7 @@ func newExportHandler(repo store.Repository, exporter export.Exporter) http.Hand
 			DocumentTypeCode: detail.DocumentType,
 			GeneratedAt:      detail.CreatedAt,
 			Content:          detail.Content,
+			Answers:          detail.AnswersAnonymized,
 			Substitutions:    req.Substitutions,
 		}
 
