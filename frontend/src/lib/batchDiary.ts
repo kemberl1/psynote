@@ -8,6 +8,7 @@ import {
   compileArc,
   type DayBrief,
 } from "./arcCompiler";
+import { unpackBatchMeta, type BatchMeta } from "./historyTitles";
 
 export type BatchDocType = "daily" | "exam_10d";
 
@@ -453,4 +454,56 @@ export function buildGenerateAnswers(
   }
 
   return withBrief;
+}
+
+export interface RebuiltBatchDay {
+  dayNumber: number;
+  isoDate: string;
+  documentType: BatchDocType;
+  answers: Answers;
+}
+
+/** Собрать дни пакета из сохранённых answers родителя (для продолжения после обрыва). */
+export function rebuildBatchDayJobs(packed: Answers): {
+  meta: BatchMeta;
+  narrativeAnswers: Answers;
+  days: RebuiltBatchDay[];
+} | null {
+  const { answers, meta } = unpackBatchMeta(packed);
+  if (!meta) return null;
+  const plan = buildBatchPlan({
+    admissionDate: meta.admission_date,
+    dateFrom: meta.date_from,
+    dateTo: meta.date_to,
+    answers,
+    directorContext: meta.director_context ?? "",
+    estimatedDischargeDate: meta.estimated_discharge ?? "",
+  });
+  if (!plan) return null;
+  const briefs = compileArc({
+    days: plan.days,
+    directorContext: meta.director_context ?? "",
+    batchAnswers: answers,
+    estimatedDischargeDate: meta.estimated_discharge ?? "",
+  });
+  const totalDays = plan.days.length;
+  return {
+    meta,
+    narrativeAnswers: answers,
+    days: plan.days.map((planDay, i) => ({
+      dayNumber: planDay.dayNumber,
+      isoDate: planDay.isoDate,
+      documentType: planDay.documentType,
+      answers: buildGenerateAnswers(
+        answers,
+        planDay.dayNumber,
+        totalDays,
+        planDay.isoDate,
+        meta.director_context ?? "",
+        meta.estimated_discharge ?? "",
+        planDay.documentType,
+        briefs[i],
+      ),
+    })),
+  };
 }

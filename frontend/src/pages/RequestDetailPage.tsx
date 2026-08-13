@@ -2,6 +2,7 @@
 // Пакет: одна запись + раскрываемый список дней. Pending: «Формируется…».
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/AuthContext";
 import { ApiError, friendlyError } from "../api/errors";
 import {
@@ -22,6 +23,11 @@ import {
   statusLabel,
 } from "../lib/format";
 import {
+  isGenerationRunning,
+  resumeBatchGeneration,
+  startSingleGeneration,
+} from "../lib/generationRunner";
+import {
   type EditDiaryState,
   unpackBatchMeta,
 } from "../lib/historyTitles";
@@ -31,12 +37,15 @@ import "../components/result/result.css";
 export function RequestDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { doctor } = useAuth();
   const docTypesQuery = useDocumentTypes();
   const { data, isPending, isError, error, refetch } = useRequestDetail(id);
   const deleteMutation = useDeleteRequest();
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [resuming, setResuming] = useState(false);
+  const [jobTick, setJobTick] = useState(0);
 
   useEffect(() => {
     if (!toast) return;
@@ -106,7 +115,14 @@ export function RequestDetailPage() {
     }
   };
 
+  useEffect(() => {
+    if (!id || !data || !isPendingStatus(data.status)) return;
+    const t = window.setInterval(() => setJobTick((n) => n + 1), 2000);
+    return () => window.clearInterval(t);
+  }, [id, data]);
+
   const pending = data ? isPendingStatus(data.status) : false;
+  const jobAlive = Boolean(id && isGenerationRunning(id) && jobTick >= 0);
   const isBatch = data?.document_type === "batch";
   const children = data?.children ?? [];
 
@@ -142,9 +158,35 @@ export function RequestDetailPage() {
           <Spinner size="lg" />
           <div className="generating-inline__title">{data.title_safe}</div>
           <div className="generating-inline__hint">
-            Генерация идёт в фоне — можно перейти в другой раздел. Когда будет
-            готово, эта запись обновится сама.
+            {jobAlive
+              ? "Генерация идёт в этой вкладке. Можно открыть другой раздел — запись обновится сама."
+              : "Похоже, генерация оборвалась (обновили страницу или перезапустился сервер). Готовые дни сохранятся — можно продолжить."}
           </div>
+          {!jobAlive && (
+            <div className="generating-inline__actions">
+              <Button
+                variant="primary"
+                loading={resuming}
+                disabled={resuming}
+                onClick={() => {
+                  if (!id) return;
+                  setResuming(true);
+                  const run = isBatch
+                    ? resumeBatchGeneration({ qc, detail: data })
+                    : startSingleGeneration({
+                        qc,
+                        documentType: data.document_type,
+                        answers: data.answers_anonymized ?? {},
+                        requestId: data.request_id,
+                      });
+                  void run.finally(() => setResuming(false));
+                }}
+              >
+                Продолжить генерацию
+              </Button>
+              <Button onClick={handleEdit}>Изменить данные</Button>
+            </div>
+          )}
           {isBatch && children.length > 0 && (
             <BatchDaysList children={children} />
           )}
