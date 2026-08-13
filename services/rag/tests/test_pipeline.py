@@ -254,6 +254,23 @@ def test_build_messages_daily_locks_diagnosis_and_plain_markup() -> None:
     assert "Обоснование диагноза (при наличии дополнительных сведений):" in system
 
 
+def test_build_messages_samples_are_style_not_foreign_diagnosis() -> None:
+    mapped = map_answers(DOC_TYPE_DAILY, {
+        "mood": "even",
+        "diagnosis": "F92.8 смешанное расстройство поведения и эмоций",
+    })
+    samples = [{"text": "Интеллект соответствует умеренной умственной отсталости."}]
+    msgs = build_messages(DOC_TYPE_DAILY, mapped, samples)
+    system = next(m.content for m in msgs if m.role == "system")
+    user = next(m.content for m in msgs if m.role == "user")
+    lower = system.lower()
+    assert "если умственной отсталости в диагнозе нет" in lower
+    assert "не копируй из образцов" in lower or "не копируй" in lower
+    assert "другие пациенты" in user.lower() or "других пациент" in user.lower()
+    assert "чужой диагноз" in user.lower() or "не чужой диагноз" in user.lower()
+    assert "если бриф дал смену терапии" in user.lower()
+
+
 def test_build_messages_allows_grounded_coloring_not_pure_invention() -> None:
     mapped = map_answers(DOC_TYPE_DAILY, {"mood": "even"})
     msgs = build_messages(DOC_TYPE_DAILY, mapped, [])

@@ -3,8 +3,8 @@
 Проверяем graceful degradation фильтров БЕЗ сети и БЕЗ torch:
   • тестируем чистую функцию search_with_fallback() с ФЕЙКОВЫМ qdrant-client;
   • фейк отдаёт пусто на строгих уровнях и непустой результат — на более слабом;
-  • проверяем, что фолбэк ДОХОДИТ до непустого уровня, логирует уровень,
-    и гарантирует chunks_used > 0, пока в коллекции есть данные.
+  • при известном diagnosis_class фолбэк не снимает класс МКБ (нет чужого регистра);
+    без класса — как раньше, до L3. Пустая выборка → [].
 
 Запуск: cd services/rag && python -m pytest tests/test_retrieval_fallback.py -q
 """
@@ -50,36 +50,61 @@ class FakeClient:
         ]
 
 
-_LEVELS = _fallback_levels(
+_LEVELS_F4X = _fallback_levels(
     doc_type="exam_10d", syndrome="тревожно-депрессивный",
     diagnosis_class="F4x", section=None)
+
+_LEVELS_NO_DX = _fallback_levels(
+    doc_type="exam_10d", syndrome="тревожный",
+    diagnosis_class=None, section=None)
 
 
 def test_strict_level_hits_immediately() -> None:
     client = FakeClient(hit_from_call=1)
-    out = search_with_fallback(client, "corpus_diaries", [0.1], 5, _LEVELS)
+    out = search_with_fallback(client, "corpus_diaries", [0.1], 5, _LEVELS_F4X)
     assert len(out) == 3
     assert client.calls == 1  # нашли сразу на L0, дальше не идём
 
 
-def test_fallback_reaches_nonempty_level(caplog) -> None:
-    # Строгий (L0) и diagnosis (L1) пусты → результат на L2 (doc_type).
-    client = FakeClient(hit_from_call=3)
+def test_known_diagnosis_falls_back_within_class(caplog) -> None:
+    """L0 пуст → L1 (тот же diagnosis_class), без снятия фильтра МКБ."""
+    client = FakeClient(hit_from_call=2)
     with caplog.at_level(logging.INFO, logger="app.retrieval"):
-        out = search_with_fallback(client, "corpus_diaries", [0.1], 5, _LEVELS)
-    assert len(out) == 3  # chunks_used > 0 гарантировано
-    assert client.calls == 3  # дошли до третьего уровня
-    # Залогирован уровень, на котором нашли (L2_doc_type).
-    assert any("L2_doc_type" in r.message for r in caplog.records)
+        out = search_with_fallback(
+            client, "corpus_diaries", [0.1], 5, _LEVELS_F4X)
+    assert len(out) == 3
+    assert client.calls == 2
+    assert any("L1_diagnosis" in r.message for r in caplog.records)
+
+
+def test_known_diagnosis_does_not_mix_other_icd() -> None:
+    """Нет F4x в корпусе → [] , а не дневники F7x с L2/L3."""
+    assert all(lvl.diagnosis_class == "F4x" for lvl in _LEVELS_F4X)
+    assert len(_LEVELS_F4X) == 2  # только L0 и L1
+    client = FakeClient(hit_from_call=999)
+    out = search_with_fallback(client, "corpus_diaries", [0.1], 5, _LEVELS_F4X)
+    assert out == []
+    assert client.calls == 2
+
+
+def test_fallback_reaches_nonempty_level(caplog) -> None:
+    # Без diagnosis_class: L0 пуст → L1 (doc_type; L2 схлопнут как дубль).
+    client = FakeClient(hit_from_call=2)
+    with caplog.at_level(logging.INFO, logger="app.retrieval"):
+        out = search_with_fallback(
+            client, "corpus_diaries", [0.1], 5, _LEVELS_NO_DX)
+    assert len(out) == 3
+    assert client.calls == 2
+    assert any("L1_diagnosis" in r.message for r in caplog.records)
 
 
 def test_fallback_to_no_filter_level() -> None:
-    """Если фильтры всё отсекают — последний уровень БЕЗ фильтра (query_filter=None)."""
-    client = FakeClient(hit_from_call=len(_LEVELS))
-    out = search_with_fallback(client, "corpus_diaries", [0.1], 5, _LEVELS)
+    """Без diagnosis_class: если фильтры всё отсекают — L3 без фильтра."""
+    client = FakeClient(hit_from_call=len(_LEVELS_NO_DX))
+    out = search_with_fallback(
+        client, "corpus_diaries", [0.1], 5, _LEVELS_NO_DX)
     assert len(out) == 3
-    assert client.calls == len(_LEVELS)
-    # На последнем (успешном) вызове фильтр должен быть None (L3_none).
+    assert client.calls == len(_LEVELS_NO_DX)
     assert client.filters_seen[-1] is None
 
 
@@ -87,9 +112,10 @@ def test_empty_collection_returns_empty(caplog) -> None:
     """Пустая коллекция → [] на всех уровнях + предупреждение в логе."""
     client = FakeClient(hit_from_call=999)  # никогда не отдаёт hits
     with caplog.at_level(logging.WARNING, logger="app.retrieval"):
-        out = search_with_fallback(client, "corpus_diaries", [0.1], 5, _LEVELS)
+        out = search_with_fallback(
+            client, "corpus_diaries", [0.1], 5, _LEVELS_NO_DX)
     assert out == []
-    assert client.calls == len(_LEVELS)  # перебрали все уровни
+    assert client.calls == len(_LEVELS_NO_DX)
     assert any("НЕ найдены" in r.message for r in caplog.records)
 
 

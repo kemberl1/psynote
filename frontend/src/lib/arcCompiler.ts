@@ -84,9 +84,21 @@ function splitListish(chunk: string): string[] {
     .filter((s) => s.length > 12);
 }
 
+function isRelativeVisitSentence(s: string): boolean {
+  const lower = s.toLowerCase();
+  if (/родительск\w* дн|на свидан/.test(lower)) return true;
+  return (
+    /встреч|визит|приход|приехала|приехал/.test(lower) &&
+    /мам[аоыуе]|матер|отц[аеу]|родител|родствен/.test(lower)
+  );
+}
+
 function classifySentence(s: string): keyof ExtractedFacts | "contrast" | "skip" {
   const lower = s.toLowerCase();
-  if (/выходн|понедельник|вторник|сред[ауы]|четверг|пятниц|суббот|воскресень/.test(lower)) {
+  if (
+    /выходн|понедельник|вторник|сред[ауы]|четверг|пятниц|суббот|воскресень/.test(lower) ||
+    isRelativeVisitSentence(s)
+  ) {
     return "timed";
   }
   if (/в первые дни|при поступлении/.test(lower) && /в дальнейшем|затем|позднее/.test(lower)) {
@@ -189,20 +201,30 @@ function diagnosisText(batchAnswers: Answers): string {
   return typeof raw === "string" ? raw.trim() : "";
 }
 
-function intellectLock(diagnosis: string): string | null {
-  if (/F71|F72|умеренн\w* умственн|выраженн\w* умственн/i.test(diagnosis)) {
+function intellectLock(diagnosis: string): string {
+  if (/F71|F72|F73|умеренн\w* умственн|выраженн\w* умственн|тяжёл\w* умственн/i.test(diagnosis)) {
     return (
-      "Интеллект — умственная отсталость умеренной (или выраженной) степени по диагнозу, " +
-      "словами полностью. Не пиши «лёгкую», не пиши аббревиатуру «УО», не подставляй F70/F91."
+      "Интеллект ЭТОГО пациента — умственная отсталость умеренной (или выраженной) степени по диагнозу, " +
+      "словами полностью. Не пиши «лёгкую», не пиши аббревиатуру «УО», не подставляй F70/F91 и не пиши «возрастную норму»."
     );
   }
   if (/F70|лёгк\w* умственн|легк\w* умственн/i.test(diagnosis)) {
     return (
-      "Интеллект — умственная отсталость лёгкой степени по диагнозу, словами полностью. " +
-      "Не подставляй F71/F91 и не пиши аббревиатуру «УО»."
+      "Интеллект ЭТОГО пациента — умственная отсталость лёгкой степени по диагнозу, словами полностью. " +
+      "Не подставляй F71/F91, не пиши «возрастную норму», не пиши аббревиатуру «УО»."
     );
   }
-  return null;
+  if (/\bF7\d/i.test(diagnosis)) {
+    return (
+      "Интеллект — умственная отсталость по диагнозу (F7x), степень как в формулировке врача, словами полностью, не «УО»."
+    );
+  }
+  return (
+    "Интеллект ЭТОГО пациента — НЕ умственная отсталость: в диагнозе нет F70–F79. " +
+    "Пиши «соответствует возрасту» / «на уровне возрастной нормы» (если бриф не задал иное). " +
+    "ЗАПРЕЩЕНО копировать из образцов корпуса «умственную отсталость», «лёгкую/умеренную УО», " +
+    "«снижен до уровня … отсталости» — это другой пациент."
+  );
 }
 
 /** Уровень речи из эпикриза/диагноза — чтобы не приписывать словесные акты неговорящему. */
@@ -221,7 +243,13 @@ export function inferSpeechLevel(
   }
   if (/отдельн\w* слов|слова-предложен|лепетн/.test(blob)) return "words";
   if (/короткие фраз|простые фраз|фразовая речь не/.test(blob)) return "short_phrases";
-  if (/развернут\w* предложен|фразовая речь сформир/.test(blob)) return "expanded";
+  if (
+    /развернут\w* предложен|фразовая речь сформир|речь фразов|собственн\w* речь фразов|отвечает развернуто/.test(
+      blob,
+    )
+  ) {
+    return "expanded";
+  }
   if (/F72|выраженн\w* умственн/.test(diagnosis)) return "sounds";
   return "unknown";
 }
@@ -348,8 +376,12 @@ function interpolateContact(
 ): string[] {
   const nonverbal = speech === "sounds" || speech === "words";
   const contact: string[] = [];
-  const blob = [...facts.traits, ...facts.laterBehaviors].join(" ").toLowerCase();
-  if (/не взаимодейств|обособлен/.test(blob)) contact.push("isolated");
+  const blob = [...facts.traits, ...facts.laterBehaviors, ...facts.improvement].join(" ").toLowerCase();
+  const isolated = /не взаимодейств|обособлен|практически не обща/.test(blob);
+  const sociable = /активно обща|с детьми обща|сверстник|весел|шумн|подвижн/.test(blob);
+  const later = phase === "titration" || phase === "improving" || phase === "residual";
+  if (isolated && !(sociable && later)) contact.push("isolated");
+  if (sociable && later && !nonverbal) contact.push("selective_children");
   if (
     !nonverbal &&
     /коррекци|замечан|каприз|плак/.test(blob) &&
@@ -362,6 +394,41 @@ function interpolateContact(
   }
   if (contact.length === 0) contact.push(nonverbal ? "isolated" : "calm_distance");
   return contact.filter((c) => !(nonverbal && (c === "does_not_disclose" || c === "productive")));
+}
+
+function isOccupation(text: string): boolean {
+  return /телевизор|\bтв\b|рисова|конструктор|сюжетно|ролев|в игровой|смотрел тв/.test(
+    text.toLowerCase(),
+  );
+}
+
+/** Даты вида 21.07 / 21.07.2026 в тексте врача → фрагмент относится к этому календарному дню. */
+export function extractDatedSnippets(
+  text: string,
+  year: number,
+): { iso: string; snippet: string }[] {
+  if (!text.trim()) return [];
+  const re = /(?:с\s+|от\s+)?(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?/g;
+  const marks: { index: number; iso: string }[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const day = Number(match[1]);
+    const month = Number(match[2]);
+    let y = match[3] ? Number(match[3]) : year;
+    if (y < 100) y += 2000;
+    if (month < 1 || month > 12 || day < 1 || day > 31) continue;
+    const iso = `${y}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    marks.push({ index: match.index, iso });
+  }
+  if (marks.length === 0) return [];
+  const out: { iso: string; snippet: string }[] = [];
+  for (let i = 0; i < marks.length; i++) {
+    const start = marks[i].index;
+    const end = i + 1 < marks.length ? marks[i + 1].index : text.length;
+    const snippet = text.slice(start, end).replace(/[;,.\s]+$/, "").trim();
+    if (snippet.length > 8) out.push({ iso: marks[i].iso, snippet });
+  }
+  return out;
 }
 
 function pickRotated(pool: string[], index: number, count: number): string[] {
@@ -444,6 +511,12 @@ function timedForDay(
       out.push(s);
       continue;
     }
+    const hasWeekday =
+      /понедельник|вторник|сред[ауы]|четверг|пятниц|суббот|воскресень/.test(lower);
+    if (isRelativeVisitSentence(s) && !hasWeekday) {
+      if (isWeekend) out.push(s);
+      continue;
+    }
     const dowMap: Record<number, RegExp> = {
       0: /воскресень/,
       1: /понедельник/,
@@ -475,10 +548,24 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
   const examIndex = days.findIndex((d) => d.documentType === "exam_10d");
   const titrationIndex =
     examIndex >= 0 ? examIndex : Math.min(Math.floor(n * 0.4), Math.max(0, n - 1));
+  const packetYear = Number((days[0]?.isoDate ?? "").slice(0, 4)) || new Date().getFullYear();
+  const medSource = [
+    typeof batchAnswers.key_medications === "string" ? batchAnswers.key_medications : "",
+    ...facts.therapy,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const datedMeds = extractDatedSnippets(medSource, packetYear);
+  const occupationPool = unique(
+    [...facts.laterBehaviors, ...facts.traits, ...facts.improvement].filter(isOccupation),
+  );
+  const visitPool = unique(
+    [...facts.timed, ...splitSentences(directorContext)].filter(isRelativeVisitSentence),
+  );
 
   const usedFieldKeys = new Set<string>();
   const fieldPoolAll = facts.laterBehaviors.filter(isFieldAct);
-  const calmPoolAll = facts.laterBehaviors.filter((s) => !isFieldAct(s));
+  const calmPoolAll = facts.laterBehaviors.filter((s) => !isFieldAct(s) && !isOccupation(s));
 
   const briefs: DayBrief[] = days.map((day, index) => {
     const periodPct = n <= 1 ? 100 : Math.round((index / (n - 1)) * 100);
@@ -487,18 +574,32 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     const { mood, moodDetail } = interpolateMood(dynamics, phase);
     const behavior = interpolateBehavior(phase, role);
     const contact = interpolateContact(facts, role, phase, speechLevel);
-    const includeFinalState =
-      role === "exam" || index >= n - 2;
-    const therapyToday =
-      role === "exam" || index === titrationIndex
-        ? facts.therapy.join(" ") || null
-        : null;
+    const includeFinalState = index >= n - 2 || (role === "exam" && periodPct >= 80);
+    const medsToday = datedMeds.filter((m) => m.iso === day.isoDate).map((m) => m.snippet);
+    const medsToDate = datedMeds.filter((m) => m.iso <= day.isoDate).map((m) => m.snippet);
+    let therapyToday: string | null = null;
+    if (medsToday.length > 0) {
+      therapyToday = medsToday.join(" ");
+    } else if (role === "exam" && medsToDate.length > 0) {
+      therapyToday =
+        "Схема к СЕГОДНЯШНЕЙ дате (события позже этой даты не включай): " +
+        medsToDate.join("; ");
+    } else if (datedMeds.length === 0 && (role === "exam" || index === titrationIndex)) {
+      therapyToday = facts.therapy.join(" ") || null;
+    }
 
     const obsCount = role === "quiet" ? 1 : role === "exam" ? 3 : 2;
     const canTakeField =
       role === "event" &&
       (phase === "admission" || phase === "field" || phase === "titration");
-    const observations: string[] = [];
+    const cal = calendarFor(day.isoDate);
+    const visitToday =
+      cal === "saturday" || cal === "sunday"
+        ? visitPool
+        : role === "exam"
+          ? visitPool.map((s) => `За период (не новый эпизод сегодня): ${s}`)
+          : [];
+    const observations: string[] = [...visitToday];
     if (role === "exam") {
       observations.push(
         ...fieldPoolAll.slice(0, 2).map((s) => `За период (не новый эпизод сегодня): ${s}`),
@@ -516,6 +617,9 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     } else {
       observations.push(...pickRotated(calmPoolAll, index, obsCount));
     }
+    if (phase !== "admission") {
+      observations.push(...pickRotated(occupationPool, index, 1));
+    }
     if (role !== "quiet") {
       observations.push(...pickRotated(facts.traits, index, 1));
     } else {
@@ -529,7 +633,8 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     }
     observations.push(...timedForDay(directorContext, day, n));
 
-    const obsCap = role === "exam" ? 6 : role === "quiet" ? 2 : 3;
+    const obsCap =
+      role === "exam" ? 7 : visitToday.length > 0 ? 4 : role === "quiet" ? 2 : 3;
     return {
       isoDate: day.isoDate,
       dayNumber: day.dayNumber,
@@ -565,6 +670,15 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
       if (typeof fs === "string" && fs.trim()) extra.push(fs.trim());
     }
     if (!briefs[i].therapyToday) extra.push(...facts.therapy);
+    extra.push(
+      ...datedMeds
+        .filter((m) => m.iso > briefs[i].isoDate)
+        .map((m) => m.snippet),
+    );
+    const cal = briefs[i].calendar;
+    if (cal !== "saturday" && cal !== "sunday" && briefs[i].role !== "exam") {
+      extra.push(...visitPool);
+    }
     if (briefs[i].phase === "admission" || briefs[i].phase === "field") {
       extra.push(...facts.improvement, ...facts.residual);
     }
@@ -572,7 +686,7 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
       extra.push(...facts.laterBehaviors.filter(isFieldAct), ...facts.early);
     }
     const stops = fieldStopsForDay(briefs[i].observations, briefs[i].includeFinalState);
-    briefs[i].forbidden = unique([...stops, ...extra, ...others]).slice(0, 18);
+    briefs[i].forbidden = unique([...stops, ...extra, ...others]).slice(0, 22);
   }
 
   return briefs;
@@ -640,11 +754,11 @@ export function formatDayBrief(
         "Не подставляй другой код МКБ (не F70 вместо F71, не F91, не выдуманный). " +
         "Сопутствующие — «не выявлено» / «—», если врач их не указал.",
     );
-    const intellect = intellectLock(diagnosis);
-    if (intellect) lines.push(intellect);
+    lines.push(intellectLock(diagnosis));
   } else {
     lines.push(
-      "Код МКБ не дан — в диагнозе плейсхолдер [ОСНОВНОЙ_ДИАГНОЗ], не выдумывай F-код.",
+      "Код МКБ не дан — в диагнозе плейсхолдер [ОСНОВНОЙ_ДИАГНОЗ], не выдумывай F-код. " +
+        "Интеллект и речь — только из ответов/брифа ЭТОГО пациента, не из образцов корпуса.",
     );
   }
   lines.push(...speechLockLines(brief.speechLevel));
@@ -664,9 +778,13 @@ export function formatDayBrief(
     for (const o of brief.observations) lines.push(`• ${o}`);
   }
   if (brief.therapyToday) {
-    lines.push(`Терапию сегодня можно кратко отразить: ${brief.therapyToday}`);
+    lines.push(
+      `Сегодня день коррекции/фиксации схемы — отрази в «Назначения» и/или «План лечения», не прячь за «см. лист назначений»: ${brief.therapyToday}`,
+    );
   } else {
-    lines.push("Терапию и дозировки сегодня НЕ перечисляй — это не день коррекции схемы.");
+    lines.push(
+      "Терапию и дозировки сегодня НЕ перечисляй — «Назначения: см. лист назначений». Не переноси смены схемы с других дат.",
+    );
   }
   if (brief.includeFinalState) {
     const fs = batchAnswers.final_state;
@@ -677,7 +795,7 @@ export function formatDayBrief(
     }
   } else {
     lines.push(
-      "Целевое состояние к концу периода сегодня НЕ пиши и НЕ цитируй — оно для последних дней и осмотра 10 дней.",
+      "Целевое состояние к выписке / финальный статус сегодня НЕ пиши и НЕ цитируй — оно только для последних дней периода и позднего осмотра 10 дней, не для середины госпитализации.",
     );
   }
   if (brief.forbidden.length > 0) {
@@ -707,7 +825,7 @@ export function formatDayBrief(
     "Нельзя выдумывать факты, которых нет в контексте: прогулки, визиты, консультации, процедуры, самоповреждение, смену схемы, «выходные» не в тот календарный день.",
   );
   lines.push(
-    "Клинические константы (диагноз, уровень речи, интеллект) держи. Штампы «мышление конкретное тугоподвижное», «психопродуктивной не выявлено» — тот же смысл, разные слова.",
+    "Клинические константы ЭТОГО пациента (диагноз, интеллект, речь, контакт) держи. Образцы корпуса — чужие дети: не копируй их МКБ, умственную отсталость, звукокомплексы, простыни, обувь, если этого нет в брифе. Штампы статуса — тот же смысл, разные слова.",
   );
   lines.push(
     "Не пиши: одинаковые фразы с соседними днями; «вероятно»; аббревиатура «УО»; «под наблюдением/надзором персонала»; жалобы и «без дополнений» внутри статуса.",

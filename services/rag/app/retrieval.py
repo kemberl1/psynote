@@ -7,19 +7,19 @@ Qdrant С ФИЛЬТРОМ по метаданным (doc_type / syndrome / diag
 ЭТАП 4.1 — ступенчатый фолбэк фильтров (graceful degradation).
 Узкая выборка корпуса приводила к тому, что строгий фильтр
 (doc_type + syndrome + diagnosis_class) для exam_10d мог вернуть 0 образцов →
-генерация шла БЕЗ few-shot (теряется суть RAG). Теперь фильтры ПОСЛЕДОВАТЕЛЬНО
-ослабляются, пока не найдутся образцы:
+    генерация шла БЕЗ few-shot (теряется суть RAG). Фильтры ПОСЛЕДОВАТЕЛЬНО
+ослабляются, пока не найдутся образцы — но diagnosis_class, если он задан,
+не снимается: иначе депрессия/F3x получит few-shot от УО/F7x и модель
+скопирует чужой регистр.
 
     L0 strict   : doc_type + syndrome + diagnosis_class (+section, если задан)
     L1 diagnosis: doc_type + diagnosis_class
-    L2 doc_type : doc_type
-    L3 none     : без фильтров — просто top-k по вектору в коллекции
+    L2 doc_type : doc_type          — только если diagnosis_class НЕ задан
+    L3 none     : без фильтров      — только если diagnosis_class НЕ задан
 
-ГАРАНТИЯ: если в коллекции вообще есть данные — retrieve() вернёт непустой
-результат (chunks_used > 0). Уровень, на котором нашлись образцы, и их число
-ЛОГИРУЮТСЯ (без ПДн — только метаданные/счётчики).
-
-daily не страдает (он и так находит на L0/L1); фолбэк лишь добавляет страховку.
+Если класс МКБ известен, а в корпусе нет совпадений — лучше 0 few-shot,
+чем чужой клинический регистр. Уровень и число образцов ЛОГИРУЮТСЯ
+(без ПДн — только метаданные/счётчики).
 """
 
 from __future__ import annotations
@@ -73,9 +73,13 @@ def _fallback_levels(doc_type: str | None, syndrome: str | None,
     candidates = [
         _Level("L0_strict", doc_type, syndrome, diagnosis_class, section),
         _Level("L1_diagnosis", doc_type, None, diagnosis_class, None),
-        _Level("L2_doc_type", doc_type, None, None, None),
-        _Level("L3_none", None, None, None, None),
     ]
+    # Не снимаем diagnosis_class: L2/L3 подмешивают чужой МКБ-регистр.
+    if not diagnosis_class:
+        candidates.extend([
+            _Level("L2_doc_type", doc_type, None, None, None),
+            _Level("L3_none", None, None, None, None),
+        ])
     levels: list[_Level] = []
     seen_keys: set[tuple] = set()
     for lvl in candidates:
@@ -125,7 +129,8 @@ def retrieve(query: str, doc_type: str | None = None, top_k: int = 5,
     """Найти top-k обезличенных образцов со ступенчатым ослаблением фильтров.
 
     docs/03 §6 + Этап 4.1. Возвращает первый НЕПУСТОЙ результат по уровням
-    L0→L3. Если коллекция пуста — вернётся [] (данных нет).
+    L0→L1 (если задан diagnosis_class) или L0→L3 (если класс неизвестен).
+    Нет совпадений / пустая коллекция — [].
     """
     settings = get_settings()
     embedder = Embedder(settings)

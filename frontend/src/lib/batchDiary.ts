@@ -385,7 +385,7 @@ export function buildGenerateAnswers(
     productive_symptoms: "not_detected",
     mood: "even",
     behavior: "ordered",
-    contact: ["isolated"],
+    contact: ["calm_distance"],
     sleep: "not_disturbed",
     appetite: "preserved",
     tolerance: "good",
@@ -442,9 +442,9 @@ export function buildGenerateAnswers(
       criticism: "formal",
       thinking: "no_gross",
       attention_memory: "no_gross",
-      intellect: /F71|F72|умеренн\w* умственн|выраженн\w* умственн/i.test(diagnosisStr)
+      intellect: /F71|F72|F73|умеренн\w* умственн|выраженн\w* умственн/i.test(diagnosisStr)
         ? "reduced"
-        : /F70|лёгк\w* УО|легк\w* УО/i.test(diagnosisStr)
+        : /F70|лёгк\w* умственн|легк\w* умственн|лёгк\w* УО|легк\w* УО/i.test(diagnosisStr)
           ? "mild_id"
           : "age_norm",
       suicidal: "not_detected",

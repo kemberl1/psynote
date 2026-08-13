@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileArc, extractFacts } from "./arcCompiler";
+import { compileArc, extractDatedSnippets, extractFacts, inferSpeechLevel } from "./arcCompiler";
 import { buildGenerateAnswers } from "./batchDiary";
 
 const DOCTOR_NARRATIVE =
@@ -296,5 +296,154 @@ describe("buildGenerateAnswers with compiled briefs", () => {
     );
     const arc = String(mon.__arc_context__ ?? "");
     expect(arc).not.toContain("искусал губу");
+  });
+});
+
+describe("patient-agnostic locks (not one diagnosis)", () => {
+  it("forbids intellectual disability when the diagnosis is not F7x", () => {
+    const days = packDays();
+    const briefs = compileArc({
+      days,
+      directorContext: "При поступлении напряжен, плаксив. Начал общаться с детьми.",
+      batchAnswers: {
+        overall_dynamics: "wavy",
+        diagnosis: "F92.8. Другие смешанные расстройства поведения и эмоций",
+        final_state: "Собственная речь фразовая. Интеллектуально на уровне возрастной нормы.",
+      },
+      estimatedDischargeDate: "2026-08-12",
+    });
+    const ans = buildGenerateAnswers(
+      {
+        overall_dynamics: "wavy",
+        diagnosis: "F92.8. Другие смешанные расстройства поведения и эмоций",
+        final_state: "Собственная речь фразовая. Интеллектуально на уровне возрастной нормы.",
+      },
+      briefs[0].dayNumber,
+      days.length,
+      briefs[0].isoDate,
+      "При поступлении напряжен, плаксив.",
+      "2026-08-12",
+      "daily",
+      briefs[0],
+    );
+    const arc = String(ans.__arc_context__);
+    expect(arc).toMatch(/F92\.8/);
+    expect(arc).toMatch(/НЕ умственная отсталость|нет F70/i);
+    expect(arc).not.toMatch(/умственная отсталость умеренной/);
+    expect(briefs[0].speechLevel).toBe("expanded");
+  });
+
+  it("still locks moderate ID when the diagnosis is F71", () => {
+    const days = packDays();
+    const briefs = compileArc({
+      days,
+      directorContext: DOCTOR_NARRATIVE,
+      batchAnswers: {
+        overall_dynamics: "positive",
+        diagnosis: "F71.18 Умственная отсталость умеренная",
+      },
+      estimatedDischargeDate: "",
+    });
+    const arc = String(
+      buildGenerateAnswers(
+        { overall_dynamics: "positive", diagnosis: "F71.18 Умственная отсталость умеренная" },
+        briefs[0].dayNumber,
+        days.length,
+        briefs[0].isoDate,
+        DOCTOR_NARRATIVE,
+        "",
+        "daily",
+        briefs[0],
+      ).__arc_context__,
+    );
+    expect(arc).toMatch(/умеренной/);
+    expect(arc).toMatch(/Не пиши «лёгкую»/);
+  });
+
+  it("puts relative visits on weekend days, not weekdays", () => {
+    const days = packDays();
+    const narrative =
+      "Состояние с улучшением. При встречах с мамой во время родительских дней был требователен, плаксив, истериоформные реакции.";
+    const briefs = compileArc({
+      days,
+      directorContext: narrative,
+      batchAnswers: { overall_dynamics: "wavy", diagnosis: "F92.8" },
+      estimatedDischargeDate: "",
+    });
+    const sat = briefs.find((b) => b.isoDate === "2026-08-01");
+    const mon = briefs.find((b) => b.isoDate === "2026-07-27");
+    expect(sat?.observations.join(" ")).toMatch(/мам|родительск|истериоформ/i);
+    expect(mon?.observations.join(" ")).not.toMatch(/истериоформ/i);
+    expect(mon?.forbidden.join(" ")).toMatch(/мам|родительск|истериоформ/i);
+  });
+
+  it("places dated medication changes on that calendar day, not the whole pack", () => {
+    const days = packDays();
+    const briefs = compileArc({
+      days,
+      directorContext: "Состояние с улучшением. Подбор терапии.",
+      batchAnswers: {
+        overall_dynamics: "wavy",
+        diagnosis: "F92.8",
+        key_medications:
+          "с 22.07 Алимемазин 10 мг/сут, 30.07 отменен Алимемазин, введен Рисперидон 0,5 мг/сут. 04.08 Рисперидон до 1 мг/сут",
+      },
+      estimatedDischargeDate: "",
+    });
+    const jul30 = briefs.find((b) => b.isoDate === "2026-07-30");
+    const aug04 = briefs.find((b) => b.isoDate === "2026-08-04");
+    const jul28 = briefs.find((b) => b.isoDate === "2026-07-28");
+    expect(jul30?.therapyToday).toMatch(/рисперидон|0,5/i);
+    expect(aug04?.therapyToday).toMatch(/1 мг/i);
+    expect(jul28?.therapyToday).toBeNull();
+    const exam = briefs.find((b) => b.role === "exam"); // 29.07
+    expect(exam?.therapyToday).toMatch(/алимемазин/i);
+    expect(exam?.therapyToday).not.toMatch(/04\.08|1 мг/i);
+    expect(exam?.includeFinalState).toBe(false);
+  });
+
+  it("does not put discharge final-state on a mid-stay 10-day exam", () => {
+    const days = packDays();
+    const briefs = compileArc({
+      days,
+      directorContext: DOCTOR_NARRATIVE,
+      batchAnswers: {
+        overall_dynamics: "positive",
+        final_state: "Договорился с мамой о правилах поведения дома.",
+      },
+      estimatedDischargeDate: "2026-08-12",
+    });
+    const exam = briefs.find((b) => b.role === "exam");
+    expect(exam?.includeFinalState).toBe(false);
+    expect(briefs[briefs.length - 1].includeFinalState).toBe(true);
+  });
+
+  it("parses dated snippets from a medication line", () => {
+    const spans = extractDatedSnippets(
+      "с 21.07 таб. Алимемазин 5 мг, с 22.07 Алимемазин 10 мг/сут, 30.07 Рисперидон 0,5 мг",
+      2026,
+    );
+    expect(spans.map((s) => s.iso)).toEqual([
+      "2026-07-21",
+      "2026-07-22",
+      "2026-07-30",
+    ]);
+  });
+
+  it("infers phrasal speech from the portrait, not from a previous ID case", () => {
+    expect(
+      inferSpeechLevel(
+        "На вопросы отвечает развернуто. Собственная речь фразовая.",
+        "F92.8",
+        "",
+      ),
+    ).toBe("expanded");
+    expect(
+      inferSpeechLevel(
+        "Собственная речь представлена отдельными звукокомплексами.",
+        "F71.18",
+        "",
+      ),
+    ).toBe("sounds");
   });
 });
