@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { omitEmptyDiarySections, normalizeDailySpacing, parseDiaryMarkup } from "./diaryMarkup";
+import { normalizeDailySpacing, omitEmptyDiarySections, parseDiaryMarkup } from "./diaryMarkup";
 
 function kinds(content: string) {
   return parseDiaryMarkup(content).map((r) => [r.kind, r.text] as const);
@@ -33,10 +33,26 @@ describe("parseDiaryMarkup", () => {
     expect(runs).toContainEqual(["placeholder", "[ФИО_ВРАЧА]"]);
   });
 
-  it("bolds the daily exam header", () => {
-    const runs = kinds("ОСМОТР ЛЕЧАЩИМ ВРАЧОМ\n[ДАТА] время: [ВРЕМЯ]");
-    expect(runs).toContainEqual(["bold", "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ"]);
-    expect(runs).toContainEqual(["placeholder", "[ДАТА]"]);
+  it("underlines the filled daily signature on the same line", () => {
+    const runs = kinds(
+      "Осмотр лечащим врачом\nПлан лечения (дополнения к плану): без дополнений\nВрач-психиатр детский Пояркова В.С.",
+    );
+    expect(runs).toContainEqual(["underline", "Врач-психиатр детский Пояркова В.С."]);
+    expect(runs.some(([k, t]) => k === "underline" && t.includes("План лечения"))).toBe(
+      false,
+    );
+  });
+
+  it("bolds only the daily exam title", () => {
+    const runs = kinds(
+      "Осмотр лечащим врачом\nДата: 06.08.2026 10:00\nЖалобы: не предъявляет",
+    );
+    expect(runs).toContainEqual(["bold", "Осмотр лечащим врачом"]);
+    expect(runs.some(([k, t]) => k === "bold" && t.includes("Дата"))).toBe(false);
+    expect(runs.some(([k, t]) => k === "bold" && t.includes("Жалобы"))).toBe(false);
+    expect(runs.some(([k, t]) => k === "text" && t.includes("Дата: 06.08.2026 10:00"))).toBe(
+      true,
+    );
   });
 
   it("does not bold values after a section colon", () => {
@@ -102,7 +118,7 @@ describe("omitEmptyDiarySections", () => {
 });
 
 describe("normalizeDailySpacing", () => {
-  it("keeps one blank after anamnesis and neurological status only", () => {
+  it("removes blank lines between daily sections", () => {
     const text = normalizeDailySpacing(
       [
         "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ",
@@ -116,13 +132,13 @@ describe("normalizeDailySpacing", () => {
         "Диагноз:",
       ].join("\n"),
     );
+    expect(text).not.toContain("\n\n");
     expect(text).toContain(
-      "Анамнез жизни (дополнения к анамнезу): без дополнений\n\nФизикальное",
+      "Анамнез жизни (дополнения к анамнезу): без дополнений\nФизикальное",
     );
     expect(text).toContain(
-      "Неврологический статус: без острой неврологической симптоматики\n\nДиагноз:",
+      "Неврологический статус: без острой неврологической симптоматики\nДиагноз:",
     );
-    expect(text).not.toContain("Жалобы: не предъявляет\n\nАнамнез заболевания");
   });
 
   it("does not change 10-day spacing", () => {

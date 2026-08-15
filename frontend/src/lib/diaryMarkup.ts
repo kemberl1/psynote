@@ -4,6 +4,7 @@
 export type DiaryRun =
   | { kind: "text"; text: string }
   | { kind: "bold"; text: string }
+  | { kind: "underline"; text: string }
   | { kind: "placeholder"; text: string };
 
 export const PLACEHOLDER_SPLIT_RE = /(\[[A-ZА-ЯЁ0-9_]+\])/g;
@@ -40,6 +41,7 @@ const SECTION_LABELS = [
 ].sort((a, b) => b.length - a.length);
 
 const HEADER_LINES = [
+  "Осмотр лечащим врачом",
   "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ",
   "ОСМОТР лечащим врачом совместно с заведующим отделением",
   "ОСМОТР",
@@ -54,6 +56,7 @@ function stripWrapStars(s: string): string {
 
 function isHeaderLine(line: string): boolean {
   const plain = stripWrapStars(line.trim());
+  if (/^дата:/i.test(plain)) return true;
   const upper = plain.toUpperCase();
   return HEADER_LINES.some((h) => h.toUpperCase() === upper);
 }
@@ -159,63 +162,34 @@ export function omitEmptyDiarySections(content: string): string {
 }
 
 const DAILY_EXAM_TITLE = "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ";
+const DAILY_EXAM_TITLE_NEW = "Осмотр лечащим врачом";
 
 function isDailyExam(content: string): boolean {
-  return content.toUpperCase().includes(DAILY_EXAM_TITLE);
-}
-
-function isSectionStart(line: string): boolean {
-  return matchSectionLabel(line.trim()) !== null;
-}
-
-function nextNonEmpty(lines: string[], from: number): string | undefined {
-  for (let i = from; i < lines.length; i++) {
-    if (lines[i].trim()) return lines[i];
-  }
-  return undefined;
-}
-
-function isDailyBlankAfter(line: string): boolean {
-  const matched = matchSectionLabel(line.trim());
-  if (!matched) return false;
-  return (
-    matched.label === "Анамнез жизни (дополнения к анамнезу)" ||
-    matched.label === "Неврологический статус"
-  );
+  return content
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .some((raw) => {
+      const line = raw.trim();
+      return (
+        line.toUpperCase() === DAILY_EXAM_TITLE ||
+        line.toLowerCase() === DAILY_EXAM_TITLE_NEW.toLowerCase()
+      );
+    });
 }
 
 /**
- * В ежедневнике — ровно одна пустая строка после анамнеза жизни
- * и после неврологического статуса. Между остальными разделами
- * лишние пустые строки убираем. Осмотр за 10 дней не трогаем.
+ * В ежедневнике убираем пустые строки между разделами.
+ * Осмотр за 10 дней не трогаем.
  */
 export function normalizeDailySpacing(content: string): string {
   if (!isDailyExam(content)) return content;
-  const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  const compacted: string[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim() !== "") {
-      compacted.push(lines[i]);
-      continue;
-    }
-    const prev = compacted.length ? compacted[compacted.length - 1] : "";
-    const next = nextNonEmpty(lines, i + 1);
-    if (prev && next && isSectionStart(prev) && isSectionStart(next)) {
-      continue;
-    }
-    if (compacted.length && compacted[compacted.length - 1] === "") continue;
-    compacted.push("");
-  }
-
-  const out: string[] = [];
-  for (let i = 0; i < compacted.length; i++) {
-    out.push(compacted[i]);
-    if (!isDailyBlankAfter(compacted[i])) continue;
-    const next = compacted[i + 1];
-    if (next !== undefined && next.trim() === "") continue;
-    out.push("");
-  }
-  return out.join("\n");
+  return content
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .join("\n");
 }
 
 function parseInlineBold(text: string): DiaryRun[] {
@@ -237,8 +211,45 @@ function parseInlineBold(text: string): DiaryRun[] {
   return runs;
 }
 
-function parseLine(line: string): DiaryRun[] {
+function isFilledDailySignature(line: string): boolean {
+  const t = line.trim();
+  if (!t || t.includes("[") || t.includes(":")) return false;
+  return /врач/i.test(t) && /[А-ЯЁ][а-яё]+/.test(t);
+}
+
+function isDailyTitleLine(line: string): boolean {
+  const plain = stripWrapStars(line.trim());
+  return (
+    plain.toUpperCase() === DAILY_EXAM_TITLE ||
+    plain.toLowerCase() === DAILY_EXAM_TITLE_NEW.toLowerCase()
+  );
+}
+
+function parseLine(line: string, daily: boolean): DiaryRun[] {
   if (!line) return [];
+  if (daily) {
+    if (isDailyTitleLine(line)) {
+      return [{ kind: "bold", text: DAILY_EXAM_TITLE_NEW }];
+    }
+    const section = matchSectionLabel(line);
+    if (section) {
+      const leadingWs = line.match(/^\s*/)?.[0] ?? "";
+      const runs: DiaryRun[] = [];
+      if (leadingWs) runs.push({ kind: "text", text: leadingWs });
+      let text = `${section.label}:`;
+      if (section.rest) {
+        const value = section.rest.replace(/\*\*/g, "");
+        if (value) text += ` ${value}`;
+      }
+      runs.push({ kind: "text", text });
+      return runs;
+    }
+    const plain = stripWrapStars(line).replace(/\*\*/g, "");
+    if (isFilledDailySignature(plain)) {
+      return [{ kind: "underline", text: plain }];
+    }
+    return [{ kind: "text", text: plain }];
+  }
   if (isHeaderLine(line)) {
     return [{ kind: "bold", text: stripWrapStars(line.trim()) }];
   }
@@ -257,7 +268,7 @@ function parseLine(line: string): DiaryRun[] {
   return parseInlineBold(line);
 }
 
-function parseTextBlock(text: string): DiaryRun[] {
+function parseTextBlock(text: string, daily: boolean): DiaryRun[] {
   const runs: DiaryRun[] = [];
   const parts = text.split(/(\n)/);
   for (const part of parts) {
@@ -265,13 +276,14 @@ function parseTextBlock(text: string): DiaryRun[] {
       runs.push({ kind: "text", text: "\n" });
       continue;
     }
-    runs.push(...parseLine(part));
+    runs.push(...parseLine(part, daily));
   }
   return runs;
 }
 
 /** Разобрать дневник на текстовые/жирные/плейсхолдерные фрагменты. */
 export function parseDiaryMarkup(content: string): DiaryRun[] {
+  const daily = isDailyExam(content);
   const parts = content.split(PLACEHOLDER_SPLIT_RE);
   const runs: DiaryRun[] = [];
   for (const part of parts) {
@@ -279,7 +291,7 @@ export function parseDiaryMarkup(content: string): DiaryRun[] {
     if (PLACEHOLDER_TEST_RE.test(part)) {
       runs.push({ kind: "placeholder", text: part });
     } else {
-      runs.push(...parseTextBlock(part));
+      runs.push(...parseTextBlock(part, daily));
     }
   }
   return mergeAdjacent(runs);

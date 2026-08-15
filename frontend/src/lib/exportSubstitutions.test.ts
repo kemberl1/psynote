@@ -42,7 +42,7 @@ describe("diary date stamp", () => {
     ).toEqual({
       doctorName: "Иванов Иван Иванович",
       doctorPosition: "врач-психиатр детский, психиатрия",
-      headName: "Петрова Анна Сергеевна",
+      headName: "Петрова Анна Сергеевна, [ДОЛЖНОСТЬ_ЗАВ_ОТДЕЛЕНИЕМ], [ЛУ]",
     });
     const subs = buildExportSubstitutions({
       doctor: {
@@ -56,8 +56,10 @@ describe("diary date stamp", () => {
     });
     expect(subs["[ФИО_ВРАЧА]"]).toBe("Иванов Иван Иванович");
     expect(subs["[ДОЛЖНОСТЬ_ВРАЧА]"]).toBe("врач-психиатр детский");
-    expect(subs["[ФИО_ЗАВ_ОТДЕЛЕНИЕМ]"]).toBe(
-      "Петрова А.С. Врач-психиатр детский (ОПО№1). Общепсихиатрическое отделение для обслуживания детского населения №2",
+    expect(subs["[ФИО_ЗАВ_ОТДЕЛЕНИЕМ]"]).toBe("Петрова А.С.");
+    expect(subs["[ДОЛЖНОСТЬ_ЗАВ_ОТДЕЛЕНИЕМ]"]).toBe("Врач-психиатр детский");
+    expect(subs["[ЛУ]"]).toBe(
+      "ОПО№1, Общепсихиатрическое отделение для обслуживания детского населения №2",
     );
   });
 
@@ -97,6 +99,64 @@ describe("diary date stamp", () => {
     expect(out.split("врача, должность").length - 1).toBe(1);
   });
 
+  it("keeps ИБ № at the top of a 10-day exam, not under the signatures", () => {
+    const out = applyDiaryStamp(
+      "ИБ №[НОМЕР_ИБ]\nОСМОТР лечащим врачом совместно с заведующим отделением\nЖалобы: не предъявляет\nФамилия, имя, отчество (при наличии) заведующего отделением, подпись\n[ФИО_ЗАВ_ОТДЕЛЕНИЕМ]",
+      { caseNumber: "20261207" },
+    );
+    expect(out.startsWith("ИБ №20261207")).toBe(true);
+    expect(out.trim().endsWith("ИБ №20261207")).toBe(false);
+    expect(out).not.toContain("[НОМЕР_ИБ]");
+  });
+
+  it("keeps signature placeholders when account settings are empty", () => {
+    const out = applyDiaryStamp(
+      "ОСМОТР лечащим врачом совместно с заведующим отделением\n" +
+        "Фамилия, имя, отчество (при наличии) врача, должность, специальность, подпись\n" +
+        "[ФИО_ВРАЧА]\n" +
+        "Фамилия, имя, отчество (при наличии) заведующего отделением, подпись\n" +
+        "[ФИО_ЗАВ_ОТДЕЛЕНИЕМ]",
+      { doctor: { display_name: "Администратор" } },
+    );
+    expect(out).toContain("[ФИО_ВРАЧА]");
+    expect(out).toContain("[ДОЛЖНОСТЬ_ВРАЧА]");
+    expect(out).toContain("[ФИО_ВРАЧА], [ДОЛЖНОСТЬ_ВРАЧА]");
+    expect(out).toContain("[ФИО_ЗАВ_ОТДЕЛЕНИЕМ], [ДОЛЖНОСТЬ_ЗАВ_ОТДЕЛЕНИЕМ], [ЛУ]");
+    expect(out).not.toContain("Администратор");
+    expect(out).not.toContain("____");
+  });
+
+  it("does not use display_name as the doctor signature", () => {
+    const subs = buildExportSubstitutions({
+      doctor: { display_name: "Администратор", position: "врач-психиатр детский" },
+    });
+    expect(subs["[ФИО_ВРАЧА]"]).toBeUndefined();
+    expect(subs["[ДОЛЖНОСТЬ_ВРАЧА]"]).toBe("врач-психиатр детский");
+  });
+
+  it("uses daily placeholders [ДОЛЖНОСТЬ_ВРАЧА] then [ФИО_ВРАЧА]", () => {
+    const out = applyDiaryStamp(
+      "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ\nЛечащий врач: [ФИО_ВРАЧА]",
+      { doctor: { display_name: "Администратор" } },
+    );
+    expect(out).toContain("[ДОЛЖНОСТЬ_ВРАЧА] [ФИО_ВРАЧА]");
+    expect(out).not.toContain("Администратор");
+  });
+
+  it("rewrites a daily exam into the MIS daily form", () => {
+    const out = applyDiaryStamp(
+      "ИБ №[НОМЕР_ИБ]\nОСМОТР ЛЕЧАЩИМ ВРАЧОМ\n[ДАТА] время: [ВРЕМЯ]\nЖалобы: не предъявляет",
+      {
+        title: "День 6 · 06.08.2026 · Ежедневный осмотр",
+        caseNumber: "20261207",
+      },
+    );
+    expect(out).toContain("Осмотр лечащим врачом");
+    expect(out).toContain("Дата: 06.08.2026 10:00");
+    expect(out).not.toContain("ИБ №");
+    expect(out).not.toContain("ОСМОТР ЛЕЧАЩИМ ВРАЧОМ");
+  });
+
   it("rewrites old numeric headers", () => {
     const out = applyDiaryStamp("13.08.2026 время: 10:45", {});
     expect(out).toBe("«13» августа 2026 г. время: 10 час. 45 мин.");
@@ -108,7 +168,7 @@ describe("diary date stamp", () => {
         full_name: "Иванов Иван Иванович",
         position: "врач-психиатр детский",
       }),
-    ).toBe("Лечащий врач, врач-психиатр детский, Иванов Иван Иванович");
+    ).toBe("врач-психиатр детский Иванов Иван Иванович");
     const out = applyDiaryStamp(
       "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ\nЛечащий врач [ФИО_ВРАЧА]",
       {
@@ -118,9 +178,8 @@ describe("diary date stamp", () => {
         },
       },
     );
-    expect(out).toContain(
-      "Лечащий врач, врач-психиатр детский, Иванов Иван Иванович",
-    );
+    expect(out).toContain("Осмотр лечащим врачом");
+    expect(out).toContain("врач-психиатр детский Иванов Иван Иванович");
     expect(out).not.toContain("[ДОЛЖНОСТЬ_ВРАЧА]");
   });
 
@@ -133,7 +192,7 @@ describe("diary date stamp", () => {
           "ОПО№1, Общепсихиатрическое отделение для обслуживания детского населения №2",
       }),
     ).toBe(
-      "Иванов Иван Иванович. Врач-психиатр детский (ОПО№1). Общепсихиатрическое отделение для обслуживания детского населения №2",
+      "Иванов Иван Иванович, Врач-психиатр детский, ОПО№1, Общепсихиатрическое отделение для обслуживания детского населения №2",
     );
   });
 });

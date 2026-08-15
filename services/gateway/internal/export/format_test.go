@@ -16,7 +16,9 @@ func TestClassifyLine(t *testing.T) {
 	}{
 		{"ИБ №[НОМЕР_ИБ]", kindCaseNo, "", ""},
 		{"ОСМОТР", kindExamTitle, "", ""},
-		{"ОСМОТР ЛЕЧАЩИМ ВРАЧОМ", kindTitle, "", ""},
+		{"ОСМОТР ЛЕЧАЩИМ ВРАЧОМ", kindDailyTitle, "", ""},
+		{"Осмотр лечащим врачом", kindDailyTitle, "", ""},
+		{"Дата: 06.08.2026 10:00", kindDailyDate, "", ""},
 		{"[ДАТА] время: [ВРЕМЯ]", kindDateTime, "", ""},
 		{"«13» августа 2026 г. время: 10 час. 00 мин.", kindDateTime, "", ""},
 		{"31.08.2025 Сознание не помрачено.", kindDailyNarrative, "", ""},
@@ -27,7 +29,9 @@ func TestClassifyLine(t *testing.T) {
 		{"Неизвестная произвольная строка без двоеточия", kindPlain, "", ""},
 		{"Фамилия, имя, отчество (при наличии) врача, должность, специальность, подпись", kindSignatureCaption, "", ""},
 		{"Педиатр от 01.09.25: режим отделения", kindConsultNote, "", ""},
-		{"Врач-психиатр                                                                     Иванова И.И.", kindDoctorSignature, "", ""},
+		{"Врач-психиатр                                                                     Иванова И.И.", kindDailySignature, "", ""},
+		{"Врач-психиатр детский Пояркова В.С.", kindDailySignature, "", ""},
+		{"[ДОЛЖНОСТЬ_ВРАЧА] [ФИО_ВРАЧА]", kindDailySignature, "", ""},
 		{"Лечащий врач: [ФИО_ВРАЧА]", kindDoctorSignature, "", ""},
 	}
 	for _, c := range cases {
@@ -128,5 +132,24 @@ func TestParseDocLines_SignatureValue(t *testing.T) {
 	}
 	if len(lines[1].spans) == 0 || !lines[1].spans[0].Underline {
 		t.Errorf("signature value must be underlined: %+v", lines[1].spans)
+	}
+}
+
+func TestParseDocLines_KeepsSignaturePlaceholders(t *testing.T) {
+	lines := parseDocLines(
+		"Фамилия, имя, отчество (при наличии) заведующего отделением, подпись\n" +
+			"[ФИО_ЗАВ_ОТДЕЛЕНИЕМ], [ДОЛЖНОСТЬ_ЗАВ_ОТДЕЛЕНИЕМ]\n",
+	)
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(lines))
+	}
+	if lines[1].kind != kindSignatureValue {
+		t.Errorf("kind = %d, want signature value", lines[1].kind)
+	}
+	if lines[1].text != "[ФИО_ЗАВ_ОТДЕЛЕНИЕМ], [ДОЛЖНОСТЬ_ЗАВ_ОТДЕЛЕНИЕМ]" {
+		t.Errorf("placeholder must stay visible: %q", lines[1].text)
+	}
+	if len(lines[1].spans) > 0 && lines[1].spans[0].Underline {
+		t.Error("unresolved placeholders must not be underlined")
 	}
 }

@@ -3,13 +3,13 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { friendlyError } from "../api/errors";
 import { useAuth } from "../auth/AuthContext";
+import "../components/questionnaire/questionnaire.css";
 import { Banner, Button } from "../components/ui";
 import {
-  composeDailyDoctorLine,
-  composeHeadSignature,
-  doctorPositionLabel,
+    composeDailyDoctorLine,
+    composeHeadSignature,
+    doctorPositionLabel,
 } from "../lib/exportSubstitutions";
-import "../components/questionnaire/questionnaire.css";
 import "./pages.css";
 import "./settings.css";
 
@@ -133,7 +133,7 @@ export function SettingsPage() {
           </label>
           <p className="settings-preview" aria-live="polite">
             <span className="settings-preview__label">Ежедневный осмотр</span>
-            {dailyLine || "Лечащий врач, …"}
+            {dailyLine || "Врач-психиатр детский    …"}
             <span className="settings-preview__label">Осмотр за 10 дней</span>
             {tenDayDoctor || "ФИО, должность"}
           </p>

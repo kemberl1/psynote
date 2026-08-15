@@ -125,15 +125,18 @@ func applySubstitutionsMap(content string, subs map[string]string) string {
 // placeholders, and rewrites a numeric date header into the MIS form.
 func transformContent(doc Document, subs map[string]string) string {
 	content := rewriteNumericDateHeaders(doc.Content)
+	content = rewriteExam10dHeader(content)
 	content = rewriteHeadSignatureCaption(content)
 	content = rewriteSignaturePlaceholders(content)
+	content = forceCanonicalSignatures(content)
 	merged := mergeSubstitutions(doc, subs)
 	content = applySubstitutionsMap(content, merged)
-	content = strings.ReplaceAll(content, "[ДОЛЖНОСТЬ_ВРАЧА]", "")
 	content = tidySignatureCommas(content)
 	content = fixObviousTypos(content)
 	content = dropEmptySections(content)
-	return normalizeDailySpacing(content)
+	content = normalizeDailySpacing(content)
+	content = rewriteDailyForm(content)
+	return ensureExam10dCaseNo(content, caseNoFromContent(content, merged))
 }
 
 const doctorSignatureCaption = "Фамилия, имя, отчество (при наличии) врача, должность, специальность, подпись"
@@ -148,6 +151,67 @@ func rewriteHeadSignatureCaption(content string) string {
 var dailyDoctorFooterRE = regexp.MustCompile(`(?m)^Лечащий врач:?\s*\[ФИО_ВРАЧА\]\s*$`)
 
 const dailyDoctorLine = "Лечащий врач, [ДОЛЖНОСТЬ_ВРАЧА], [ФИО_ВРАЧА]"
+const phDoctorName = "[ФИО_ВРАЧА]"
+const phDoctorPos = "[ДОЛЖНОСТЬ_ВРАЧА]"
+const phHeadName = "[ФИО_ЗАВ_ОТДЕЛЕНИЕМ]"
+const phHeadPos = "[ДОЛЖНОСТЬ_ЗАВ_ОТДЕЛЕНИЕМ]"
+const phLU = "[ЛУ]"
+const exam10dDoctorLine = phDoctorName + ", " + phDoctorPos
+const exam10dHeadLine = phHeadName + ", " + phHeadPos + ", " + phLU
+const dailyPlaceholderSig = phDoctorPos + " " + phDoctorName
+
+func forceCanonicalSignatures(content string) string {
+	daily := isDailyExam(content)
+	lines := strings.Split(normalizeNewlines(content), "\n")
+	out := make([]string, 0, len(lines)+2)
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		switch line {
+		case doctorSignatureCaption:
+			i = skipFollowingSignatureValue(lines, i)
+			if daily {
+				out = append(out, dailyPlaceholderSig)
+			} else {
+				out = append(out, doctorSignatureCaption, exam10dDoctorLine)
+			}
+		case headSignatureCaption:
+			i = skipFollowingSignatureValue(lines, i)
+			out = append(out, headSignatureCaption, exam10dHeadLine)
+		default:
+			out = append(out, lines[i])
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func skipFollowingSignatureValue(lines []string, i int) int {
+	j := i + 1
+	for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
+		j++
+	}
+	if j < len(lines) && isFollowingSignatureValue(lines[j]) {
+		return j
+	}
+	return i
+}
+
+func isFollowingSignatureValue(raw string) bool {
+	line := strings.TrimSpace(raw)
+	if line == "" || line == doctorSignatureCaption || line == headSignatureCaption {
+		return false
+	}
+	if _, _, ok := splitKnownSection(line); ok {
+		return false
+	}
+	upper := strings.ToUpper(line)
+	if upper == "ОСМОТР" || strings.EqualFold(line, dailyExamTitle) || strings.HasPrefix(line, "ИБ") {
+		return false
+	}
+	if strings.HasPrefix(line, "Дата:") || isDateTimeLine(line) {
+		return false
+	}
+	return true
+}
 
 func rewriteSignaturePlaceholders(content string) string {
 	content = normalizeNewlines(content)
@@ -173,7 +237,7 @@ func tidySignatureCommas(content string) string {
 		for emptyCommaRE.MatchString(out) {
 			out = emptyCommaRE.ReplaceAllString(out, ",")
 		}
-		if !strings.Contains(out, ":") {
+		if !strings.Contains(out, ":") && !strings.Contains(out, "\t") {
 			out = strings.TrimSpace(strings.Trim(out, ","))
 			out = strings.Join(strings.Fields(out), " ")
 		}
@@ -182,70 +246,232 @@ func tidySignatureCommas(content string) string {
 	return strings.Join(lines, "\n")
 }
 
-func isDailyExam(content string) bool {
-	return strings.Contains(strings.ToUpper(content), "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ")
-}
+const dailyExamTitle = "Осмотр лечащим врачом"
+const exam10dCombinedHeader = "ОСМОТР лечащим врачом совместно с заведующим отделением"
+const exam10dSplitHeader = "ОСМОТР\nлечащим врачом совместно с заведующим отделением"
 
-func nextNonEmptyLine(lines []string, from int) string {
-	for i := from; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) != "" {
-			return lines[i]
+func isDailyExam(content string) bool {
+	for _, raw := range strings.Split(normalizeNewlines(content), "\n") {
+		line := strings.TrimSpace(raw)
+		upper := strings.ToUpper(line)
+		if upper == "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ" || strings.EqualFold(line, dailyExamTitle) {
+			return true
 		}
 	}
-	return ""
+	return false
 }
 
-func isDailyBlankAfterLabel(label string) bool {
-	switch strings.ToLower(strings.TrimSpace(label)) {
-	case "анамнез жизни (дополнения к анамнезу)", "неврологический статус":
-		return true
-	default:
-		return false
+func rewriteExam10dHeader(content string) string {
+	if isDailyExam(content) {
+		return content
 	}
+	return strings.ReplaceAll(content, exam10dCombinedHeader, exam10dSplitHeader)
 }
 
-// normalizeDailySpacing inserts the two MIS blank lines in the daily exam
-// and drops extra empty lines between other sections. exam_10d is unchanged.
+var officialDateLineRE = regexp.MustCompile(
+	`^«\s*(\d{1,2})\s*»\s+(\p{L}+)\s+(\d{4})\s+г\.(?:\s+время:)?\s+(\d{1,2})\s+час\.\s+(\d{1,2})\s*мин\.?$`,
+)
+
+var dailyDatePrefixRE = regexp.MustCompile(`(?i)^дата:\s*`)
+
+func monthFromGenitive(name string) int {
+	n := strings.ToLower(strings.TrimSpace(name))
+	for i, m := range ruMonthsGenitive {
+		if i > 0 && m == n {
+			return i
+		}
+	}
+	return 0
+}
+
+func formatDailyDateLine(day, month, year, hour, minute int) string {
+	return fmt.Sprintf("Дата: %02d.%02d.%04d %02d:%02d", day, month, year, hour, minute)
+}
+
+func rewriteDailyDateLine(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	body := dailyDatePrefixRE.ReplaceAllString(trimmed, "")
+	if m := officialDateLineRE.FindStringSubmatch(body); m != nil {
+		month := monthFromGenitive(m[2])
+		if month == 0 {
+			return "", false
+		}
+		var day, year, hour, minute int
+		fmt.Sscanf(m[1], "%d", &day)
+		fmt.Sscanf(m[3], "%d", &year)
+		fmt.Sscanf(m[4], "%d", &hour)
+		fmt.Sscanf(m[5], "%d", &minute)
+		return formatDailyDateLine(day, month, year, hour, minute), true
+	}
+	if m := numericDateTimeRE.FindStringSubmatch(body); m != nil {
+		var day, month, year, hour, minute int
+		fmt.Sscanf(m[1], "%d", &day)
+		fmt.Sscanf(m[2], "%d", &month)
+		fmt.Sscanf(m[3], "%d", &year)
+		fmt.Sscanf(m[4], "%d", &hour)
+		fmt.Sscanf(m[5], "%d", &minute)
+		return formatDailyDateLine(day, month, year, hour, minute), true
+	}
+	if dailyDatePrefixRE.MatchString(trimmed) {
+		return trimmed, true
+	}
+	return "", false
+}
+
+func splitPositionAndName(rest string) (pos, name string) {
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return "", ""
+	}
+	parts := strings.Split(rest, ", ")
+	if len(parts) >= 2 {
+		last := strings.TrimSpace(parts[len(parts)-1])
+		lower := strings.ToLower(last)
+		if !strings.Contains(lower, "врач") && len(strings.Fields(last)) >= 2 {
+			return strings.TrimSpace(strings.Join(parts[:len(parts)-1], ", ")), last
+		}
+	}
+	if strings.Contains(strings.ToLower(rest), "врач") {
+		return rest, ""
+	}
+	return "", rest
+}
+
+func rewriteDailyDoctorLine(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "Лечащий врач") {
+		return "", false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "Лечащий врач"))
+	rest = strings.TrimLeft(rest, ":,—–-")
+	rest = strings.TrimSpace(rest)
+	real := strings.ReplaceAll(rest, phDoctorPos, "")
+	real = strings.ReplaceAll(real, phDoctorName, "")
+	for strings.Contains(real, ",,") {
+		real = strings.ReplaceAll(real, ",,", ",")
+	}
+	real = strings.Trim(real, ",; \t")
+	pos, name := splitPositionAndName(real)
+	if pos == "" {
+		pos = phDoctorPos
+	}
+	if name == "" {
+		name = phDoctorName
+	}
+	return pos + " " + name, true
+}
+
+// rewriteDailyForm приводит ежедневный осмотр к бланку МИС с фото:
+// «Осмотр лечащим врачом», «Дата: ДД.ММ.ГГГГ ЧЧ:ММ», подпись должность + ФИО.
+func rewriteDailyForm(content string) string {
+	if !isDailyExam(content) {
+		return content
+	}
+	var out []string
+	for _, raw := range strings.Split(normalizeNewlines(content), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		upper := strings.ToUpper(line)
+		if strings.HasPrefix(line, "ИБ №") || strings.HasPrefix(upper, "ИБ N") {
+			continue
+		}
+		if upper == "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ" || strings.EqualFold(line, dailyExamTitle) {
+			out = append(out, dailyExamTitle)
+			continue
+		}
+		if line == doctorSignatureCaption {
+			continue
+		}
+		if rewritten, ok := rewriteDailyDateLine(line); ok {
+			out = append(out, rewritten)
+			continue
+		}
+		if rewritten, ok := rewriteDailyDoctorLine(line); ok {
+			out = append(out, rewritten)
+			continue
+		}
+		out = append(out, line)
+	}
+	for len(out) > 0 && out[0] == "" {
+		out = out[1:]
+	}
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return strings.Join(out, "\n")
+}
+
+func formatCaseNo(raw string) string {
+	s := strings.TrimSpace(raw)
+	s = strings.TrimPrefix(s, "ИБ №")
+	s = strings.TrimPrefix(s, "ИБ N")
+	s = strings.TrimSpace(s)
+	if s == "" || hasUnresolvedPlaceholder(s) {
+		return "ИБ №"
+	}
+	return "ИБ №" + s
+}
+
+func isCaseNoLine(line string) bool {
+	s := strings.TrimSpace(line)
+	upper := strings.ToUpper(s)
+	return strings.HasPrefix(s, "ИБ №") || strings.HasPrefix(upper, "ИБ N")
+}
+
+func caseNoFromContent(content string, subs map[string]string) string {
+	if subs != nil {
+		if v := formatCaseNo(subs["[НОМЕР_ИБ]"]); v != "ИБ №" {
+			return v
+		}
+	}
+	for _, raw := range strings.Split(normalizeNewlines(content), "\n") {
+		if isCaseNoLine(raw) && !hasUnresolvedPlaceholder(raw) {
+			return formatCaseNo(raw)
+		}
+	}
+	return "ИБ №"
+}
+
+// ensureExam10dCaseNo держит ИБ только в шапке текста, без [НОМЕР_ИБ] и без хвоста под осмотром.
+func ensureExam10dCaseNo(content, ib string) string {
+	if isDailyExam(content) {
+		return content
+	}
+	if !strings.Contains(content, "заведующим") && !strings.Contains(strings.ToUpper(content), "ОСМОТР") {
+		return content
+	}
+	lines := strings.Split(normalizeNewlines(content), "\n")
+	out := make([]string, 0, len(lines)+1)
+	saw := false
+	for _, raw := range lines {
+		if isCaseNoLine(raw) {
+			if !saw {
+				out = append(out, ib)
+				saw = true
+			}
+			continue
+		}
+		out = append(out, raw)
+	}
+	if !saw {
+		out = append([]string{ib}, out...)
+	}
+	return strings.Join(out, "\n")
+}
+
+// normalizeDailySpacing убирает пустые строки между разделами ежедневника.
 func normalizeDailySpacing(content string) string {
 	if !isDailyExam(content) {
 		return content
 	}
-	lines := strings.Split(normalizeNewlines(content), "\n")
-	compacted := make([]string, 0, len(lines))
-	for i, raw := range lines {
-		if strings.TrimSpace(raw) != "" {
-			compacted = append(compacted, raw)
+	var out []string
+	for _, raw := range strings.Split(normalizeNewlines(content), "\n") {
+		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		prev := ""
-		if n := len(compacted); n > 0 {
-			prev = compacted[n-1]
-		}
-		next := nextNonEmptyLine(lines, i+1)
-		if prev != "" && next != "" {
-			if _, _, prevSec := splitKnownSection(prev); prevSec {
-				if _, _, nextSec := splitKnownSection(next); nextSec {
-					continue
-				}
-			}
-		}
-		if len(compacted) > 0 && compacted[len(compacted)-1] == "" {
-			continue
-		}
-		compacted = append(compacted, "")
-	}
-
-	out := make([]string, 0, len(compacted)+2)
-	for i, line := range compacted {
-		out = append(out, line)
-		label, _, ok := splitKnownSection(line)
-		if !ok || !isDailyBlankAfterLabel(label) {
-			continue
-		}
-		if i+1 < len(compacted) && strings.TrimSpace(compacted[i+1]) == "" {
-			continue
-		}
-		out = append(out, "")
+		out = append(out, raw)
 	}
 	return strings.Join(out, "\n")
 }

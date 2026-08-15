@@ -27,17 +27,14 @@ func TestTransformDaily_KeepsTemplateLikeUI(t *testing.T) {
 
 	out := transformContent(doc, doc.Substitutions)
 
-	if !strings.Contains(out, "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ") {
-		t.Error("daily export must keep the same header as UI")
+	if !strings.Contains(out, "Осмотр лечащим врачом") {
+		t.Error("daily export must use the MIS daily header")
 	}
 	if !strings.Contains(out, "Психический статус:") {
 		t.Error("psychiatric section must keep its title")
 	}
-	if !strings.Contains(out, "«31» августа 2025 г.") {
-		t.Errorf("official date must be filled: %q", out)
-	}
-	if !strings.Contains(out, "время: 10 час. 00 мин.") {
-		t.Errorf("exam time must be 10 час. 00 мин., got: %q", out)
+	if !strings.Contains(out, "Дата: 31.08.2025 10:00") {
+		t.Errorf("daily date must be numeric: %q", out)
 	}
 	if strings.Contains(out, "14:30") {
 		t.Errorf("must not use generation clock: %q", out)
@@ -57,8 +54,8 @@ func TestTransformDaily_KeepsTemplateLikeUI(t *testing.T) {
 	if !strings.Contains(out, "F32.10") {
 		t.Error("diagnosis must stay")
 	}
-	if !strings.Contains(out, "ИБ №") {
-		t.Error("case-number line must stay like UI")
+	if strings.Contains(out, "ИБ №") {
+		t.Error("daily exam must not keep the case-number line")
 	}
 }
 
@@ -135,8 +132,8 @@ func TestTransformExam10d_MarkdownLabels(t *testing.T) {
 	if !strings.Contains(out, "отрицательной динамикой") {
 		t.Error("missing epicrisis body from markdown export")
 	}
-	if !strings.Contains(out, "ОСМОТР лечащим врачом совместно с заведующим отделением") {
-		t.Error("exam header must match UI, not a rebuilt corpus title")
+	if !strings.Contains(out, "ОСМОТР\nлечащим врачом совместно с заведующим отделением") {
+		t.Error("exam header must be split into title and subtitle")
 	}
 }
 
@@ -157,7 +154,10 @@ func TestTransformExam10d_StructuredHeader(t *testing.T) {
 	if !strings.Contains(out, "ИБ №12345") {
 		t.Errorf("case number = %q", out)
 	}
-	if !strings.Contains(out, "ОСМОТР лечащим врачом совместно с заведующим отделением") {
+	if strings.HasSuffix(strings.TrimSpace(out), "ИБ №12345") && strings.Count(out, "ИБ №12345") > 1 {
+		t.Errorf("case number must not be repeated under the exam: %q", out)
+	}
+	if !strings.Contains(out, "ОСМОТР\nлечащим врачом совместно с заведующим отделением") {
 		t.Errorf("title missing in %q", out)
 	}
 	if !strings.Contains(out, "«08» сентября 2025 г.") {
@@ -178,7 +178,7 @@ func TestBuildDocLines_DailyKeepsExamHeader(t *testing.T) {
 	foundTitle := false
 	foundStatus := false
 	for _, l := range lines {
-		if l.kind == kindTitle && strings.Contains(strings.ToUpper(l.text), "ОСМОТР") {
+		if l.kind == kindDailyTitle && strings.Contains(l.text, "Осмотр лечащим врачом") {
 			foundTitle = true
 		}
 		if l.kind == kindLabelValue && strings.Contains(l.label, "Психический статус") {
@@ -186,7 +186,7 @@ func TestBuildDocLines_DailyKeepsExamHeader(t *testing.T) {
 		}
 	}
 	if !foundTitle {
-		t.Error("daily export must keep ОСМОТР ЛЕЧАЩИМ ВРАЧОМ like UI")
+		t.Error("daily export must keep Осмотр лечащим врачом")
 	}
 	if !foundStatus {
 		t.Error("expected kindLabelValue for psychiatric status")
@@ -202,7 +202,7 @@ func TestTransformDaily_KeepsInterventionsLine(t *testing.T) {
 			"Выполнены медицинские вмешательства: осмотр врачом-психиатром детским.\n",
 	}
 	out := transformContent(doc, nil)
-	if !strings.Contains(out, "ОСМОТР ЛЕЧАЩИМ ВРАЧОМ") {
+	if !strings.Contains(out, "Осмотр лечащим врачом") {
 		t.Errorf("header must stay: %q", out)
 	}
 	if !strings.Contains(out, "вмешательства") {
@@ -219,8 +219,8 @@ func TestTransformDaily_RewritesNumericDateHeader(t *testing.T) {
 			"Психический статус: Сознание ясное.\n",
 	}
 	out := transformContent(doc, nil)
-	if !strings.Contains(out, "«13» августа 2026 г. время: 10 час. 45 мин.") {
-		t.Errorf("numeric header must become MIS date: %q", out)
+	if !strings.Contains(out, "Дата: 13.08.2026 10:45") {
+		t.Errorf("numeric header must become daily date: %q", out)
 	}
 	if strings.Contains(out, "13.08.2026 время: 10:45") {
 		t.Errorf("old numeric header must not remain: %q", out)
@@ -272,8 +272,8 @@ func TestDiaryStamp_PrefersTitleDateAndFixedTime(t *testing.T) {
 		GeneratedAt: time.Date(2026, 8, 13, 11, 0, 0, 0, time.UTC),
 		Content:     "[ДАТА] время: [ВРЕМЯ]\nЛечащий врач: [ФИО_ВРАЧА]",
 		Substitutions: map[string]string{
-			"[ДАТА]":     "13.08.2026",
-			"[ВРЕМЯ]":    "11:05",
+			"[ДАТА]":      "13.08.2026",
+			"[ВРЕМЯ]":     "11:05",
 			"[ФИО_ВРАЧА]": "Врач Т.",
 		},
 	}
@@ -333,17 +333,56 @@ func TestTransformDaily_SignatureOrderAndSpacing(t *testing.T) {
 		},
 	}
 	out := transformContent(doc, doc.Substitutions)
-	if !strings.Contains(out, "Лечащий врач, врач-психиатр детский, Иванов Иван Иванович") {
+	if !strings.Contains(out, "врач-психиатр детский Иванов Иван Иванович") {
 		t.Errorf("daily signature order: %q", out)
 	}
-	if strings.Contains(out, "Жалобы: не предъявляет\n\nАнамнез заболевания") {
-		t.Errorf("extra blank between unrelated sections: %q", out)
+	if strings.Contains(out, "\n\n") {
+		t.Errorf("daily must not keep blank lines between sections: %q", out)
 	}
-	if !strings.Contains(out, "Анамнез жизни (дополнения к анамнезу): без дополнений\n\nФизикальное") {
-		t.Errorf("blank after анамнез жизни: %q", out)
+}
+
+func TestTransformExam10d_UnresolvedCaseNoStaysBlankPrefix(t *testing.T) {
+	doc := Document{
+		DocumentTypeCode: "exam_10d",
+		GeneratedAt:      time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC),
+		Content: "ИБ №[НОМЕР_ИБ]\n" +
+			"ОСМОТР\n" +
+			"лечащим врачом совместно с заведующим отделением\n" +
+			"Жалобы: не предъявляет\n",
 	}
-	if !strings.Contains(out, "Неврологический статус: без острой неврологической симптоматики\n\nДиагноз:") {
-		t.Errorf("blank after неврологический статус: %q", out)
+	out := transformContent(doc, nil)
+	if strings.Contains(out, "[НОМЕР_ИБ]") {
+		t.Errorf("placeholder must not remain: %q", out)
+	}
+	if !strings.Contains(out, "ИБ №") {
+		t.Errorf("ИБ № must stay: %q", out)
+	}
+	if strings.HasSuffix(strings.TrimSpace(out), "ИБ №") && !strings.HasPrefix(strings.TrimSpace(out), "ИБ №") {
+		t.Errorf("ИБ № must not hang under the exam: %q", out)
+	}
+}
+
+func TestTransformExam10d_MissingSignaturesKeepPlaceholders(t *testing.T) {
+	doc := Document{
+		DocumentTypeCode: "exam_10d",
+		GeneratedAt:      time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC),
+		Content: "ОСМОТР\n" +
+			"лечащим врачом совместно с заведующим отделением\n" +
+			"Жалобы: не предъявляет\n" +
+			"Фамилия, имя, отчество (при наличии) врача, должность, специальность, подпись\n" +
+			"[ФИО_ВРАЧА]\n" +
+			"Фамилия, имя, отчество (при наличии) заведующего отделением, подпись\n" +
+			"[ФИО_ЗАВ_ОТДЕЛЕНИЕМ]",
+	}
+	out := transformContent(doc, nil)
+	if !strings.Contains(out, "[ФИО_ВРАЧА]") || !strings.Contains(out, "[ДОЛЖНОСТЬ_ВРАЧА]") {
+		t.Errorf("doctor placeholders must stay: %q", out)
+	}
+	if !strings.Contains(out, "[ФИО_ЗАВ_ОТДЕЛЕНИЕМ], [ДОЛЖНОСТЬ_ЗАВ_ОТДЕЛЕНИЕМ], [ЛУ]") {
+		t.Errorf("head placeholders must stay: %q", out)
+	}
+	if strings.Contains(out, "____") {
+		t.Errorf("unresolved signatures must not become underscores: %q", out)
 	}
 }
 

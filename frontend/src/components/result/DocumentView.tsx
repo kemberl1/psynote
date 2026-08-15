@@ -38,6 +38,9 @@ function renderDiaryContent(text: string): ReactNode[] {
     if (run.kind === "bold") {
       return <strong key={i}>{run.text}</strong>;
     }
+    if (run.kind === "underline") {
+      return <u key={i}>{run.text}</u>;
+    }
     return <Fragment key={i}>{run.text}</Fragment>;
   });
 }
