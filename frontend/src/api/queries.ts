@@ -4,6 +4,7 @@ import {
     useMutation,
     useQuery,
     useQueryClient,
+    type QueryKey,
     type UseQueryResult,
 } from "@tanstack/react-query";
 import {
@@ -168,16 +169,21 @@ function applyTitlePatch(old: unknown, id: string, title: string): unknown {
   return old;
 }
 
+type PatchRequestContext = {
+  snapshots: Array<readonly [QueryKey, unknown]>;
+};
+
 export function usePatchRequest() {
   const qc = useQueryClient();
   return useMutation<
     { request_id: string; title_safe: string; status: string },
     unknown,
-    { id: string; body: PatchRequestBody }
+    { id: string; body: PatchRequestBody },
+    PatchRequestContext
   >({
     mutationFn: ({ id, body }) => patchRequest(id, body),
     onMutate: async ({ id, body }) => {
-      if (!body.title_safe) return { snapshots: [] as [unknown, unknown][] };
+      if (!body.title_safe) return { snapshots: [] };
       await qc.cancelQueries({ queryKey: ["requests"] });
       const snapshots = qc.getQueriesData({ queryKey: ["requests"] });
       qc.setQueriesData({ queryKey: ["requests"] }, (old) =>
@@ -186,7 +192,7 @@ export function usePatchRequest() {
       return { snapshots };
     },
     onError: (_err, _vars, ctx) => {
-      ctx?.snapshots?.forEach(([key, data]) => {
+      ctx?.snapshots.forEach(([key, data]) => {
         qc.setQueryData(key, data);
       });
     },
