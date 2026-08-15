@@ -203,11 +203,14 @@
   border-radius: 50%;
   background: var(--text-tertiary);
 }
-.history-item__delete {
+.history-item__actions {
+  display: flex;
   flex-shrink: 0;
+  margin: 6px 4px 0 0;
+}
+.history-item__icon {
   width: 28px;
   height: 28px;
-  margin: 6px 4px 0 0;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -215,21 +218,45 @@
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   opacity: 0;
   transition: opacity var(--transition), background var(--transition), color var(--transition);
 }
-.history-item:hover .history-item__delete,
-.history-item--active .history-item__delete,
-.history-item__delete:focus-visible {
+.history-item:hover .history-item__icon,
+.history-item--active .history-item__icon,
+.history-item--editing .history-item__icon,
+.history-item__icon:focus-visible {
   opacity: 1;
 }
-.history-item__delete:hover {
+.history-item__icon:hover {
   background: var(--surface);
   color: var(--text);
 }
-.history-item__delete:disabled {
+.history-item__icon:disabled {
   opacity: 0.4;
   cursor: wait;
+}
+.history-item__edit-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+}
+.history-item__edit-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.editable-title__form {
+  min-width: 0;
+  width: 100%;
 }
 
 /* ─── Main / рабочая область ─────────────────────────────────────────────── */
@@ -268,5 +295,8 @@
   }
   .topbar__tag {
     display: none;
+  }
+  .history-item__icon {
+    opacity: 1;
   }
 }

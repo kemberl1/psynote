@@ -7,17 +7,18 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "../../api/errors";
 import type {
-  AnonymizationSummary,
-  DocumentType,
-  ExportFormat,
+    AnonymizationSummary,
+    DocumentType,
+    ExportFormat,
 } from "../../api/types";
+import { useAuth } from "../../auth/AuthContext";
 import { copyText } from "../../lib/clipboard";
 import { downloadExport } from "../../lib/download";
 import { buildExportSubstitutions, prepareDiaryPreview } from "../../lib/exportSubstitutions";
 import { documentTypeLabel, formatDateTime, statusLabel } from "../../lib/format";
-import { useAuth } from "../../auth/AuthContext";
-import { Badge, Button } from "../ui";
 import { GenerationFeedback } from "../feedback/GenerationFeedback";
+import { EditableTitle, TitleEditButton } from "../history/EditableTitle";
+import { Badge, Button } from "../ui";
 import { AnonymizationNotice } from "./AnonymizationNotice";
 import { DocumentView } from "./DocumentView";
 import "./result.css";
@@ -35,6 +36,8 @@ interface GenerationResultProps {
   anonymization?: AnonymizationSummary;
   /** Открыть форму с исходными данными для повторной генерации. */
   onEdit?: () => void;
+  onRename?: (title: string) => void;
+  renaming?: boolean;
 }
 
 export function GenerationResult({
@@ -48,9 +51,12 @@ export function GenerationResult({
   createdAt,
   anonymization,
   onEdit,
+  onRename,
+  renaming,
 }: GenerationResultProps) {
   const { doctor } = useAuth();
   const [toast, setToast] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
   // Какой формат сейчас экспортируется (для лоадера на конкретной кнопке).
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
 
@@ -99,7 +105,31 @@ export function GenerationResult({
   return (
     <div className="result">
       <div className="result__header">
-        <h2>{title ?? documentTypeLabel(documentType, documentTypes)}</h2>
+        <div className="result__title-row">
+          {onRename && title ? (
+            <>
+              <EditableTitle
+                as="h2"
+                className="result__title"
+                inputClassName="result__title-input"
+                value={title}
+                editing={editingTitle}
+                onEditingChange={setEditingTitle}
+                onSave={onRename}
+                saving={renaming}
+              />
+              {!editingTitle && (
+                <TitleEditButton
+                  className="title-edit-btn"
+                  disabled={renaming}
+                  onClick={() => setEditingTitle(true)}
+                />
+              )}
+            </>
+          ) : (
+            <h2>{title ?? documentTypeLabel(documentType, documentTypes)}</h2>
+          )}
+        </div>
         <div className="result__meta">
           <Badge tone="accent">
             {documentTypeLabel(documentType, documentTypes)}

@@ -260,7 +260,7 @@ func defaultPendingTitle(docType string) string {
 	case "exam_10d":
 		return "Осмотр (раз в 10 дней) · Формируется…"
 	case "batch":
-		return "Пакет дневников · Формируется…"
+		return "Период дневников · Формируется…"
 	default:
 		return "Ежедневный дневник · Формируется…"
 	}

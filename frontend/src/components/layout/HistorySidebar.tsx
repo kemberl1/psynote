@@ -4,14 +4,16 @@
 import { useMemo, useState, type MouseEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { friendlyError } from "../../api/errors";
-import { useDeleteRequest, useHistory } from "../../api/queries";
+import { useDeleteRequest, useHistory, usePatchRequest } from "../../api/queries";
 import type { HistoryItem } from "../../api/types";
 import {
-  documentTypeLabel,
-  formatDateShort,
-  isPendingStatus,
-  statusLabel,
+    documentTypeLabel,
+    formatDateTimeShort,
+    isPendingStatus,
+    statusLabel,
 } from "../../lib/format";
+import { displayHistoryTitle } from "../../lib/historyTitles";
+import { EditableTitle, TitleEditButton } from "../history/EditableTitle";
 import { Badge, Banner, Button, EmptyState, Skeleton } from "../ui";
 
 export function HistorySidebar() {
@@ -20,6 +22,7 @@ export function HistorySidebar() {
   const [search, setSearch] = useState("");
   const { data, isPending, isError, error, refetch } = useHistory();
   const deleteMutation = useDeleteRequest();
+  const patchMutation = usePatchRequest();
 
   const items = data?.items ?? [];
   const filtered = useMemo(() => {
@@ -27,7 +30,7 @@ export function HistorySidebar() {
     if (!q) return items;
     return items.filter(
       (it) =>
-        it.title_safe.toLowerCase().includes(q) ||
+        displayHistoryTitle(it.title_safe).toLowerCase().includes(q) ||
         documentTypeLabel(it.document_type).toLowerCase().includes(q),
     );
   }, [items, search]);
@@ -37,7 +40,7 @@ export function HistorySidebar() {
     if (deleteMutation.isPending) return;
     const label =
       item.document_type === "batch"
-        ? "Удалить весь пакет дневников из истории?"
+        ? "Удалить все дневники за этот период из истории?"
         : "Удалить запись из истории?";
     if (!window.confirm(label)) return;
     deleteMutation.mutate(item.request_id, {
@@ -109,8 +112,18 @@ export function HistorySidebar() {
               deleteMutation.isPending &&
               deleteMutation.variables === item.request_id
             }
+            renaming={
+              patchMutation.isPending &&
+              patchMutation.variables?.id === item.request_id
+            }
             onClick={() => navigate(`/requests/${item.request_id}`)}
             onDelete={(e) => handleDelete(item, e)}
+            onRename={(title) =>
+              patchMutation.mutate({
+                id: item.request_id,
+                body: { title_safe: title },
+              })
+            }
           />
         ))}
       </div>
@@ -122,58 +135,92 @@ function HistoryRow({
   item,
   active,
   deleting,
+  renaming,
   onClick,
   onDelete,
+  onRename,
 }: {
   item: HistoryItem;
   active: boolean;
   deleting: boolean;
+  renaming: boolean;
   onClick: () => void;
   onDelete: (e: MouseEvent) => void;
+  onRename: (title: string) => void;
 }) {
+  const [editing, setEditing] = useState(false);
   const pending = isPendingStatus(item.status);
+  const title = displayHistoryTitle(item.title_safe);
   const typeLabel =
     item.document_type === "batch"
       ? item.children_count
-        ? `Пакет · ${item.children_count} дн.`
-        : "Пакет дневников"
+        ? `Период · ${item.children_count} дн.`
+        : "Период дневников"
       : documentTypeLabel(item.document_type);
 
   return (
     <div
       className={`history-item${active ? " history-item--active" : ""}${
         pending ? " history-item--pending" : ""
-      }`}
+      }${editing ? " history-item--editing" : ""}`}
     >
-      <button
-        type="button"
-        className="history-item__main"
-        onClick={onClick}
-        aria-current={active ? "true" : undefined}
-      >
-        <span className="history-item__title">{item.title_safe}</span>
-        <span className="history-item__meta">
-          <Badge tone={pending ? "accent" : "default"}>{typeLabel}</Badge>
-          {pending && (
-            <>
-              <span className="history-item__dot" aria-hidden="true" />
-              <span className="history-item__status">{statusLabel(item.status)}</span>
-            </>
-          )}
-          <span className="history-item__dot" aria-hidden="true" />
-          <span>{formatDateShort(item.created_at)}</span>
-        </span>
-      </button>
-      <button
-        type="button"
-        className="history-item__delete"
-        onClick={onDelete}
-        disabled={deleting}
-        aria-label="Удалить из истории"
-        title="Удалить"
-      >
-        ×
-      </button>
+      {editing ? (
+        <div className="history-item__main">
+          <EditableTitle
+            value={title}
+            editing
+            onEditingChange={setEditing}
+            onSave={onRename}
+            saving={renaming}
+            className="history-item__title"
+            inputClassName="history-item__edit-input"
+          />
+          <span className="history-item__meta">
+            <Badge tone={pending ? "accent" : "default"}>{typeLabel}</Badge>
+            <span className="history-item__dot" aria-hidden="true" />
+            <span>{formatDateTimeShort(item.created_at)}</span>
+          </span>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="history-item__main"
+          onClick={onClick}
+          aria-current={active ? "true" : undefined}
+        >
+          <span className="history-item__title">{title}</span>
+          <span className="history-item__meta">
+            <Badge tone={pending ? "accent" : "default"}>{typeLabel}</Badge>
+            {pending && (
+              <>
+                <span className="history-item__dot" aria-hidden="true" />
+                <span className="history-item__status">{statusLabel(item.status)}</span>
+              </>
+            )}
+            <span className="history-item__dot" aria-hidden="true" />
+            <span>{formatDateTimeShort(item.created_at)}</span>
+          </span>
+        </button>
+      )}
+      <div className="history-item__actions">
+        {!editing && (
+          <TitleEditButton
+            className="history-item__icon"
+            disabled={renaming || deleting}
+            onClick={() => setEditing(true)}
+          />
+        )}
+        <button
+          type="button"
+          className="history-item__icon"
+          onClick={onDelete}
+          disabled={deleting}
+          aria-label="Удалить из истории"
+          title="Удалить"
+        >
+          ×
+        </button>
+      </div>
     </div>
   );
 }

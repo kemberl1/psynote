@@ -8,7 +8,7 @@
 INSERT INTO document_type (code, title, description, is_active, sort_order) VALUES
     ('daily',    'Ежедневный осмотр',      'Ежедневная запись психического статуса', TRUE, 1),
     ('exam_10d', 'Осмотр за 10 дней',      'Расширенный осмотр со структурными секциями', TRUE, 2),
-    ('batch',    'Пакет дневников',        'Агрегированная генерация за период', TRUE, 3)
+    ('batch',    'Период дневников',       'Агрегированная генерация за период', TRUE, 3)
 ON CONFLICT (code) DO NOTHING;
 
 -- TODO(этап 8): доп. типы — primary_exam, anamnesis, discharge_epicrisis (docs/05 §2.2).

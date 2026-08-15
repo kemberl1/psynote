@@ -1,38 +1,44 @@
 // RequestDetailPage (/requests/:id) — просмотр результата из истории.
 // Пакет: одна запись + раскрываемый список дней. Pending: «Формируется…».
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "../auth/AuthContext";
 import { ApiError, friendlyError } from "../api/errors";
 import {
-  useDeleteRequest,
-  useDocumentTypes,
-  useRequestDetail,
+    useDeleteRequest,
+    useDocumentTypes,
+    usePatchRequest,
+    useRequestDetail,
 } from "../api/queries";
 import type { ExportFormat, HistoryChild } from "../api/types";
+import { useAuth } from "../auth/AuthContext";
 import { GenerationFeedback } from "../components/feedback/GenerationFeedback";
-import { GenerationResult } from "../components/result/GenerationResult";
+import { EditableTitle, TitleEditButton } from "../components/history/EditableTitle";
 import { DocumentView } from "../components/result/DocumentView";
-import { Banner, Badge, Button, Skeleton, Spinner } from "../components/ui";
+import { GenerationResult } from "../components/result/GenerationResult";
+import "../components/result/result.css";
+import { Badge, Banner, Button, Skeleton, Spinner } from "../components/ui";
 import { downloadBatchExport, downloadExport } from "../lib/download";
 import { buildExportSubstitutions } from "../lib/exportSubstitutions";
 import {
-  documentTypeLabel,
-  isPendingStatus,
-  statusLabel,
+    documentTypeLabel,
+    formatDateTime,
+    isPendingStatus,
+    statusLabel,
 } from "../lib/format";
 import {
-  isGenerationRunning,
-  resumeBatchGeneration,
-  startSingleGeneration,
+    isGenerationRunning,
+    resumeBatchGeneration,
+    startSingleGeneration,
 } from "../lib/generationRunner";
 import {
-  type EditDiaryState,
-  unpackBatchMeta,
+    displayHistoryTitle,
+    isAutoBatchTitle,
+    stripTitleStatus,
+    unpackBatchMeta,
+    type EditDiaryState,
 } from "../lib/historyTitles";
 import "./pages.css";
-import "../components/result/result.css";
 
 export function RequestDetailPage() {
   const { id } = useParams();
@@ -42,6 +48,8 @@ export function RequestDetailPage() {
   const docTypesQuery = useDocumentTypes();
   const { data, isPending, isError, error, refetch } = useRequestDetail(id);
   const deleteMutation = useDeleteRequest();
+  const patchMutation = usePatchRequest();
+  const [editingTitle, setEditingTitle] = useState(false);
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [resuming, setResuming] = useState(false);
@@ -57,11 +65,15 @@ export function RequestDetailPage() {
     if (!data) return;
     if (data.document_type === "batch") {
       const { answers, meta } = unpackBatchMeta(data.answers_anonymized);
+      const shown = stripTitleStatus(displayHistoryTitle(data.title_safe));
       const state: EditDiaryState = {
         requestId: data.request_id,
         documentType: "batch",
         answers,
         batchMeta: meta ?? undefined,
+        sessionTitle: isAutoBatchTitle(data.title_safe)
+          ? (meta?.session_title ?? "")
+          : shown,
       };
       navigate("/diary/batch", { state });
       return;
@@ -78,7 +90,7 @@ export function RequestDetailPage() {
     if (!data) return;
     const label =
       data.document_type === "batch"
-        ? "Удалить весь пакет дневников из истории?"
+        ? "Удалить все дневники за этот период из истории?"
         : "Удалить запись из истории?";
     if (!window.confirm(label)) return;
     deleteMutation.mutate(data.request_id, {
@@ -125,6 +137,14 @@ export function RequestDetailPage() {
   const jobAlive = Boolean(id && isGenerationRunning(id) && jobTick >= 0);
   const isBatch = data?.document_type === "batch";
   const children = data?.children ?? [];
+  const sessionTitle = data ? displayHistoryTitle(data.title_safe) : "";
+  const renameSession = (title: string) => {
+    if (!data) return;
+    patchMutation.mutate({
+      id: data.request_id,
+      body: { title_safe: title },
+    });
+  };
 
   return (
     <>
@@ -158,7 +178,25 @@ export function RequestDetailPage() {
           <div className="generating-inline">
             <div className="generating-inline__row">
               <Spinner size="lg" />
-              <div className="generating-inline__title">{data.title_safe}</div>
+              <div className="generating-inline__title-wrap">
+                <EditableTitle
+                  as="div"
+                  className="generating-inline__title"
+                  inputClassName="generating-inline__title-input"
+                  value={sessionTitle}
+                  editing={editingTitle}
+                  onEditingChange={setEditingTitle}
+                  onSave={renameSession}
+                  saving={patchMutation.isPending}
+                />
+                {!editingTitle && (
+                  <TitleEditButton
+                    className="title-edit-btn"
+                    disabled={patchMutation.isPending}
+                    onClick={() => setEditingTitle(true)}
+                  />
+                )}
+              </div>
             </div>
             <div className="generating-inline__hint">
               {jobAlive
@@ -200,11 +238,30 @@ export function RequestDetailPage() {
       {data && !pending && isBatch && (
         <div className="result">
           <div className="result__header">
-            <h2>{data.title_safe}</h2>
+            <div className="result__title-row">
+              <EditableTitle
+                as="h2"
+                className="result__title"
+                inputClassName="result__title-input"
+                value={sessionTitle}
+                editing={editingTitle}
+                onEditingChange={setEditingTitle}
+                onSave={renameSession}
+                saving={patchMutation.isPending}
+              />
+              {!editingTitle && (
+                <TitleEditButton
+                  className="title-edit-btn"
+                  disabled={patchMutation.isPending}
+                  onClick={() => setEditingTitle(true)}
+                />
+              )}
+            </div>
             <div className="result__meta">
-              <Badge tone="accent">Пакет дневников</Badge>
+              <Badge tone="accent">Период дневников</Badge>
               <Badge tone="success">{statusLabel(data.status)}</Badge>
               <span>{children.length} дней</span>
+              <span>{formatDateTime(data.created_at)}</span>
             </div>
           </div>
 
@@ -246,7 +303,9 @@ export function RequestDetailPage() {
         <>
           <GenerationResult
             requestId={data.request_id}
-            title={data.title_safe}
+            title={sessionTitle}
+            onRename={renameSession}
+            renaming={patchMutation.isPending}
             documentType={data.document_type}
             documentTypes={docTypesQuery.data}
             content={data.content}
@@ -314,7 +373,7 @@ function BatchDaysList({ children }: { children: HistoryChild[] }) {
   };
 
   return (
-    <div className="batch-days" aria-label="Дни пакета">
+    <div className="batch-days" aria-label="Дни периода">
       {sorted.map((child) => {
         const expanded = Boolean(open[child.request_id]);
         const childPending = isPendingStatus(child.status);

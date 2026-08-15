@@ -46,6 +46,17 @@
   color: var(--text);
 }
 
+.batch-session-name {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+.batch-session-name__label {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
 /* Пакетная генерация — даты и превью */
 .batch-dates {
   display: grid;
@@ -384,9 +395,32 @@
   align-items: center;
   gap: var(--space-3);
 }
+.generating-inline__title-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1;
+}
 .generating-inline__title {
   font-size: var(--fs-lg);
   font-weight: 600;
+}
+.generating-inline__title-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+}
+.generating-inline__title-input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 .generating-inline__hint {
   font-size: var(--fs-sm);

@@ -16,7 +16,7 @@ import {
 } from "../lib/batchDiary";
 import { BATCH_QUESTIONNAIRE } from "../lib/batchQuestionnaire";
 import { startBatchGeneration } from "../lib/generationRunner";
-import type { EditDiaryState } from "../lib/historyTitles";
+import { batchAutoTitle, type EditDiaryState } from "../lib/historyTitles";
 import {
   buildDefaults,
   computeProgress,
@@ -46,6 +46,9 @@ export function BatchDiaryPage() {
   );
   const [directorContext, setDirectorContext] = useState(
     editState?.batchMeta?.director_context ?? "",
+  );
+  const [sessionTitle, setSessionTitle] = useState(
+    editState?.sessionTitle ?? editState?.batchMeta?.session_title ?? "",
   );
   const [replaceRequestId, setReplaceRequestId] = useState<string | undefined>(
     editState?.documentType === "batch" ? editState.requestId : undefined,
@@ -169,6 +172,7 @@ export function BatchDiaryPage() {
           date_to: dateTo,
           estimated_discharge: estimatedDischargeDate,
           director_context: directorContext,
+          session_title: sessionTitle.trim(),
         },
         narrativeAnswers: payload,
         days,
@@ -187,7 +191,7 @@ export function BatchDiaryPage() {
       <div className="page-head">
         <h1 className="page-head__title">
           {replaceRequestId
-            ? "Редактирование пакета"
+            ? "Редактирование периода"
             : "Сформировать дневники за выбранный период"}
         </h1>
         <p className="page-head__subtitle">
@@ -208,6 +212,28 @@ export function BatchDiaryPage() {
 
       <div className="section">
         <span className="section__label">Период и поступление</span>
+        <label className="batch-session-name">
+          <span className="batch-session-name__label">
+            Название в истории{" "}
+            <span className="field__optional">необязательно</span>
+          </span>
+          <input
+            className="field__input"
+            type="text"
+            maxLength={160}
+            value={sessionTitle}
+            onChange={(e) => setSessionTitle(e.target.value)}
+            placeholder={
+              planPreview
+                ? batchAutoTitle(dateFrom, dateTo, planPreview.days.length)
+                : "Например: Иванов, июль 2026"
+            }
+          />
+          <span className="field__help">
+            Так запись появится в истории. Если оставить пустым — подставим
+            период дат.
+          </span>
+        </label>
         <div className="batch-dates">
           <DateField
             id="admission"
@@ -308,7 +334,7 @@ export function BatchDiaryPage() {
             loading={starting}
             onClick={() => void handleGenerate()}
           >
-            {replaceRequestId ? "Сгенерировать пакет заново" : "Сгенерировать пакет"}
+            {replaceRequestId ? "Сгенерировать дневники заново" : "Сгенерировать дневники"}
           </Button>
         </div>
       )}

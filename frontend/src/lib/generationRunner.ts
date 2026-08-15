@@ -1,17 +1,20 @@
 // Фоновые задачи генерации: запись уже в истории со статусом pending,
 // пользователь может уйти на другой экран — задача доживёт до конца.
 import type { QueryClient } from "@tanstack/react-query";
-import { createPending, generate, patchRequest } from "../api/endpoints";
+import { createPending, fetchRequestDetail, generate, patchRequest } from "../api/endpoints";
 import type { Answers, GenerateRequest, HistoryChild, HistoryDetail } from "../api/types";
 import { rebuildBatchDayJobs } from "./batchDiary";
 import { formatDiaryDate } from "./format";
 import {
-  batchDayTitle,
-  batchDoneTitle,
-  batchPendingTitle,
-  packBatchAnswers,
-  pendingTitle,
-  type BatchMeta,
+    batchDayTitle,
+    batchSessionTitle,
+    displayHistoryTitle,
+    isAutoBatchTitle,
+    packBatchAnswers,
+    pendingTitle,
+    stripTitleStatus,
+    withPendingSuffix,
+    type BatchMeta,
 } from "./historyTitles";
 
 const running = new Set<string>();
@@ -84,6 +87,32 @@ function documentTypeShort(documentType: string): string {
   return pendingTitle(documentType).replace(" · Формируется…", "");
 }
 
+function customOrAutoTitle(meta: BatchMeta, dayCount: number, currentTitle?: string): string {
+  const custom = meta.session_title?.trim();
+  if (custom) return custom;
+  if (currentTitle && !isAutoBatchTitle(currentTitle)) {
+    return stripTitleStatus(currentTitle);
+  }
+  return batchSessionTitle(meta.date_from, meta.date_to, dayCount);
+}
+
+async function finalizeParentTitle(
+  parentId: string,
+  fallback: string,
+  failed: number,
+): Promise<string> {
+  let base = fallback;
+  try {
+    const detail = await fetchRequestDetail(parentId);
+    const current = stripTitleStatus(displayHistoryTitle(detail.title_safe));
+    if (current) base = current;
+  } catch {
+    /* оставляем fallback */
+  }
+  if (failed > 0) return `${base} · ошибок: ${failed}`;
+  return base;
+}
+
 export interface BatchDayJob {
   dayNumber: number;
   isoDate: string;
@@ -100,11 +129,7 @@ export async function startBatchGeneration(opts: {
   replaceRequestId?: string;
 }): Promise<string> {
   const dayCount = opts.days.length;
-  const titlePending = batchPendingTitle(
-    opts.meta.date_from,
-    opts.meta.date_to,
-    dayCount,
-  );
+  const titlePending = withPendingSuffix(customOrAutoTitle(opts.meta, dayCount));
   const packed = packBatchAnswers(opts.narrativeAnswers, opts.meta);
 
   let parentId = opts.replaceRequestId;
@@ -158,22 +183,17 @@ export async function startBatchGeneration(opts: {
         invalidateAll(opts.qc, parent);
       }
 
-      const doneTitle = batchDoneTitle(
-        opts.meta.date_from,
-        opts.meta.date_to,
-        dayCount,
-      );
+      const fallback = customOrAutoTitle(opts.meta, dayCount);
       await patchRequest(parent, {
         status: failed === dayCount ? "failed" : "done",
-        title_safe:
-          failed > 0 ? `${doneTitle} · ошибок: ${failed}` : doneTitle,
+        title_safe: await finalizeParentTitle(parent, fallback, failed),
         answers_anonymized: packed,
       });
     } catch {
       try {
         await patchRequest(parent, {
           status: "failed",
-          title_safe: `${batchDoneTitle(opts.meta.date_from, opts.meta.date_to, dayCount)} · Ошибка`,
+          title_safe: `${customOrAutoTitle(opts.meta, dayCount)} · Ошибка`,
         });
       } catch {
         /* ignore */
@@ -212,10 +232,8 @@ export async function resumeBatchGeneration(opts: {
 
   await patchRequest(parent, {
     status: "pending",
-    title_safe: batchPendingTitle(
-      rebuilt.meta.date_from,
-      rebuilt.meta.date_to,
-      dayCount,
+    title_safe: withPendingSuffix(
+      customOrAutoTitle(rebuilt.meta, dayCount, opts.detail.title_safe),
     ),
     answers_anonymized: packed,
   });
@@ -263,21 +281,21 @@ export async function resumeBatchGeneration(opts: {
         invalidateAll(opts.qc, parent);
       }
 
-      const doneTitle = batchDoneTitle(
-        rebuilt.meta.date_from,
-        rebuilt.meta.date_to,
+      const fallback = customOrAutoTitle(
+        rebuilt.meta,
         dayCount,
+        opts.detail.title_safe,
       );
       await patchRequest(parent, {
         status: failed === dayCount ? "failed" : "done",
-        title_safe: failed > 0 ? `${doneTitle} · ошибок: ${failed}` : doneTitle,
+        title_safe: await finalizeParentTitle(parent, fallback, failed),
         answers_anonymized: packed,
       });
     } catch {
       try {
         await patchRequest(parent, {
           status: "failed",
-          title_safe: `${batchDoneTitle(rebuilt.meta.date_from, rebuilt.meta.date_to, dayCount)} · Ошибка`,
+          title_safe: `${customOrAutoTitle(rebuilt.meta, dayCount, opts.detail.title_safe)} · Ошибка`,
         });
       } catch {
         /* ignore */

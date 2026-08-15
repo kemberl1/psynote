@@ -151,6 +151,23 @@ export function useCreatePending() {
   });
 }
 
+function applyTitlePatch(old: unknown, id: string, title: string): unknown {
+  if (!old || typeof old !== "object") return old;
+  if ("items" in old && Array.isArray((old as HistoryListResult).items)) {
+    const list = old as HistoryListResult;
+    return {
+      ...list,
+      items: list.items.map((it) =>
+        it.request_id === id ? { ...it, title_safe: title } : it,
+      ),
+    };
+  }
+  if ("request_id" in old && (old as HistoryDetail).request_id === id) {
+    return { ...(old as HistoryDetail), title_safe: title };
+  }
+  return old;
+}
+
 export function usePatchRequest() {
   const qc = useQueryClient();
   return useMutation<
@@ -159,10 +176,24 @@ export function usePatchRequest() {
     { id: string; body: PatchRequestBody }
   >({
     mutationFn: ({ id, body }) => patchRequest(id, body),
-    onSuccess: (data) => {
+    onMutate: async ({ id, body }) => {
+      if (!body.title_safe) return { snapshots: [] as [unknown, unknown][] };
+      await qc.cancelQueries({ queryKey: ["requests"] });
+      const snapshots = qc.getQueriesData({ queryKey: ["requests"] });
+      qc.setQueriesData({ queryKey: ["requests"] }, (old) =>
+        applyTitlePatch(old, id, body.title_safe!),
+      );
+      return { snapshots };
+    },
+    onError: (_err, _vars, ctx) => {
+      ctx?.snapshots?.forEach(([key, data]) => {
+        qc.setQueryData(key, data);
+      });
+    },
+    onSettled: (_data, _err, vars) => {
       invalidateHistory(qc);
       void qc.invalidateQueries({
-        queryKey: queryKeys.requestDetail(data.request_id),
+        queryKey: queryKeys.requestDetail(vars.id),
       });
     },
   });

@@ -5,7 +5,7 @@ import type { DocumentType } from "../api/types";
 const DOC_TYPE_LABELS: Record<string, string> = {
   daily: "Ежедневный осмотр",
   exam_10d: "Осмотр за 10 дней",
-  batch: "Пакет дневников",
+  batch: "Период дневников",
 };
 
 /** Возвращает заголовок типа документа по коду. */
@@ -18,6 +18,7 @@ export function documentTypeLabel(
     // Каталог может ещё отдавать старые длинные названия — нормализуем.
     if (code === "daily") return "Ежедневный осмотр";
     if (code === "exam_10d") return "Осмотр за 10 дней";
+    if (code === "batch") return "Период дневников";
     return found.title;
   }
   return DOC_TYPE_LABELS[code] ?? code;
@@ -94,6 +95,21 @@ export function formatDateShort(iso: string): string {
     day: "numeric",
     month: "short",
   });
+}
+
+/** Дата и локальное время генерации: «14 авг., 17:42». ISO из API — UTC. */
+export function formatDateTimeShort(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const date = d.toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "short",
+  });
+  const time = d.toLocaleTimeString("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${date}, ${time}`;
 }
 
 /** YYYY-MM-DD → ДД.ММ.ГГГГ (для подписей пакетных дней). */

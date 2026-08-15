@@ -10,18 +10,38 @@ export interface BatchMeta {
   date_to: string;
   estimated_discharge?: string;
   director_context?: string;
+  /** Пользовательское название сессии в истории. */
+  session_title?: string;
 }
 
 export function pendingTitle(documentType: string): string {
   return `${documentTypeLabel(documentType)} · Формируется…`;
 }
 
+export function batchAutoTitle(dateFrom: string, dateTo: string, dayCount: number): string {
+  return `Период · ${formatDiaryDate(dateFrom)}–${formatDiaryDate(dateTo)} (${dayCount} дн.)`;
+}
+
+export function batchSessionTitle(
+  dateFrom: string,
+  dateTo: string,
+  dayCount: number,
+  custom?: string,
+): string {
+  const name = custom?.trim();
+  return name || batchAutoTitle(dateFrom, dateTo, dayCount);
+}
+
+export function withPendingSuffix(title: string): string {
+  return `${stripTitleStatus(title)} · Формируется…`;
+}
+
 export function batchPendingTitle(dateFrom: string, dateTo: string, dayCount: number): string {
-  return `Пакет · ${formatDiaryDate(dateFrom)}–${formatDiaryDate(dateTo)} (${dayCount} дн.) · Формируется…`;
+  return withPendingSuffix(batchAutoTitle(dateFrom, dateTo, dayCount));
 }
 
 export function batchDoneTitle(dateFrom: string, dateTo: string, dayCount: number): string {
-  return `Пакет · ${formatDiaryDate(dateFrom)}–${formatDiaryDate(dateTo)} (${dayCount} дн.)`;
+  return batchAutoTitle(dateFrom, dateTo, dayCount);
 }
 
 export function batchDayTitle(
@@ -30,6 +50,24 @@ export function batchDayTitle(
   documentType: string,
 ): string {
   return `День ${dayNumber} · ${formatDiaryDate(isoDate)} · ${documentTypeLabel(documentType)}`;
+}
+
+/** Старые записи хранили «Пакет» — в UI показываем «Период». */
+export function displayHistoryTitle(title: string): string {
+  return title.replaceAll("Пакет", "Период");
+}
+
+export function stripTitleStatus(title: string): string {
+  return title
+    .replace(/\s·\sФормируется…$/u, "")
+    .replace(/\s·\sошибок:\s\d+$/u, "")
+    .replace(/\s·\sОшибка$/u, "")
+    .trim();
+}
+
+export function isAutoBatchTitle(title: string): boolean {
+  const t = stripTitleStatus(displayHistoryTitle(title));
+  return /^Период · \d{2}\.\d{2}\.\d{4}–\d{2}\.\d{2}\.\d{4} \(\d+ дн\.\)$/.test(t);
 }
 
 export function packBatchAnswers(
@@ -67,6 +105,7 @@ export function unpackBatchMeta(answers: Answers | undefined | null): {
         typeof m.estimated_discharge === "string" ? m.estimated_discharge : "",
       director_context:
         typeof m.director_context === "string" ? m.director_context : "",
+      session_title: typeof m.session_title === "string" ? m.session_title : "",
     },
   };
 }
@@ -78,4 +117,5 @@ export interface EditDiaryState {
   answers: Answers;
   /** Для пакета. */
   batchMeta?: BatchMeta;
+  sessionTitle?: string;
 }

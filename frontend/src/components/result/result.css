@@ -15,6 +15,58 @@
   flex-direction: column;
   gap: var(--space-2);
 }
+.result__title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.result__title-row .editable-title__form,
+.result__title {
+  flex: 1;
+  min-width: 0;
+}
+.result__title,
+.result__header h2 {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  line-height: var(--lh-snug);
+}
+.result__title-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+}
+.result__title-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.title-edit-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  margin-top: 2px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.title-edit-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
 .result__meta {
   display: flex;
   flex-wrap: wrap;
