@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { compileArc, extractDatedSnippets, extractFacts, inferSpeechLevel } from "./arcCompiler";
+import {
+    compileArc,
+    extractDatedSnippets,
+    extractFacts,
+    inferSpeechLevel,
+    weekendDutyNote,
+} from "./arcCompiler";
 import { buildGenerateAnswers } from "./batchDiary";
 
 const DOCTOR_NARRATIVE =
@@ -187,6 +193,13 @@ describe("compileArc", () => {
       sat,
     );
     expect(String(satAns.__arc_context__)).toMatch(/суббота|выходн/i);
+    expect(sat?.weekendDutyNote).toMatch(/с 1-2\.08/);
+    expect(satAns.additional_info).toBe("present");
+    expect(String(satAns.additional_info_detail)).toMatch(
+      /за период выходных дней с 1-2\.08 под наблюдением дежурного мед персонала/,
+    );
+    expect(String(satAns.__arc_context__)).toMatch(/Дополнительные сведения о заболевании/);
+    expect(sun?.weekendDutyNote).toMatch(/с 1-2\.08/);
   });
 
   it("locks the ICD diagnosis into every day brief", () => {
@@ -360,7 +373,7 @@ describe("patient-agnostic locks (not one diagnosis)", () => {
     expect(arc).toMatch(/Не пиши «лёгкую»/);
   });
 
-  it("puts relative visits on weekend days, not weekdays", () => {
+  it("puts parent-day visits on the Wednesday closest to the narrative, not the weekend", () => {
     const days = packDays();
     const narrative =
       "Состояние с улучшением. При встречах с мамой во время родительских дней был требователен, плаксив, истериоформные реакции.";
@@ -370,11 +383,75 @@ describe("patient-agnostic locks (not one diagnosis)", () => {
       batchAnswers: { overall_dynamics: "wavy", diagnosis: "F92.8" },
       estimatedDischargeDate: "",
     });
+    const wed = briefs.find((b) => b.isoDate === "2026-07-29");
+    const wed2 = briefs.find((b) => b.isoDate === "2026-08-05");
     const sat = briefs.find((b) => b.isoDate === "2026-08-01");
     const mon = briefs.find((b) => b.isoDate === "2026-07-27");
-    expect(sat?.observations.join(" ")).toMatch(/мам|родительск|истериоформ/i);
+    const onWeds = [wed, wed2].filter((b) =>
+      /мам|родительск|истериоформ/i.test(b?.observations.join(" ") ?? ""),
+    );
+    expect(onWeds.length).toBe(1);
+    expect(sat?.observations.join(" ")).not.toMatch(/истериоформ/i);
     expect(mon?.observations.join(" ")).not.toMatch(/истериоформ/i);
     expect(mon?.forbidden.join(" ")).toMatch(/мам|родительск|истериоформ/i);
+  });
+
+  it("pins a parent-day event to the Wednesday nearest an explicit date", () => {
+    const days = packDays();
+    const briefs = compileArc({
+      days,
+      directorContext:
+        "Состояние с улучшением. 05.08 в родительский день был требователен, плаксив.",
+      batchAnswers: { overall_dynamics: "wavy", diagnosis: "F92.8" },
+      estimatedDischargeDate: "",
+    });
+    const wed = briefs.find((b) => b.isoDate === "2026-08-05");
+    const otherWed = briefs.find((b) => b.isoDate === "2026-07-29");
+    expect(wed?.observations.join(" ")).toMatch(/требователен|плаксив|родительск/i);
+    expect(otherWed?.observations.join(" ")).not.toMatch(/требователен|плаксив/i);
+  });
+
+  it("puts an early parent-day mention on the first Wednesday of the packet", () => {
+    const days = packDays();
+    const briefs = compileArc({
+      days,
+      directorContext:
+        "В первые дни беспокоен. В родительский день плакал после встречи с мамой.",
+      batchAnswers: { overall_dynamics: "wavy", diagnosis: "F92.8" },
+      estimatedDischargeDate: "",
+    });
+    const firstWed = briefs.find((b) => b.isoDate === "2026-07-29");
+    const laterWed = briefs.find((b) => b.isoDate === "2026-08-05");
+    expect(firstWed?.observations.join(" ")).toMatch(/плакал|мам/i);
+    expect(laterWed?.observations.join(" ")).not.toMatch(/плакал/i);
+  });
+
+  it("puts an explicit weekday incident on that weekday", () => {
+    const days = packDays();
+    const briefs = compileArc({
+      days,
+      directorContext: "В пятницу был конфликт с соседкой по палате.",
+      batchAnswers: { overall_dynamics: "stable", diagnosis: "F92.8" },
+      estimatedDischargeDate: "",
+    });
+    const fri = briefs.find((b) => b.isoDate === "2026-07-31");
+    const wed = briefs.find((b) => b.isoDate === "2026-07-29");
+    expect(fri?.observations.join(" ")).toMatch(/конфликт/i);
+    expect(wed?.observations.join(" ")).not.toMatch(/конфликт/i);
+  });
+
+  it("puts a dated narrative incident on that calendar day", () => {
+    const days = packDays();
+    const briefs = compileArc({
+      days,
+      directorContext: "Состояние стабильно. 01.08 на прогулке упал, ссадина на колене.",
+      batchAnswers: { overall_dynamics: "stable", diagnosis: "F92.8" },
+      estimatedDischargeDate: "",
+    });
+    const sat = briefs.find((b) => b.isoDate === "2026-08-01");
+    const sun = briefs.find((b) => b.isoDate === "2026-08-02");
+    expect(sat?.observations.join(" ")).toMatch(/прогулк|упал|ссадин/i);
+    expect(sun?.observations.join(" ")).not.toMatch(/упал|ссадин/i);
   });
 
   it("places dated medication changes on that calendar day, not the whole pack", () => {
@@ -445,5 +522,63 @@ describe("patient-agnostic locks (not one diagnosis)", () => {
         "",
       ),
     ).toBe("sounds");
+  });
+});
+
+describe("weekendDutyNote", () => {
+  it("formats same-month Saturday–Sunday as дд-дд.мм", () => {
+    expect(weekendDutyNote("2026-08-01", 8)).toBe(
+      "за период выходных дней с 1-2.08 под наблюдением дежурного мед персонала.",
+    );
+    expect(weekendDutyNote("2026-08-02", 9)).toBe(
+      "за период выходных дней с 1-2.08 под наблюдением дежурного мед персонала.",
+    );
+  });
+
+  it("formats a weekend that crosses months", () => {
+    expect(weekendDutyNote("2026-10-31", 20)).toBe(
+      "за период выходных дней с 31.10-1.11 под наблюдением дежурного мед персонала.",
+    );
+  });
+
+  it("skips the first three hospital days even on a weekend", () => {
+    expect(weekendDutyNote("2026-08-01", 1)).toBeNull();
+    expect(weekendDutyNote("2026-08-02", 2)).toBeNull();
+    expect(weekendDutyNote("2026-08-02", 3)).toBeNull();
+    expect(weekendDutyNote("2026-08-01", 4)).not.toBeNull();
+  });
+
+  it("skips weekdays", () => {
+    expect(weekendDutyNote("2026-08-03", 10)).toBeNull();
+  });
+
+  it("does not instruct the duty formula on admission-weekend days", () => {
+    const days = [
+      { isoDate: "2026-08-01", dayNumber: 1, documentType: "daily" as const },
+      { isoDate: "2026-08-02", dayNumber: 2, documentType: "daily" as const },
+      { isoDate: "2026-08-08", dayNumber: 8, documentType: "daily" as const },
+    ];
+    const briefs = compileArc({
+      days,
+      directorContext: "Состояние стабильно.",
+      batchAnswers: { overall_dynamics: "stable" },
+      estimatedDischargeDate: "",
+    });
+    expect(briefs[0].weekendDutyNote).toBeNull();
+    expect(briefs[1].weekendDutyNote).toBeNull();
+    expect(briefs[2].weekendDutyNote).toMatch(/с 8-9\.08/);
+    const early = buildGenerateAnswers(
+      { overall_dynamics: "stable" },
+      1,
+      3,
+      "2026-08-01",
+      "Состояние стабильно.",
+      "",
+      "daily",
+      briefs[0],
+    );
+    expect(early.additional_info).toBeUndefined();
+    expect(String(early.__arc_context__)).toMatch(/первых трёх дней/);
+    expect(String(early.__arc_context__)).not.toMatch(/напиши РОВНО/);
   });
 });

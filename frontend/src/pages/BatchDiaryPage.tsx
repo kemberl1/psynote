@@ -1,19 +1,19 @@
 // BatchDiaryPage (/diary/batch) — пакетная генерация дневников за период.
 // Одна запись в истории (пакет) + дочерние дни. Генерация в фоне.
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
-import { friendlyError } from "../api/errors";
 import { deleteRequest } from "../api/endpoints";
+import { friendlyError } from "../api/errors";
 import type { Answers } from "../api/types";
 import { QuestionnaireRenderer } from "../components/questionnaire/QuestionnaireRenderer";
 import { Banner, Button } from "../components/ui";
+import { compileArc } from "../lib/arcCompiler";
 import {
   buildBatchPlan,
   buildGenerateAnswers,
   validateBatchDates,
 } from "../lib/batchDiary";
-import { compileArc } from "../lib/arcCompiler";
 import { BATCH_QUESTIONNAIRE } from "../lib/batchQuestionnaire";
 import { startBatchGeneration } from "../lib/generationRunner";
 import type { EditDiaryState } from "../lib/historyTitles";
@@ -191,9 +191,8 @@ export function BatchDiaryPage() {
             : "Сформировать дневники за выбранный период"}
         </h1>
         <p className="page-head__subtitle">
-          Опишите нарратив периода один раз — AI построит полный ряд дневников
-          с правильной клинической динамикой. В истории появится одна запись
-          пакета; внутри можно раскрыть каждый день.
+          Опишите динамику пациента и необходимые вводные данные - система построит полный ряд дневников
+          с правильной клинической динамикой и распределит информацию по заданному периоду.
         </p>
       </div>
 
@@ -269,14 +268,16 @@ export function BatchDiaryPage() {
           </span>
           <textarea
             className="field__textarea batch-context__area"
-            rows={4}
-            placeholder="Например: пациент поступил в тяжёлом состоянии, постепенно стабилизировался, к концу периода — устойчивая ремиссия."
+            rows={5}
+            placeholder="Укажите здесь все, что важно для контекста по данному пациенту. Например: пациент поступил в тяжёлом состоянии, постепенно стабилизировался, к концу периода — устойчивая ремиссия. Была коррекция терапии (указать). Наличие других заболеваний (указать). Важные анамнестические данные (указать). Это поможет системе лучше понять историю пациента и сформировать более точные дневники."
             value={directorContext}
             onChange={(e) => setDirectorContext(e.target.value)}
           />
           <span className="field__help">
             Окно для ввода дополнительного контекста. Помогает ИИ лучше
-            понимать индивидуальную историю пациента.{" "}
+            понимать индивидуальную историю пациента. Если укажете дату, день
+            недели или родительский день — событие попадёт в подходящий день
+            (родительский день отделения — среда).{" "}
             <b>Не попадёт в текст дневников</b> — нужно только для формирования
             контекста.
           </span>

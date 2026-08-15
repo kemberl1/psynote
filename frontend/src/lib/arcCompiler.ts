@@ -13,7 +13,7 @@ export interface ArcDayPlan {
 export type DayRole = "quiet" | "event" | "exam";
 export type DayPhase = "admission" | "field" | "titration" | "improving" | "residual";
 
-export type DayCalendar = "weekday" | "saturday" | "sunday" | "monday";
+export type DayCalendar = "weekday" | "wednesday" | "saturday" | "sunday" | "monday";
 export type SpeechLevel = "sounds" | "words" | "short_phrases" | "expanded" | "unknown";
 
 export interface DayBrief {
@@ -39,6 +39,11 @@ export interface DayBrief {
   lengthHint: "short" | "medium" | "exam";
   /** Понедельник после сб/вс, которые уже есть в этом пакете. */
   weekendRecap: boolean;
+  /**
+   * Формула «Дополнительные сведения о заболевании» на сб/вс
+   * (не первые 3 дня госпитализации). Иначе null.
+   */
+  weekendDutyNote: string | null;
 }
 
 export interface CompileArcInput {
@@ -84,9 +89,14 @@ function splitListish(chunk: string): string[] {
     .filter((s) => s.length > 12);
 }
 
-function isRelativeVisitSentence(s: string): boolean {
+/** Родительский день отделения — среда. */
+export function isParentDaySentence(s: string): boolean {
+  return /родительск\w* дн|на свидан/.test(s.toLowerCase());
+}
+
+export function isRelativeVisitSentence(s: string): boolean {
   const lower = s.toLowerCase();
-  if (/родительск\w* дн|на свидан/.test(lower)) return true;
+  if (isParentDaySentence(s)) return true;
   return (
     /встреч|визит|приход|приехала|приехал/.test(lower) &&
     /мам[аоыуе]|матер|отц[аеу]|родител|родствен/.test(lower)
@@ -108,6 +118,7 @@ function classifySentence(s: string): keyof ExtractedFacts | "contrast" | "skip"
   if (/мг\/сут|левомепромазин|рисперидон|риперидон|вальпро|бипериден|терапи|дозировк|отмен/.test(lower)) {
     return "therapy";
   }
+  if (/\d{1,2}[./]\d{1,2}/.test(s)) return "timed";
   if (/положительн\w+ динамик|стал более|снизилась частота|приблизилось к ровному/.test(lower)) {
     return "improvement";
   }
@@ -193,6 +204,7 @@ function calendarFor(iso: string): DayCalendar {
   if (dow === 6) return "saturday";
   if (dow === 0) return "sunday";
   if (dow === 1) return "monday";
+  if (dow === 3) return "wednesday";
   return "weekday";
 }
 
@@ -494,45 +506,196 @@ function parseIso(iso: string): Date | null {
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 }
 
-function timedForDay(
-  directorContext: string,
-  day: ArcDayPlan,
-  periodLength: number,
-): string[] {
-  if (!directorContext.trim()) return [];
-  const date = parseIso(day.isoDate);
-  if (!date) return [];
+function formatIso(d: Date): string {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${day}`;
+}
+
+function dowOf(iso: string): number | null {
+  const d = parseIso(iso);
+  return d ? d.getDay() : null;
+}
+
+const WEEKDAY_RES: { dow: number; re: RegExp }[] = [
+  { dow: 0, re: /воскресень/ },
+  { dow: 1, re: /понедельник/ },
+  { dow: 2, re: /вторник/ },
+  { dow: 3, re: /сред[ауые]/ },
+  { dow: 4, re: /четверг/ },
+  { dow: 5, re: /пятниц/ },
+  { dow: 6, re: /суббот/ },
+];
+
+function saturdayOf(date: Date): Date {
+  const sat = new Date(date);
+  // вс → вчера, сб → сегодня; иначе последняя суббота.
+  sat.setDate(date.getDate() - ((date.getDay() + 1) % 7));
+  return sat;
+}
+
+function formatWeekendSpan(sat: Date, sun: Date): string {
+  const sD = sat.getDate();
+  const eD = sun.getDate();
+  const sM = sat.getMonth() + 1;
+  const eM = sun.getMonth() + 1;
+  if (sM === eM) return `${sD}-${eD}.${String(sM).padStart(2, "0")}`;
+  return `${sD}.${String(sM).padStart(2, "0")}-${eD}.${String(eM).padStart(2, "0")}`;
+}
+
+/**
+ * Формула бланка после диагноза на сб/вс.
+ * Первые 3 дня госпитализации — без формулы (даже если выходной).
+ */
+export function weekendDutyNote(isoDate: string, dayNumber: number): string | null {
+  if (dayNumber <= 3) return null;
+  const date = parseIso(isoDate);
+  if (!date) return null;
   const dow = date.getDay();
-  const isWeekend = dow === 0 || dow === 6;
-  const out: string[] = [];
-  for (const s of splitSentences(directorContext)) {
-    const lower = s.toLowerCase();
-    if (/выходн/.test(lower) && isWeekend) {
-      out.push(s);
-      continue;
-    }
-    const hasWeekday =
-      /понедельник|вторник|сред[ауы]|четверг|пятниц|суббот|воскресень/.test(lower);
-    if (isRelativeVisitSentence(s) && !hasWeekday) {
-      if (isWeekend) out.push(s);
-      continue;
-    }
-    const dowMap: Record<number, RegExp> = {
-      0: /воскресень/,
-      1: /понедельник/,
-      2: /вторник/,
-      3: /сред[ауы]/,
-      4: /четверг/,
-      5: /пятниц/,
-      6: /суббот/,
-    };
-    const re = dowMap[dow];
-    if (re && re.test(lower)) out.push(s);
-    if (/перед выпиской|в последние дни/.test(lower) && day.dayNumber >= periodLength - 1) {
-      out.push(s);
+  if (dow !== 0 && dow !== 6) return null;
+  const sat = saturdayOf(date);
+  const sun = new Date(sat);
+  sun.setDate(sat.getDate() + 1);
+  return (
+    `за период выходных дней с ${formatWeekendSpan(sat, sun)} ` +
+    "под наблюдением дежурного мед персонала."
+  );
+}
+
+function closestDays(
+  days: ArcDayPlan[],
+  pred: (d: ArcDayPlan) => boolean,
+  anchorIso: string,
+): ArcDayPlan[] {
+  const candidates = days.filter(pred);
+  if (candidates.length === 0) return [];
+  const anchor = parseIso(anchorIso)?.getTime();
+  if (anchor == null) return [candidates[0]];
+  let best = candidates[0];
+  let bestDist = Infinity;
+  for (const c of candidates) {
+    const t = parseIso(c.isoDate)?.getTime() ?? Infinity;
+    const dist = Math.abs(t - anchor);
+    if (dist < bestDist) {
+      best = c;
+      bestDist = dist;
     }
   }
-  return unique(out);
+  return [best];
+}
+
+function weekendPairInPacket(days: ArcDayPlan[], one: ArcDayPlan): ArcDayPlan[] {
+  const date = parseIso(one.isoDate);
+  if (!date) return [one];
+  const sat = saturdayOf(date);
+  const sun = new Date(sat);
+  sun.setDate(sat.getDate() + 1);
+  const satIso = formatIso(sat);
+  const sunIso = formatIso(sun);
+  const pair = days.filter((d) => d.isoDate === satIso || d.isoDate === sunIso);
+  return pair.length > 0 ? pair : [one];
+}
+
+/** Опорная дата в пакете: явная дата, фаза повествования или позиция фразы. */
+export function narrativeAnchorIso(
+  sentence: string,
+  directorContext: string,
+  days: ArcDayPlan[],
+  packetYear: number,
+): string {
+  if (days.length === 0) return "";
+  const dated = extractDatedSnippets(sentence, packetYear);
+  if (dated[0]) return dated[0].iso;
+  const lower = sentence.toLowerCase();
+  if (/в первые дни|при поступлении|с первых дней|в начале госпитал/.test(lower)) {
+    return days[0].isoDate;
+  }
+  if (/перед выпиской|в последние дни|ближе к выписке|накануне выписки/.test(lower)) {
+    return days[days.length - 1].isoDate;
+  }
+  const pos = directorContext.indexOf(sentence);
+  if (pos >= 0) {
+    const window = directorContext.slice(Math.max(0, pos - 140), pos + sentence.length + 80);
+    const w = window.toLowerCase();
+    if (/в первые дни|при поступлении|с первых дней|в начале госпитал/.test(w)) {
+      return days[0].isoDate;
+    }
+    if (/перед выпиской|в последние дни|ближе к выписке|накануне выписки/.test(w)) {
+      return days[days.length - 1].isoDate;
+    }
+    if (directorContext.length > 1 && days.length > 1) {
+      const frac = pos / (directorContext.length - 1);
+      return days[Math.round(frac * (days.length - 1))].isoDate;
+    }
+  }
+  return days[Math.floor(days.length / 2)]?.isoDate ?? days[0].isoDate;
+}
+
+/**
+ * Раскладывает фразы врача с датой / днём недели / родительским днём
+ * на подходящие дни пакета (ближайшие к повествованию).
+ */
+export function assignTimedObservations(
+  directorContext: string,
+  days: ArcDayPlan[],
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const add = (iso: string, text: string) => {
+    const list = out.get(iso) ?? [];
+    list.push(text);
+    out.set(iso, list);
+  };
+  if (!directorContext.trim() || days.length === 0) return out;
+  const packetYear = Number(days[0].isoDate.slice(0, 4)) || new Date().getFullYear();
+  const inPacket = new Set(days.map((d) => d.isoDate));
+
+  for (const raw of splitSentences(directorContext)) {
+    if (classifySentence(raw) === "therapy") continue;
+    const s = raw.replace(/[.;]+$/, "");
+    const lower = s.toLowerCase();
+    const dated = extractDatedSnippets(s, packetYear)
+      .map((d) => d.iso)
+      .filter((iso) => inPacket.has(iso));
+    const mentioned = WEEKDAY_RES.filter((x) => x.re.test(lower)).map((x) => x.dow);
+    const parent = isParentDaySentence(s);
+    const weekendKw = /выходн/.test(lower);
+    const visit = isRelativeVisitSentence(s);
+    const late = /перед выпиской|в последние дни|ближе к выписке|накануне выписки/.test(lower);
+    const anchor = narrativeAnchorIso(s, directorContext, days, packetYear);
+
+    let targets: ArcDayPlan[] = [];
+    if (dated.length > 0) {
+      targets = days.filter((d) => dated.includes(d.isoDate));
+    } else if (mentioned.length === 1) {
+      targets = closestDays(days, (d) => dowOf(d.isoDate) === mentioned[0], anchor);
+    } else if (mentioned.length > 1) {
+      const hit = closestDays(
+        days,
+        (d) => mentioned.includes(dowOf(d.isoDate) ?? -1),
+        anchor,
+      );
+      targets =
+        mentioned.includes(0) && mentioned.includes(6) && hit[0]
+          ? weekendPairInPacket(days, hit[0])
+          : hit;
+    } else if (parent || (visit && !weekendKw)) {
+      targets = closestDays(days, (d) => dowOf(d.isoDate) === 3, anchor);
+    } else if (weekendKw) {
+      const hit = closestDays(days, (d) => {
+        const dow = dowOf(d.isoDate);
+        return dow === 0 || dow === 6;
+      }, anchor);
+      targets = hit[0] ? weekendPairInPacket(days, hit[0]) : [];
+    } else if (late) {
+      targets = days.slice(-2);
+    } else {
+      continue;
+    }
+
+    for (const t of targets) add(t.isoDate, s);
+  }
+  return out;
 }
 
 /** Собрать брифы на каждый день пакета. */
@@ -559,6 +722,7 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
   const occupationPool = unique(
     [...facts.laterBehaviors, ...facts.traits, ...facts.improvement].filter(isOccupation),
   );
+  const timedByDay = assignTimedObservations(directorContext, days);
   const visitPool = unique(
     [...facts.timed, ...splitSentences(directorContext)].filter(isRelativeVisitSentence),
   );
@@ -592,14 +756,14 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     const canTakeField =
       role === "event" &&
       (phase === "admission" || phase === "field" || phase === "titration");
-    const cal = calendarFor(day.isoDate);
+    const timedToday = timedByDay.get(day.isoDate) ?? [];
     const visitToday =
-      cal === "saturday" || cal === "sunday"
+      role === "exam"
         ? visitPool
-        : role === "exam"
-          ? visitPool.map((s) => `За период (не новый эпизод сегодня): ${s}`)
-          : [];
-    const observations: string[] = [...visitToday];
+            .filter((s) => !timedToday.includes(s))
+            .map((s) => `За период (не новый эпизод сегодня): ${s}`)
+        : [];
+    const observations: string[] = [...timedToday, ...visitToday];
     if (role === "exam") {
       observations.push(
         ...fieldPoolAll.slice(0, 2).map((s) => `За период (не новый эпизод сегодня): ${s}`),
@@ -631,10 +795,11 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     if (phase === "residual") {
       observations.push(...pickRotated(facts.residual, 0, 1));
     }
-    observations.push(...timedForDay(directorContext, day, n));
 
-    const obsCap =
-      role === "exam" ? 7 : visitToday.length > 0 ? 4 : role === "quiet" ? 2 : 3;
+    const reserved = unique(timedToday);
+    const rest = unique(observations).filter((o) => !reserved.includes(o));
+    const restCap =
+      role === "exam" ? 7 : timedToday.length > 0 ? 3 : role === "quiet" ? 2 : 3;
     return {
       isoDate: day.isoDate,
       dayNumber: day.dayNumber,
@@ -651,12 +816,13 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
       contact,
       sleep: "not_disturbed",
       appetite: "preserved",
-      observations: unique(observations).slice(0, obsCap),
+      observations: unique([...reserved, ...rest.slice(0, restCap)]),
       forbidden: [],
       therapyToday,
       includeFinalState,
       lengthHint: role === "exam" ? "exam" : role === "quiet" ? "short" : "medium",
       weekendRecap: priorWeekendInPacket(days, index),
+      weekendDutyNote: weekendDutyNote(day.isoDate, day.dayNumber),
     };
   });
 
@@ -675,9 +841,9 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
         .filter((m) => m.iso > briefs[i].isoDate)
         .map((m) => m.snippet),
     );
-    const cal = briefs[i].calendar;
-    if (cal !== "saturday" && cal !== "sunday" && briefs[i].role !== "exam") {
-      extra.push(...visitPool);
+    const timedHere = new Set(timedByDay.get(briefs[i].isoDate) ?? []);
+    if (briefs[i].role !== "exam") {
+      extra.push(...visitPool.filter((s) => !timedHere.has(s)));
     }
     if (briefs[i].phase === "admission" || briefs[i].phase === "field") {
       extra.push(...facts.improvement, ...facts.residual);
@@ -722,6 +888,7 @@ export function formatDayBrief(
 
   const calendarLabel: Record<DayCalendar, string> = {
     weekday: "будний день",
+    wednesday: "среда, родительский день отделения",
     saturday: "суббота, выходной",
     sunday: "воскресенье, выходной",
     monday: "понедельник после выходных",
@@ -731,15 +898,30 @@ export function formatDayBrief(
   } else {
     lines.push(`Календарь: ${calendarLabel[brief.calendar]}.`);
   }
-  if (brief.calendar === "saturday" || brief.calendar === "sunday") {
+  if (brief.calendar === "wednesday") {
     lines.push(
-      "Выходной: наблюдения дня — в психическом статусе. " +
-        "«Дополнительные сведения о заболевании» оставь «нет», если нет сведений о болезни. " +
-        "Не пиши построения/занятия как в будни. Визиты и прогулки — только если они в наблюдениях сегодня.",
+      "Родительский день отделения — СРЕДА. Встречи с родственниками, свидания и события «в родительский день» пиши СЕГОДНЯ, если они в наблюдениях. На другие дни не переноси.",
     );
+  }
+  if (brief.calendar === "saturday" || brief.calendar === "sunday") {
+    if (brief.weekendDutyNote) {
+      lines.push(
+        "Выходной (не первые 3 дня госпитализации): наблюдения дня — в психическом статусе. " +
+          `После диагноза в «Дополнительные сведения о заболевании» напиши РОВНО: «${brief.weekendDutyNote}» ` +
+          "Эту формулу не ставь в психический статус и не меняй даты. " +
+          "Не пиши построения/занятия как в будни. Визиты и прогулки — только если они в наблюдениях сегодня.",
+      );
+    } else {
+      lines.push(
+        "Выходной, но это один из первых трёх дней госпитализации: " +
+          "«Дополнительные сведения о заболевании» оставь «нет». " +
+          "НЕ пиши формулу «за период выходных дней» и «под наблюдением дежурного мед персонала». " +
+          "Наблюдения дня — в психическом статусе. Визиты и прогулки — только если они в наблюдениях сегодня.",
+      );
+    }
   } else if (brief.weekendRecap) {
     lines.push(
-      "Понедельник после сб/вс ЭТОГО пакета: в психическом статусе 1–2 фразы «за период выходных» — сон, фон, общение, если это следует из портрета. Не выдумывай прогулки, визиты и инциденты, которых нет в нарративе. «Дополнительные сведения о заболевании» — «нет», если нет сведений о болезни.",
+      "Понедельник после сб/вс ЭТОГО пакета: в психическом статусе 1–2 фразы «за период выходных» — сон, фон, общение, если это следует из портрета. Не выдумывай прогулки, визиты и инциденты, которых нет в нарративе. «Дополнительные сведения о заболевании» — «нет», если нет сведений о болезни. Формулу про дежурный персонал на понедельнике НЕ пиши — она только на сб/вс.",
     );
   } else if (brief.calendar === "monday") {
     lines.push(
@@ -828,7 +1010,11 @@ export function formatDayBrief(
     "Клинические константы ЭТОГО пациента (диагноз, интеллект, речь, контакт) держи. Образцы корпуса — чужие дети: не копируй их МКБ, умственную отсталость, звукокомплексы, простыни, обувь, если этого нет в брифе. Штампы статуса — тот же смысл, разные слова.",
   );
   lines.push(
-    "Не пиши: одинаковые фразы с соседними днями; «вероятно»; аббревиатура «УО»; «под наблюдением/надзором персонала»; жалобы и «без дополнений» внутри статуса.",
+    "Не пиши: одинаковые фразы с соседними днями; «вероятно»; аббревиатура «УО»; жалобы и «без дополнений» внутри статуса. " +
+      "«под наблюдением/надзором персонала» в статусе запрещено" +
+      (brief.weekendDutyNote
+        ? " — исключение только строка «Дополнительные сведения о заболевании» с формулой дежурного персонала."
+        : "."),
   );
   return lines.join("\n");
 }
@@ -848,6 +1034,10 @@ export function applyBriefToAnswers(
     sleep: brief.sleep,
     appetite: brief.appetite,
   };
+  if (brief.weekendDutyNote) {
+    out.additional_info = "present";
+    out.additional_info_detail = brief.weekendDutyNote;
+  }
   if (brief.moodDetail.length > 0) out.mood_detail = brief.moodDetail;
   if (brief.behavior === "violates" || brief.behavior === "restless") {
     const blob = brief.observations.join(" ").toLowerCase();

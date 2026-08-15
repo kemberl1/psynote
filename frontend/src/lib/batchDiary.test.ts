@@ -1,13 +1,13 @@
 // Юнит-тесты логики пакетной генерации (10-дневное правило, план, answers).
 import { describe, expect, it } from "vitest";
 import {
-  buildBatchPlan,
-  buildGenerateAnswers,
-  dayNumberFromAdmission,
-  filterDirectorContextForDay,
-  isExam10Day,
-  resolveDocType,
-  validateBatchDates,
+    buildBatchPlan,
+    buildGenerateAnswers,
+    dayNumberFromAdmission,
+    filterDirectorContextForDay,
+    isExam10Day,
+    resolveDocType,
+    validateBatchDates,
 } from "./batchDiary";
 
 function d(iso: string): Date {
@@ -314,5 +314,13 @@ describe("filterDirectorContextForDay", () => {
 
   it("returns empty string for empty context", () => {
     expect(filterDirectorContextForDay("", mon, 3, 10)).toBe("");
+  });
+
+  it("puts parent-day visits on Wednesday, not Saturday", () => {
+    const ctx =
+      "Состояние стабильно. В родительский день плакал после встречи с мамой.";
+    expect(filterDirectorContextForDay(ctx, wed, 11, 14)).toContain("плакал");
+    expect(filterDirectorContextForDay(ctx, sat, 7, 14)).not.toContain("плакал");
+    expect(filterDirectorContextForDay(ctx, mon, 9, 14)).not.toContain("плакал");
   });
 });

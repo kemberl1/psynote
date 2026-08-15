@@ -364,7 +364,7 @@ func dailyQuestions() []Question {
 		{
 			ID: "additional_info", Label: "Дополнительные сведения о заболевании", Type: "select",
 			Required: false, AllowCustom: true, Default: "none", Group: grpEvents,
-			Help: "Строка бланка под диагнозом. Наблюдения выходного — в психический статус, не сюда.",
+			Help: "Строка бланка под диагнозом. На выходных (не первые 3 дня госпитализации) — формула про дежурный персонал за период сб–вс.",
 			Options: []Option{
 				{Value: "none", Label: "нет", Prompt: "Дополнительные сведения о заболевании: нет."},
 				{Value: "present", Label: "есть сведения", Prompt: "Имеются дополнительные сведения о заболевании."},
@@ -374,7 +374,7 @@ func dailyQuestions() []Question {
 		{
 			ID: "additional_info_detail", Label: "Дополнительные сведения о заболевании (текст)", Type: "text",
 			Required: false, AllowCustom: true, Group: grpEvents,
-			Help: "Кратко, без персональных данных.",
+			Help: "На выходных: «за период выходных дней с ДД-ДД.ММ под наблюдением дежурного мед персонала».",
 		},
 		{
 			ID: "exam_plan", Label: "План обследования", Type: "select",

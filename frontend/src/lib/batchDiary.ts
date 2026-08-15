@@ -4,9 +4,11 @@
 // которое RAG-сервис инжектирует в системный промпт, а НЕ в текст дневника.
 import type { Answers } from "../api/types";
 import {
-  applyBriefToAnswers,
-  compileArc,
-  type DayBrief,
+    applyBriefToAnswers,
+    compileArc,
+    isParentDaySentence,
+    isRelativeVisitSentence,
+    type DayBrief,
 } from "./arcCompiler";
 import { unpackBatchMeta, type BatchMeta } from "./historyTitles";
 
@@ -201,6 +203,15 @@ const DOW_KEYWORDS: Record<number, string[]> = {
 /** Ключевые слова, указывающие на выходной день. */
 const WEEKEND_KEYWORDS = ["в выходные", "на выходных", "выходные", "в выходной"];
 
+/** Родительский день отделения — среда. */
+const PARENT_DAY_KEYWORDS = [
+  "родительский день",
+  "родительские дни",
+  "родительских дней",
+  "на свидании",
+  "на свиданиях",
+];
+
 /** Ключевые слова для привязки к первым/последним дням. */
 const EARLY_KEYWORDS = [
   "первые дни", "в первые дни", "в начале", "при поступлении",
@@ -225,6 +236,7 @@ function splitDirectorContext(context: string): {
   // Все ключевые слова-триггеры временно́й привязки (кроме общих фоновых)
   const temporalTriggers = [
     ...WEEKEND_KEYWORDS,
+    ...PARENT_DAY_KEYWORDS,
     ...EARLY_KEYWORDS,
     ...LATE_KEYWORDS,
     ...Object.values(DOW_KEYWORDS).flat(),
@@ -284,10 +296,22 @@ function isSentenceRelevantForDay(
   }
 
   // День недели → точное совпадение
+  let mentionedWeekday = false;
   for (const [dowStr, keywords] of Object.entries(DOW_KEYWORDS)) {
     if (keywords.some((kw) => lower.includes(kw))) {
-      return dow === Number(dowStr);
+      mentionedWeekday = true;
+      if (dow === Number(dowStr)) return true;
     }
+  }
+  if (mentionedWeekday) return false;
+
+  // Родительский день / визит без иной даты → среда
+  if (
+    PARENT_DAY_KEYWORDS.some((kw) => lower.includes(kw)) ||
+    isParentDaySentence(sentence) ||
+    isRelativeVisitSentence(sentence)
+  ) {
+    return dow === 3;
   }
 
   // «Первые дни» / «при поступлении» / «в начале» → дни 1–3
