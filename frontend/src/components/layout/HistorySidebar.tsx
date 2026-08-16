@@ -14,7 +14,8 @@ import {
 } from "../../lib/format";
 import { displayHistoryTitle } from "../../lib/historyTitles";
 import { EditableTitle, TitleEditButton } from "../history/EditableTitle";
-import { Badge, Banner, Button, EmptyState, Skeleton } from "../ui";
+import { Banner, Button, EmptyState, Skeleton } from "../ui";
+import { useConfirm } from "../ui/confirm";
 
 export function HistorySidebar() {
   const navigate = useNavigate();
@@ -23,6 +24,7 @@ export function HistorySidebar() {
   const { data, isPending, isError, error, refetch } = useHistory();
   const deleteMutation = useDeleteRequest();
   const patchMutation = usePatchRequest();
+  const confirm = useConfirm();
 
   const items = data?.items ?? [];
   const filtered = useMemo(() => {
@@ -38,15 +40,22 @@ export function HistorySidebar() {
   const handleDelete = (item: HistoryItem, e: MouseEvent) => {
     e.stopPropagation();
     if (deleteMutation.isPending) return;
-    const label =
-      item.document_type === "batch"
-        ? "Удалить все дневники за этот период из истории?"
-        : "Удалить запись из истории?";
-    if (!window.confirm(label)) return;
-    deleteMutation.mutate(item.request_id, {
-      onSuccess: () => {
-        if (activeId === item.request_id) navigate("/diary");
-      },
+    const isBatch = item.document_type === "batch";
+    void confirm({
+      title: isBatch ? "Удалить период?" : "Удалить запись?",
+      text: isBatch
+        ? "Все дневники за этот период исчезнут из истории."
+        : "Запись исчезнет из истории.",
+      confirmLabel: "Удалить",
+      cancelLabel: "Отмена",
+      danger: true,
+    }).then((ok) => {
+      if (!ok) return;
+      deleteMutation.mutate(item.request_id, {
+        onSuccess: () => {
+          if (activeId === item.request_id) navigate("/diary");
+        },
+      });
     });
   };
 
@@ -151,12 +160,8 @@ function HistoryRow({
   const [editing, setEditing] = useState(false);
   const pending = isPendingStatus(item.status);
   const title = displayHistoryTitle(item.title_safe);
-  const typeLabel =
-    item.document_type === "batch"
-      ? item.children_count
-        ? `Период · ${item.children_count} дн.`
-        : "Период дневников"
-      : documentTypeLabel(item.document_type);
+  const when = formatDateTimeShort(item.created_at);
+  const meta = pending ? `${statusLabel(item.status)} · ${when}` : when;
 
   return (
     <div
@@ -175,11 +180,7 @@ function HistoryRow({
             className="history-item__title"
             inputClassName="history-item__edit-input"
           />
-          <span className="history-item__meta">
-            <Badge tone={pending ? "accent" : "default"}>{typeLabel}</Badge>
-            <span className="history-item__dot" aria-hidden="true" />
-            <span>{formatDateTimeShort(item.created_at)}</span>
-          </span>
+          <span className="history-item__meta">{meta}</span>
         </div>
       ) : (
         <button
@@ -188,18 +189,8 @@ function HistoryRow({
           onClick={onClick}
           aria-current={active ? "true" : undefined}
         >
-          <span className="history-item__title">{title}</span>
-          <span className="history-item__meta">
-            <Badge tone={pending ? "accent" : "default"}>{typeLabel}</Badge>
-            {pending && (
-              <>
-                <span className="history-item__dot" aria-hidden="true" />
-                <span className="history-item__status">{statusLabel(item.status)}</span>
-              </>
-            )}
-            <span className="history-item__dot" aria-hidden="true" />
-            <span>{formatDateTimeShort(item.created_at)}</span>
-          </span>
+          <span className="history-item__title" title={title}>{title}</span>
+          <span className="history-item__meta">{meta}</span>
         </button>
       )}
       <div className="history-item__actions">
@@ -218,7 +209,14 @@ function HistoryRow({
           aria-label="Удалить из истории"
           title="Удалить"
         >
-          ×
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M18 6 6 18M6 6l12 12"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
         </button>
       </div>
     </div>
@@ -227,14 +225,14 @@ function HistoryRow({
 
 function SidebarSkeleton() {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 6 }}>
-      {Array.from({ length: 6 }).map((_, i) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 4 }}>
+      {Array.from({ length: 8 }).map((_, i) => (
         <div
           key={i}
-          style={{ display: "flex", flexDirection: "column", gap: 6, padding: 6 }}
+          style={{ display: "flex", flexDirection: "column", gap: 4, padding: 6 }}
         >
-          <Skeleton width="85%" height="13px" />
-          <Skeleton width="50%" height="10px" />
+          <Skeleton width="88%" height="12px" />
+          <Skeleton width="42%" height="9px" />
         </div>
       ))}
     </div>

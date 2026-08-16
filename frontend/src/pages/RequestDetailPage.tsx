@@ -5,10 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiError, friendlyError } from "../api/errors";
 import {
-    useDeleteRequest,
-    useDocumentTypes,
-    usePatchRequest,
-    useRequestDetail,
+  useDeleteRequest,
+  useDocumentTypes,
+  usePatchRequest,
+  useRequestDetail,
 } from "../api/queries";
 import type { ExportFormat, HistoryChild } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
@@ -18,25 +18,26 @@ import { DocumentView } from "../components/result/DocumentView";
 import { GenerationResult } from "../components/result/GenerationResult";
 import "../components/result/result.css";
 import { Badge, Banner, Button, Skeleton, Spinner } from "../components/ui";
+import { useConfirm } from "../components/ui/confirm";
 import { downloadBatchExport, downloadExport } from "../lib/download";
 import { buildExportSubstitutions } from "../lib/exportSubstitutions";
 import {
-    documentTypeLabel,
-    formatDateTime,
-    isPendingStatus,
-    statusLabel,
+  documentTypeLabel,
+  formatDateTime,
+  isPendingStatus,
+  statusLabel,
 } from "../lib/format";
 import {
-    isGenerationRunning,
-    resumeBatchGeneration,
-    startSingleGeneration,
+  isGenerationRunning,
+  resumeBatchGeneration,
+  startSingleGeneration,
 } from "../lib/generationRunner";
 import {
-    displayHistoryTitle,
-    isAutoBatchTitle,
-    stripTitleStatus,
-    unpackBatchMeta,
-    type EditDiaryState,
+  displayHistoryTitle,
+  isAutoBatchTitle,
+  stripTitleStatus,
+  unpackBatchMeta,
+  type EditDiaryState,
 } from "../lib/historyTitles";
 import "./pages.css";
 
@@ -49,6 +50,7 @@ export function RequestDetailPage() {
   const { data, isPending, isError, error, refetch } = useRequestDetail(id);
   const deleteMutation = useDeleteRequest();
   const patchMutation = usePatchRequest();
+  const confirm = useConfirm();
   const [editingTitle, setEditingTitle] = useState(false);
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -88,13 +90,20 @@ export function RequestDetailPage() {
 
   const handleDelete = () => {
     if (!data) return;
-    const label =
-      data.document_type === "batch"
-        ? "Удалить все дневники за этот период из истории?"
-        : "Удалить запись из истории?";
-    if (!window.confirm(label)) return;
-    deleteMutation.mutate(data.request_id, {
-      onSuccess: () => navigate("/diary"),
+    const isBatch = data.document_type === "batch";
+    void confirm({
+      title: isBatch ? "Удалить период?" : "Удалить запись?",
+      text: isBatch
+        ? "Все дневники за этот период исчезнут из истории."
+        : "Запись исчезнет из истории.",
+      confirmLabel: "Удалить",
+      cancelLabel: "Отмена",
+      danger: true,
+    }).then((ok) => {
+      if (!ok) return;
+      deleteMutation.mutate(data.request_id, {
+        onSuccess: () => navigate("/diary"),
+      });
     });
   };
 

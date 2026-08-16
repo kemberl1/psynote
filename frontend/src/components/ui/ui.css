@@ -59,6 +59,15 @@
   color: var(--text);
 }
 
+.ui-btn--danger {
+  background: var(--danger);
+  color: #140808;
+  font-weight: 600;
+}
+.ui-btn--danger:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
 .ui-btn--sm {
   height: 32px;
   font-size: var(--fs-sm);
@@ -226,4 +235,62 @@
 }
 .ui-banner__action {
   margin-top: var(--space-3);
+}
+
+/* ─── Confirm dialog ─────────────────────────────────────────────────────── */
+.ui-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+}
+.ui-confirm__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(2px);
+  cursor: default;
+}
+.ui-confirm__panel {
+  position: relative;
+  width: min(400px, 100%);
+  padding: var(--space-6);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  animation: ui-confirm-in var(--transition-slow);
+}
+.ui-confirm__title {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: var(--lh-snug);
+}
+.ui-confirm__text {
+  margin-top: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+}
+.ui-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+}
+@keyframes ui-confirm-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
