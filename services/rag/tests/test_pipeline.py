@@ -268,7 +268,8 @@ def test_build_messages_samples_are_style_not_foreign_diagnosis() -> None:
     assert "не копируй из образцов" in lower or "не копируй" in lower
     assert "другие пациенты" in user.lower() or "других пациент" in user.lower()
     assert "чужой диагноз" in user.lower() or "не чужой диагноз" in user.lower()
-    assert "если бриф дал смену терапии" in user.lower()
+    assert "план лечения" in user.lower()
+    assert "см. лист назначений" in user.lower()
 
 
 def test_build_messages_allows_grounded_coloring_not_pure_invention() -> None:
@@ -278,7 +279,7 @@ def test_build_messages_allows_grounded_coloring_not_pure_invention() -> None:
     lower = system.lower()
     assert "дорисовать быт" in lower
     assert "за период выходных дней" in lower
-    assert "понедельник после субботы" in lower or "после субботы–воскресенья" in lower
+    assert "понедельник после пропущенных" in lower or "после пропущенных сб" in lower
     assert "без агрессивных, аутоагрессивных" in lower
     assert "каркас" in system.lower() or "шаблон" in system.lower()
     user = next(m.content for m in msgs if m.role == "user")

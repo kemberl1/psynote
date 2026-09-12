@@ -37,11 +37,11 @@ export interface DayBrief {
   therapyToday: string | null;
   includeFinalState: boolean;
   lengthHint: "short" | "medium" | "exam";
-  /** Понедельник после сб/вс, которые уже есть в этом пакете. */
+  /** Понедельник после пропущенных сб/вс этого пакета. */
   weekendRecap: boolean;
   /**
-   * Формула «Дополнительные сведения о заболевании» на сб/вс
-   * (не первые 3 дня госпитализации). Иначе null.
+   * Формула «Дополнительные сведения о заболевании» на понедельнике
+   * после выходных (не первые 3 дня госпитализации). Иначе null.
    */
   weekendDutyNote: string | null;
 }
@@ -213,30 +213,43 @@ function diagnosisText(batchAnswers: Answers): string {
   return typeof raw === "string" ? raw.trim() : "";
 }
 
-function intellectLock(diagnosis: string): string {
-  if (/F71|F72|F73|умеренн\w* умственн|выраженн\w* умственн|тяжёл\w* умственн/i.test(diagnosis)) {
-    return (
-      "Интеллект ЭТОГО пациента — умственная отсталость умеренной (или выраженной) степени по диагнозу, " +
-      "словами полностью. Не пиши «лёгкую», не пиши аббревиатуру «УО», не подставляй F70/F91 и не пиши «возрастную норму»."
-    );
+function cognitiveLockLines(diagnosis: string): string[] {
+  if (/F72|F73|тяжёл\w* умственн|выраженн\w* умственн/i.test(diagnosis)) {
+    return [
+      "Интеллект ЭТОГО пациента — умственная отсталость тяжёлой (выраженной) степени по диагнозу, словами полностью. Не пиши «лёгкую», «умеренную», аббревиатуру «УО», F70/F91 и «возрастную норму».",
+      "КОГНИТИВНЫЙ ПРОФИЛЬ — константы ВСЕХ дней, не меняй от дня к дню:",
+      "• Критика: отсутствует / не выявляется. Не чередуй со «снижена».",
+      "• Эмоциональные реакции: недифференцированные (удовольствие/неудовольствие), лабильные. ЗАПРЕЩЕНО: «адекватны ситуации».",
+      "• Волевой контроль: отсутствует или резко снижен. ЗАПРЕЩЕНО: «достаточен».",
+      "• Мышление: наглядно-действенное / наглядно-образное. Не «абстрактное».",
+    ];
+  }
+  if (/F71|умеренн\w* умственн/i.test(diagnosis)) {
+    return [
+      "Интеллект ЭТОГО пациента — умственная отсталость умеренной степени по диагнозу, словами полностью. Не пиши «лёгкую», не пиши аббревиатуру «УО», не подставляй F70/F91 и не пиши «возрастную норму».",
+      "КОГНИТИВНЫЙ ПРОФИЛЬ — константы ВСЕХ дней, не меняй от дня к дню:",
+      "• Критика: отсутствует / не выявляется. При умеренной умственной отсталости критики нет — не пиши «снижена» вперемешку с «отсутствует».",
+      "• Эмоциональные реакции: недифференцированные (удовольствие/неудовольствие), лабильные, легко возбудим. ЗАПРЕЩЕНО: «адекватны ситуации».",
+      "• Волевой контроль: резко снижен или отсутствует. ЗАПРЕЩЕНО: «достаточен».",
+      "• Мышление: наглядно-действенное / наглядно-образное или сугубо конкретное. Не «соответствует возрасту».",
+    ];
   }
   if (/F70|лёгк\w* умственн|легк\w* умственн/i.test(diagnosis)) {
-    return (
-      "Интеллект ЭТОГО пациента — умственная отсталость лёгкой степени по диагнозу, словами полностью. " +
-      "Не подставляй F71/F91, не пиши «возрастную норму», не пиши аббревиатуру «УО»."
-    );
+    return [
+      "Интеллект ЭТОГО пациента — умственная отсталость лёгкой степени по диагнозу, словами полностью. Не подставляй F71/F91, не пиши «возрастную норму», не пиши аббревиатуру «УО».",
+    ];
   }
   if (/\bF7\d/i.test(diagnosis)) {
-    return (
-      "Интеллект — умственная отсталость по диагнозу (F7x), степень как в формулировке врача, словами полностью, не «УО»."
-    );
+    return [
+      "Интеллект — умственная отсталость по диагнозу (F7x), степень как в формулировке врача, словами полностью, не «УО», не «возрастная норма».",
+    ];
   }
-  return (
+  return [
     "Интеллект ЭТОГО пациента — НЕ умственная отсталость: в диагнозе нет F70–F79. " +
-    "Пиши «соответствует возрасту» / «на уровне возрастной нормы» (если бриф не задал иное). " +
-    "ЗАПРЕЩЕНО копировать из образцов корпуса «умственную отсталость», «лёгкую/умеренную УО», " +
-    "«снижен до уровня … отсталости» — это другой пациент."
-  );
+      "Пиши «соответствует возрасту» / «на уровне возрастной нормы» (если бриф не задал иное). " +
+      "ЗАПРЕЩЕНО копировать из образцов корпуса «умственную отсталость», «лёгкую/умеренную УО», " +
+      "«снижен до уровня … отсталости» — это другой пациент.",
+  ];
 }
 
 /** Уровень речи из эпикриза/диагноза — чтобы не приписывать словесные акты неговорящему. */
@@ -479,14 +492,13 @@ function takeUnused(pool: string[], used: Set<string>, count: number): string[] 
 
 function priorWeekendInPacket(days: ArcDayPlan[], index: number): boolean {
   if (calendarFor(days[index]?.isoDate ?? "") !== "monday") return false;
-  let sawSat = false;
-  let sawSun = false;
   for (let j = 0; j < index; j++) {
     const c = calendarFor(days[j].isoDate);
-    if (c === "saturday") sawSat = true;
-    if (c === "sunday") sawSun = true;
+    if ((c === "saturday" || c === "sunday") && days[j].dayNumber > 3) {
+      return true;
+    }
   }
-  return sawSat && sawSun;
+  return false;
 }
 
 function fieldStopsForDay(observations: string[], includeFinalState: boolean): string[] {
@@ -545,15 +557,15 @@ function formatWeekendSpan(sat: Date, sun: Date): string {
 }
 
 /**
- * Формула бланка после диагноза на сб/вс.
- * Первые 3 дня госпитализации — без формулы (даже если выходной).
+ * Формула бланка после диагноза — на ПОНЕДЕЛЬНИКЕ после выходных.
+ * Первые 3 дня госпитализации — без формулы. Суббота/воскресенье — null
+ * (отдельный дневник за выходной после 3-го дня не пишется).
  */
 export function weekendDutyNote(isoDate: string, dayNumber: number): string | null {
   if (dayNumber <= 3) return null;
   const date = parseIso(isoDate);
   if (!date) return null;
-  const dow = date.getDay();
-  if (dow !== 0 && dow !== 6) return null;
+  if (date.getDay() !== 1) return null;
   const sat = saturdayOf(date);
   const sun = new Date(sat);
   sun.setDate(sat.getDate() + 1);
@@ -561,6 +573,27 @@ export function weekendDutyNote(isoDate: string, dayNumber: number): string | nu
     `за период выходных дней с ${formatWeekendSpan(sat, sun)} ` +
     "под наблюдением дежурного мед персонала."
   );
+}
+
+/** Убрать из текста препараты/инъекции — оставить наблюдаемое поведение. */
+export function stripTherapyClauses(text: string): string {
+  let s = text
+    .replace(/\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\.?/g, " ")
+    .replace(
+      /(?:р-?ра?\.?|таб\.?|раствор)\s[^.]{0,90}?(?:мг\/сут|кап\/сут|мл(?:\s*в\/м)?)/gi,
+      " ",
+    )
+    .replace(/с седативной целью[^.]*?(?:\.|$)/gi, " ")
+    .replace(/в связи с (?:этим|возбуждением)[^.]*инъекц[^.]*?(?:\.|$)/gi, " ")
+    .replace(/(?:выполнена|сделана) инъекц[^.]*?(?:\.|$)/gi, " ")
+    .replace(/дозировка[^.]*(?:\.|$)/gi, " ")
+    .replace(/под контролем\s*АД,?\s*ЧСС/gi, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[,.\s]+|[.,\s]+$/g, "")
+    .trim();
+  if (s.length < 28) return "";
+  if (s && !/[.!?]$/.test(s)) s += ".";
+  return s;
 }
 
 function closestDays(
@@ -698,6 +731,60 @@ export function assignTimedObservations(
   return out;
 }
 
+function recapHostIndex(briefs: DayBrief[], weekendIndex: number): number {
+  for (let i = weekendIndex + 1; i < briefs.length; i++) {
+    if (briefs[i].calendar === "monday") return i;
+  }
+  for (let i = weekendIndex - 1; i >= 0; i--) {
+    if (briefs[i].calendar !== "saturday" && briefs[i].calendar !== "sunday") {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function dutyFormulaFromWeekend(weekendIso: string): string | null {
+  const date = parseIso(weekendIso);
+  if (!date) return null;
+  const sat = saturdayOf(date);
+  const sun = new Date(sat);
+  sun.setDate(sat.getDate() + 1);
+  return (
+    `за период выходных дней с ${formatWeekendSpan(sat, sun)} ` +
+    "под наблюдением дежурного мед персонала."
+  );
+}
+
+function attachWeekendRecaps(briefs: DayBrief[]): void {
+  for (let i = 0; i < briefs.length; i++) {
+    const b = briefs[i];
+    if (b.dayNumber <= 3) continue;
+    if (b.calendar !== "saturday" && b.calendar !== "sunday") continue;
+    const host = recapHostIndex(briefs, i);
+    if (host < 0) continue;
+    const target = briefs[host];
+    target.weekendRecap = true;
+    const formula =
+      weekendDutyNote(target.isoDate, target.dayNumber) ??
+      dutyFormulaFromWeekend(b.isoDate);
+    if (!formula) continue;
+    const extra = b.observations
+      .filter((o) => o.length > 24 && !/^За период/.test(o))
+      .slice(0, 2)
+      .join(" ");
+    if (!target.weekendDutyNote) {
+      target.weekendDutyNote = extra ? `${formula.replace(/\.$/, "")}. ${extra}` : formula;
+    } else if (extra && !target.weekendDutyNote.includes(extra.slice(0, 24))) {
+      target.weekendDutyNote = `${target.weekendDutyNote.replace(/\.$/, "")}. ${extra}`;
+    }
+  }
+  for (const b of briefs) {
+    if (b.calendar === "saturday" || b.calendar === "sunday") {
+      b.weekendDutyNote = null;
+    }
+  }
+}
+
 /** Собрать брифы на каждый день пакета. */
 export function compileArc(input: CompileArcInput): DayBrief[] {
   const { days, directorContext, batchAnswers } = input;
@@ -800,6 +887,11 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     const rest = unique(observations).filter((o) => !reserved.includes(o));
     const restCap =
       role === "exam" ? 7 : timedToday.length > 0 ? 3 : role === "quiet" ? 2 : 3;
+    const dayObservations = unique([...reserved, ...rest.slice(0, restCap)]);
+    if (therapyToday) {
+      const clinical = stripTherapyClauses(therapyToday);
+      if (clinical) dayObservations.unshift(clinical);
+    }
     return {
       isoDate: day.isoDate,
       dayNumber: day.dayNumber,
@@ -816,15 +908,19 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
       contact,
       sleep: "not_disturbed",
       appetite: "preserved",
-      observations: unique([...reserved, ...rest.slice(0, restCap)]),
+      observations: unique(dayObservations),
       forbidden: [],
       therapyToday,
       includeFinalState,
       lengthHint: role === "exam" ? "exam" : role === "quiet" ? "short" : "medium",
       weekendRecap: priorWeekendInPacket(days, index),
-      weekendDutyNote: weekendDutyNote(day.isoDate, day.dayNumber),
+      weekendDutyNote: priorWeekendInPacket(days, index)
+        ? weekendDutyNote(day.isoDate, day.dayNumber)
+        : null,
     };
   });
+
+  attachWeekendRecaps(briefs);
 
   for (let i = 0; i < briefs.length; i++) {
     const others = briefs
@@ -904,24 +1000,28 @@ export function formatDayBrief(
     );
   }
   if (brief.calendar === "saturday" || brief.calendar === "sunday") {
-    if (brief.weekendDutyNote) {
+    if (brief.dayNumber <= 3) {
       lines.push(
-        "Выходной (не первые 3 дня госпитализации): наблюдения дня — в психическом статусе. " +
-          `После диагноза в «Дополнительные сведения о заболевании» напиши РОВНО: «${brief.weekendDutyNote}» ` +
-          "Эту формулу не ставь в психический статус и не меняй даты. " +
-          "Не пиши построения/занятия как в будни. Визиты и прогулки — только если они в наблюдениях сегодня.",
+        "Выходной, но это один из первых трёх дней госпитализации: пиши обычный ежедневный осмотр. " +
+          "«Дополнительные сведения о заболевании» оставь «нет». " +
+          "НЕ пиши формулу «за период выходных дней» и «под наблюдением дежурного мед персонала».",
       );
     } else {
       lines.push(
-        "Выходной, но это один из первых трёх дней госпитализации: " +
-          "«Дополнительные сведения о заболевании» оставь «нет». " +
-          "НЕ пиши формулу «за период выходных дней» и «под наблюдением дежурного мед персонала». " +
-          "Наблюдения дня — в психическом статусе. Визиты и прогулки — только если они в наблюдениях сегодня.",
+        "Выходной после 3-го дня госпитализации: отдельный дневник за сегодня НЕ пишется. " +
+          "Если этот текст всё же генерируется — сделай его максимально коротким и без формулы дежурного персонала; " +
+          "пересказ выходных уйдёт в понедельник.",
       );
     }
-  } else if (brief.weekendRecap) {
+  } else if (brief.weekendRecap || brief.weekendDutyNote) {
+    const formula = brief.weekendDutyNote
+      ? `«${brief.weekendDutyNote}»`
+      : "формулу из брифа про дежурный персонал";
     lines.push(
-      "Понедельник после сб/вс ЭТОГО пакета: в психическом статусе 1–2 фразы «за период выходных» — сон, фон, общение, если это следует из портрета. Не выдумывай прогулки, визиты и инциденты, которых нет в нарративе. «Дополнительные сведения о заболевании» — «нет», если нет сведений о болезни. Формулу про дежурный персонал на понедельнике НЕ пиши — она только на сб/вс.",
+      "Понедельник после пропущенных сб/вс ЭТОГО пакета: отдельный дневник за субботу и воскресенье не пишется. " +
+        `После диагноза в «Дополнительные сведения о заболевании» напиши ${formula} ` +
+        "— формула про дежурный персонал и кратко (1–2 предложения) что было за выходные, если это есть в наблюдениях. " +
+        "Эту формулу не ставь в психический статус и не выдумывай прогулки и инциденты.",
     );
   } else if (brief.calendar === "monday") {
     lines.push(
@@ -936,7 +1036,7 @@ export function formatDayBrief(
         "Не подставляй другой код МКБ (не F70 вместо F71, не F91, не выдуманный). " +
         "Сопутствующие — «не выявлено» / «—», если врач их не указал.",
     );
-    lines.push(intellectLock(diagnosis));
+    lines.push(...cognitiveLockLines(diagnosis));
   } else {
     lines.push(
       "Код МКБ не дан — в диагнозе плейсхолдер [ОСНОВНОЙ_ДИАГНОЗ], не выдумывай F-код. " +
@@ -961,11 +1061,14 @@ export function formatDayBrief(
   }
   if (brief.therapyToday) {
     lines.push(
-      `Сегодня день коррекции/фиксации схемы — отрази в «Назначения» и/или «План лечения», не прячь за «см. лист назначений»: ${brief.therapyToday}`,
+      `Сегодня коррекция/инъекция — пиши ТОЛЬКО в «План лечения (дополнения к плану)». ` +
+        `«Назначения» всегда: «см. лист назначений». ` +
+        `В психический статус — эпизод поведения БЕЗ препаратов, доз и инъекций. ` +
+        `Текст для плана лечения: ${brief.therapyToday}`,
     );
   } else {
     lines.push(
-      "Терапию и дозировки сегодня НЕ перечисляй — «Назначения: см. лист назначений». Не переноси смены схемы с других дат.",
+      "Терапию и дозировки сегодня НЕ перечисляй — «Назначения: см. лист назначений», «План лечения: без дополнений». Не переноси смены схемы с других дат.",
     );
   }
   if (brief.includeFinalState) {
@@ -1037,6 +1140,11 @@ export function applyBriefToAnswers(
   if (brief.weekendDutyNote) {
     out.additional_info = "present";
     out.additional_info_detail = brief.weekendDutyNote;
+  }
+  out.prescriptions = "see_list";
+  if (brief.therapyToday) {
+    out.treatment_plan = "adjusted";
+    out.treatment_plan_detail = brief.therapyToday;
   }
   if (brief.moodDetail.length > 0) out.mood_detail = brief.moodDetail;
   if (brief.behavior === "violates" || brief.behavior === "restless") {

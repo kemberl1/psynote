@@ -18,3 +18,12 @@ def test_fix_complaints_without_samostoyatelno() -> None:
     src = "Жалобы: самостоятельно не предъявляет"
     assert fix_obvious_typos(src) == "Жалобы: не предъявляет"
     assert "ест самостоятельно" in fix_obvious_typos("ест самостоятельно")
+
+
+def test_fix_english_leak_and_ocliks() -> None:
+    src = "Фон настроения mildly раздражительный. На оклики реагирует непродолжительно."
+    out = fix_obvious_typos(src)
+    assert "mildly" not in out
+    assert "слегка раздражительный" in out
+    assert "на оклики" not in out.lower()
+    assert "на замечания" in out.lower()

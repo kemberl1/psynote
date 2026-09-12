@@ -12,6 +12,7 @@ import { compileArc } from "../lib/arcCompiler";
 import {
   buildBatchPlan,
   buildGenerateAnswers,
+  shouldSkipWeekendDaily,
   validateBatchDates,
 } from "../lib/batchDiary";
 import { BATCH_QUESTIONNAIRE } from "../lib/batchQuestionnaire";
@@ -98,6 +99,12 @@ export function BatchDiaryPage() {
     dateValidation.ok,
   ]);
 
+  const generatedDays = useMemo(
+    () => planPreview?.days.filter((d) => !shouldSkipWeekendDaily(d)) ?? [],
+    [planPreview],
+  );
+  const skippedWeekendCount = (planPreview?.days.length ?? 0) - generatedDays.length;
+
   const invalidIds = useMemo(
     () =>
       showInvalid && progress
@@ -114,6 +121,7 @@ export function BatchDiaryPage() {
     dateValidation.ok &&
     progress !== null &&
     progress.missingRequired.length === 0 &&
+    generatedDays.length > 0 &&
     !starting;
 
   const handleGenerate = async () => {
@@ -136,21 +144,28 @@ export function BatchDiaryPage() {
       batchAnswers: payload,
       estimatedDischargeDate,
     });
-    const days = planPreview.days.map((plan, i) => ({
-      dayNumber: plan.dayNumber,
-      isoDate: plan.isoDate,
-      documentType: plan.documentType,
-      answers: buildGenerateAnswers(
-        payload,
-        plan.dayNumber,
-        totalDays,
-        plan.isoDate,
-        directorContext,
-        estimatedDischargeDate,
-        plan.documentType,
-        briefs[i],
-      ),
-    }));
+    const days = planPreview.days
+      .map((plan, i) => ({
+        dayNumber: plan.dayNumber,
+        isoDate: plan.isoDate,
+        documentType: plan.documentType,
+        answers: buildGenerateAnswers(
+          payload,
+          plan.dayNumber,
+          totalDays,
+          plan.isoDate,
+          directorContext,
+          estimatedDischargeDate,
+          plan.documentType,
+          briefs[i],
+        ),
+      }))
+      .filter((_, i) => !shouldSkipWeekendDaily(planPreview.days[i]));
+
+    if (days.length === 0) {
+      setStarting(false);
+      return;
+    }
 
     try {
       // При повторной генерации пакета удаляем старую запись (дети cascade),
@@ -277,10 +292,24 @@ export function BatchDiaryPage() {
         )}
         {planPreview && (
           <p className="batch-preview">
-            Будет сгенерировано <b>{planPreview.days.length}</b> записей:{" "}
-            <b>{planPreview.dailyCount}</b> ежедневных,{" "}
-            <b>{planPreview.examCount}</b>{" "}
-            {planPreview.examCount === 1 ? "осмотр" : "осмотров"} за 10 дней.
+            Будет сгенерировано <b>{generatedDays.length}</b> записей
+            {skippedWeekendCount > 0
+              ? ` (календарных дней ${planPreview.days.length}, выходные после 3-го дня госпитализации пропускаются)`
+              : ""}
+            : <b>{generatedDays.filter((d) => d.documentType === "daily").length}</b>{" "}
+            ежедневных,{" "}
+            <b>{generatedDays.filter((d) => d.documentType === "exam_10d").length}</b>{" "}
+            {generatedDays.filter((d) => d.documentType === "exam_10d").length === 1
+              ? "осмотр"
+              : "осмотров"}{" "}
+            за 10 дней.
+            {skippedWeekendCount > 0 && (
+              <>
+                {" "}
+                Кратко за сб–вс — в понедельник в «Дополнительных сведениях о
+                заболевании».
+              </>
+            )}
           </p>
         )}
       </div>

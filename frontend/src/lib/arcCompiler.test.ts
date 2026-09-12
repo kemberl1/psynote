@@ -4,9 +4,14 @@ import {
     extractDatedSnippets,
     extractFacts,
     inferSpeechLevel,
+    stripTherapyClauses,
     weekendDutyNote,
 } from "./arcCompiler";
-import { buildGenerateAnswers } from "./batchDiary";
+import {
+  buildGenerateAnswers,
+  intellectFromDiagnosis,
+  shouldSkipWeekendDaily,
+} from "./batchDiary";
 
 const DOCTOR_NARRATIVE =
   "Психическое состояние с улучшением в отделении. Режимные моменты полностью не мог осмыслить по причине выраженного когнитивного дефекта. Находился под постоянным надзором медперсонала. В первые дни был двигательно суетлив, периодами расторможен, в дальнейшем в течение дней преимущественно бездеятелен, хаотично перемещается по палате, стаскивает простыни с кроватей других детей, собирает обувь, при вербальной коррекции раздражается, начинает капризничать, плакать. Фон настроения неустойчив. С детьми по палате практически не взаимодействует. Гигиенические навыки сформированы недостаточно, ест самостоятельно, пользуется ложкой. Проводился подбор лекарственной терапии, с целью купирования возбуждений с агрессией в терапии был продолжен прием таб. Левомепромазина с коррекцией дозировки до 112,5 мг/сут, а таб. Риперидон в дозировке до 2 мг/сут был с постепенным снижением и отмены. Также продолжен прием противоэпилептической терапии таб. Вальпроевой кислоты в дозировке 750 мг/сут по рекомендации невролога. На фоне коррекции терапии с положительной динамикой, стал более упорядоченным в поведении, настроение постепенно приблизилось к ровному, снизилась частота возбуждений. Остается трудным в поведении, нуждается в индивидуальном подходе. Аппетит и сон достаточные.";
@@ -101,6 +106,7 @@ describe("compileArc", () => {
     const firstMon = briefs.find((b) => b.isoDate === "2026-07-27");
     expect(firstMon?.calendar).toBe("monday");
     expect(firstMon?.weekendRecap).toBe(false);
+    expect(firstMon?.weekendDutyNote).toBeNull();
     const ans = buildGenerateAnswers(
       { overall_dynamics: "positive", leading_syndrome: "psychomotor_autoaggression" },
       firstMon!.dayNumber,
@@ -131,7 +137,12 @@ describe("compileArc", () => {
       secondMon,
     );
     const arc = String(ans.__arc_context__);
-    expect(arc).toMatch(/Понедельник после сб\/вс ЭТОГО пакета/);
+    expect(arc).toMatch(/Понедельник после пропущенных сб\/вс ЭТОГО пакета/);
+    expect(arc).toMatch(/Дополнительные сведения о заболевании/);
+    expect(ans.additional_info).toBe("present");
+    expect(String(ans.additional_info_detail)).toMatch(
+      /за период выходных дней с 1-2\.08 под наблюдением дежурного мед персонала/,
+    );
     expect(arc).not.toMatch(/НЕ пиши «за период выходных дней»/);
   });
 
@@ -193,13 +204,10 @@ describe("compileArc", () => {
       sat,
     );
     expect(String(satAns.__arc_context__)).toMatch(/суббота|выходн/i);
-    expect(sat?.weekendDutyNote).toMatch(/с 1-2\.08/);
-    expect(satAns.additional_info).toBe("present");
-    expect(String(satAns.additional_info_detail)).toMatch(
-      /за период выходных дней с 1-2\.08 под наблюдением дежурного мед персонала/,
-    );
-    expect(String(satAns.__arc_context__)).toMatch(/Дополнительные сведения о заболевании/);
-    expect(sun?.weekendDutyNote).toMatch(/с 1-2\.08/);
+    expect(sat?.weekendDutyNote).toBeNull();
+    expect(satAns.additional_info).toBeUndefined();
+    expect(String(satAns.__arc_context__)).toMatch(/отдельный дневник за сегодня НЕ пишется/i);
+    expect(sun?.weekendDutyNote).toBeNull();
   });
 
   it("locks the ICD diagnosis into every day brief", () => {
@@ -371,6 +379,9 @@ describe("patient-agnostic locks (not one diagnosis)", () => {
     );
     expect(arc).toMatch(/умеренной/);
     expect(arc).toMatch(/Не пиши «лёгкую»/);
+    expect(arc).toMatch(/Критика: отсутствует/);
+    expect(arc).toMatch(/адекватны ситуации/);
+    expect(arc).toMatch(/Назначения.*см\. лист назначений/s);
   });
 
   it("puts parent-day visits on the Wednesday closest to the narrative, not the weekend", () => {
@@ -526,30 +537,30 @@ describe("patient-agnostic locks (not one diagnosis)", () => {
 });
 
 describe("weekendDutyNote", () => {
-  it("formats same-month Saturday–Sunday as дд-дд.мм", () => {
-    expect(weekendDutyNote("2026-08-01", 8)).toBe(
+  it("formats the previous Saturday–Sunday on Monday", () => {
+    expect(weekendDutyNote("2026-08-03", 10)).toBe(
       "за период выходных дней с 1-2.08 под наблюдением дежурного мед персонала.",
     );
-    expect(weekendDutyNote("2026-08-02", 9)).toBe(
-      "за период выходных дней с 1-2.08 под наблюдением дежурного мед персонала.",
-    );
+    expect(weekendDutyNote("2026-08-01", 8)).toBeNull();
+    expect(weekendDutyNote("2026-08-02", 9)).toBeNull();
   });
 
   it("formats a weekend that crosses months", () => {
-    expect(weekendDutyNote("2026-10-31", 20)).toBe(
+    expect(weekendDutyNote("2026-11-02", 22)).toBe(
       "за период выходных дней с 31.10-1.11 под наблюдением дежурного мед персонала.",
     );
   });
 
-  it("skips the first three hospital days even on a weekend", () => {
-    expect(weekendDutyNote("2026-08-01", 1)).toBeNull();
-    expect(weekendDutyNote("2026-08-02", 2)).toBeNull();
-    expect(weekendDutyNote("2026-08-02", 3)).toBeNull();
-    expect(weekendDutyNote("2026-08-01", 4)).not.toBeNull();
+  it("skips the first three hospital days even on Monday", () => {
+    expect(weekendDutyNote("2026-08-03", 1)).toBeNull();
+    expect(weekendDutyNote("2026-08-03", 2)).toBeNull();
+    expect(weekendDutyNote("2026-08-03", 3)).toBeNull();
+    expect(weekendDutyNote("2026-08-03", 4)).not.toBeNull();
   });
 
-  it("skips weekdays", () => {
-    expect(weekendDutyNote("2026-08-03", 10)).toBeNull();
+  it("skips non-Mondays", () => {
+    expect(weekendDutyNote("2026-08-04", 11)).toBeNull();
+    expect(weekendDutyNote("2026-08-07", 14)).toBeNull();
   });
 
   it("does not instruct the duty formula on admission-weekend days", () => {
@@ -557,6 +568,7 @@ describe("weekendDutyNote", () => {
       { isoDate: "2026-08-01", dayNumber: 1, documentType: "daily" as const },
       { isoDate: "2026-08-02", dayNumber: 2, documentType: "daily" as const },
       { isoDate: "2026-08-08", dayNumber: 8, documentType: "daily" as const },
+      { isoDate: "2026-08-10", dayNumber: 10, documentType: "daily" as const },
     ];
     const briefs = compileArc({
       days,
@@ -566,7 +578,8 @@ describe("weekendDutyNote", () => {
     });
     expect(briefs[0].weekendDutyNote).toBeNull();
     expect(briefs[1].weekendDutyNote).toBeNull();
-    expect(briefs[2].weekendDutyNote).toMatch(/с 8-9\.08/);
+    expect(briefs[2].weekendDutyNote).toBeNull();
+    expect(briefs[3].weekendDutyNote).toMatch(/с 8-9\.08/);
     const early = buildGenerateAnswers(
       { overall_dynamics: "stable" },
       1,
@@ -580,5 +593,51 @@ describe("weekendDutyNote", () => {
     expect(early.additional_info).toBeUndefined();
     expect(String(early.__arc_context__)).toMatch(/первых трёх дней/);
     expect(String(early.__arc_context__)).not.toMatch(/напиши РОВНО/);
+  });
+});
+
+describe("stripTherapyClauses", () => {
+  it("keeps the behavioral episode and drops the injection", () => {
+    const src =
+      "07.08. Р-р. Рисперидон 1% 0,75 мг/сут. Днем после завтра стал постоянно стремиться к движению, залезал на кровати, прыгал с них. В связи с этим с седативной целью была сделана инъекция р-ра. Хлорпромазина 2,5%-1 мл в/м.";
+    const out = stripTherapyClauses(src);
+    expect(out).toMatch(/залезал на кровати/);
+    expect(out).not.toMatch(/инъекц/i);
+    expect(out).not.toMatch(/мг\/сут/);
+  });
+});
+
+describe("shouldSkipWeekendDaily", () => {
+  it("skips Saturday/Sunday after hospital day 3", () => {
+    expect(
+      shouldSkipWeekendDaily({ isoDate: "2026-07-25", dayNumber: 23, documentType: "daily" }),
+    ).toBe(true);
+    expect(
+      shouldSkipWeekendDaily({ isoDate: "2026-07-26", dayNumber: 24, documentType: "daily" }),
+    ).toBe(true);
+  });
+
+  it("keeps the first three hospital days and weekdays and 10-day exams", () => {
+    expect(
+      shouldSkipWeekendDaily({ isoDate: "2026-08-01", dayNumber: 2, documentType: "daily" }),
+    ).toBe(false);
+    expect(
+      shouldSkipWeekendDaily({ isoDate: "2026-07-27", dayNumber: 8, documentType: "daily" }),
+    ).toBe(false);
+    expect(
+      shouldSkipWeekendDaily({ isoDate: "2026-08-01", dayNumber: 20, documentType: "exam_10d" }),
+    ).toBe(false);
+  });
+});
+
+describe("intellectFromDiagnosis", () => {
+  it("maps F71/F72 to moderate/severe ID, not age norm", () => {
+    expect(intellectFromDiagnosis("F71.18 Умственная отсталость умеренная")).toBe(
+      "moderate_id",
+    );
+    expect(intellectFromDiagnosis("F72.14 Умственная отсталость тяжелая")).toBe(
+      "severe_id",
+    );
+    expect(intellectFromDiagnosis("F92.8")).toBe("age_norm");
   });
 });

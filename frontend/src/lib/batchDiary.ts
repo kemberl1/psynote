@@ -8,6 +8,7 @@ import {
     compileArc,
     isParentDaySentence,
     isRelativeVisitSentence,
+    stripTherapyClauses,
     type DayBrief,
 } from "./arcCompiler";
 import { unpackBatchMeta, type BatchMeta } from "./historyTitles";
@@ -146,6 +147,44 @@ export function buildBatchPlan(params: BatchParams): BatchPlan | null {
     dailyCount: days.length - examCount,
     examCount,
   };
+}
+
+/** Суббота или воскресенье по ISO-дате (локальный календарь). */
+export function isWeekendIso(iso: string): boolean {
+  const d = parseLocalDate(iso);
+  if (!d) return false;
+  const dow = d.getDay();
+  return dow === 0 || dow === 6;
+}
+
+/**
+ * Ежедневный осмотр на сб/вс не пишем, кроме первых 3 дней госпитализации.
+ * Осмотр за 10 дней на выходных оставляем — это этапный бланк.
+ */
+export function shouldSkipWeekendDaily(day: {
+  isoDate: string;
+  dayNumber: number;
+  documentType: BatchDocType;
+}): boolean {
+  if (day.documentType === "exam_10d") return false;
+  if (day.dayNumber <= 3) return false;
+  return isWeekendIso(day.isoDate);
+}
+
+export function daysToGenerate(plan: BatchPlan): BatchDayPlan[] {
+  return plan.days.filter((d) => !shouldSkipWeekendDaily(d));
+}
+
+export function intellectFromDiagnosis(diagnosisStr: string): string {
+  if (/F72|F73|тяжёл\w* умственн|выраженн\w* умственн/i.test(diagnosisStr)) {
+    return "severe_id";
+  }
+  if (/F71|умеренн\w* умственн/i.test(diagnosisStr)) return "moderate_id";
+  if (/F70|лёгк\w* умственн|легк\w* умственн|лёгк\w* УО|легк\w* УО/i.test(diagnosisStr)) {
+    return "mild_id";
+  }
+  if (/\bF7\d/i.test(diagnosisStr)) return "reduced";
+  return "age_norm";
 }
 
 // ── Маппинг новых полей нарративного опросника → значения daily/exam_10d ──
@@ -387,7 +426,6 @@ export function buildGenerateAnswers(
   void totalDays;
   const overallDynamics = batchAnswers.overall_dynamics;
   const notableEvents = batchAnswers.notable_events;
-  const keyMedications = batchAnswers.key_medications;
 
   const resolvedBrief =
     brief ??
@@ -421,16 +459,13 @@ export function buildGenerateAnswers(
 
   const clinicalParts: string[] = [];
   if (resolvedBrief?.therapyToday) {
-    clinicalParts.push(resolvedBrief.therapyToday);
+    const clinical = stripTherapyClauses(resolvedBrief.therapyToday);
+    if (clinical) clinicalParts.push(clinical);
   } else if (docType === "exam_10d") {
     const eventsDesc = describeNotableEvents(notableEvents);
     if (eventsDesc) clinicalParts.push(`В данный период: ${eventsDesc}.`);
-    if (typeof keyMedications === "string" && keyMedications.trim()) {
-      clinicalParts.push(`Терапия: ${keyMedications.trim()}.`);
-    }
   }
   if (clinicalParts.length > 0) {
-    withBrief.events = ["therapy_correction"];
     withBrief.events_detail = clinicalParts.join(" ");
   }
 
@@ -463,14 +498,18 @@ export function buildGenerateAnswers(
       ...withBrief,
       physical_status: "unremarkable",
       neuro_status: "no_acute",
-      criticism: "formal",
-      thinking: "no_gross",
+      criticism: /F71|F72|F73|умеренн\w* умственн|выраженн\w* умственн|тяжёл\w* умственн/i.test(
+        diagnosisStr,
+      )
+        ? "absent"
+        : "formal",
+      thinking: /F71|F72|F73|умеренн\w* умственн|выраженн\w* умственн|тяжёл\w* умственн/i.test(
+        diagnosisStr,
+      )
+        ? "visual_action"
+        : "no_gross",
       attention_memory: "no_gross",
-      intellect: /F71|F72|F73|умеренн\w* умственн|выраженн\w* умственн/i.test(diagnosisStr)
-        ? "reduced"
-        : /F70|лёгк\w* умственн|легк\w* умственн|лёгк\w* УО|легк\w* УО/i.test(diagnosisStr)
-          ? "mild_id"
-          : "age_norm",
+      intellect: intellectFromDiagnosis(diagnosisStr),
       suicidal: "not_detected",
       syndrome: batchAnswers.leading_syndrome ?? "anxious",
       comorbidities: ["none"],
@@ -518,20 +557,22 @@ export function rebuildBatchDayJobs(packed: Answers): {
   return {
     meta,
     narrativeAnswers: answers,
-    days: plan.days.map((planDay, i) => ({
-      dayNumber: planDay.dayNumber,
-      isoDate: planDay.isoDate,
-      documentType: planDay.documentType,
-      answers: buildGenerateAnswers(
-        answers,
-        planDay.dayNumber,
-        totalDays,
-        planDay.isoDate,
-        meta.director_context ?? "",
-        meta.estimated_discharge ?? "",
-        planDay.documentType,
-        briefs[i],
-      ),
-    })),
+    days: plan.days
+      .map((planDay, i) => ({
+        dayNumber: planDay.dayNumber,
+        isoDate: planDay.isoDate,
+        documentType: planDay.documentType,
+        answers: buildGenerateAnswers(
+          answers,
+          planDay.dayNumber,
+          totalDays,
+          planDay.isoDate,
+          meta.director_context ?? "",
+          meta.estimated_discharge ?? "",
+          planDay.documentType,
+          briefs[i],
+        ),
+      }))
+      .filter((_, i) => !shouldSkipWeekendDaily(plan.days[i])),
   };
 }

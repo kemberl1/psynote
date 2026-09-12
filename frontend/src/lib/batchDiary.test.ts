@@ -91,6 +91,27 @@ describe("buildGenerateAnswers", () => {
     );
     expect(ans.period_dynamics).toBe("improvement");
     expect(ans.syndrome).toBe("anxious");
+    expect(ans.intellect).toBe("age_norm");
+  });
+
+  it("maps F71 exam answers to moderate ID and absent criticism", () => {
+    const ans = buildGenerateAnswers(
+      {
+        overall_dynamics: "positive",
+        leading_syndrome: "behavioral",
+        diagnosis: "F71.18 Умственная отсталость умеренная",
+      },
+      10,
+      10,
+      "2025-06-10",
+      "",
+      "",
+      "exam_10d",
+    );
+    expect(ans.intellect).toBe("moderate_id");
+    expect(ans.criticism).toBe("absent");
+    expect(ans.thinking).toBe("visual_action");
+    expect(ans.prescriptions).toBe("see_list");
   });
 
   it("omits exam fields for daily", () => {
