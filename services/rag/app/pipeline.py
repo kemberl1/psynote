@@ -26,11 +26,15 @@ from typing import Callable, Protocol
 
 from app.anonymizer_client import AnonymizerClient
 from app.config import Settings
-from app.generation import build_messages, build_query_text
+from app.generation import build_messages, build_query_text, query_is_agitation
 from app.llm_client import LLMClient, LLMResult, OpenAICompatibleClient
 from app.questionnaire import iter_free_text, map_answers
 from app.templates import SUPPORTED_DOC_TYPES, DOC_TYPE_DAILY
-from app.postprocess import polish_diary
+from app.postprocess import (
+    flatten_answer_text,
+    mentioned_drugs,
+    polish_diary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +56,7 @@ class RetrieveFn(Protocol):
     def __call__(self, query: str, doc_type: str | None = None, top_k: int = 5,
                  *, syndrome: str | None = None,
                  diagnosis_class: str | None = None,
-                 section: str | None = None) -> list[dict]: ...
+                 section: str | tuple | None = None) -> list[dict]: ...
 
 
 @dataclass
@@ -175,10 +179,27 @@ class DiaryGenerator:
         # 3. Retrieval few-shot образцов нужного типа/регистра (docs/03 §6).
         k = top_k if top_k is not None else self._settings.retrieval_top_k
         query = build_query_text(mapped, doc_type)
+        agitation = query_is_agitation(mapped)
         try:
-            samples = self._get_retrieve()(
+            from app.retrieval import (
+                FIXATION_RETRIEVE_QUERY,
+                STYLE_SECTIONS,
+                pick_style_samples,
+            )
+            retrieve = self._get_retrieve()
+            samples = retrieve(
                 query, doc_type=doc_type, top_k=k,
-                syndrome=mapped.syndrome, diagnosis_class=mapped.diagnosis_class)
+                syndrome=mapped.syndrome, diagnosis_class=mapped.diagnosis_class,
+                section=STYLE_SECTIONS)
+            if agitation and not any(
+                "фиксац" in (s.get("text") or "").lower() for s in samples
+            ):
+                extra = retrieve(
+                    FIXATION_RETRIEVE_QUERY, doc_type=doc_type, top_k=k,
+                    syndrome=None, diagnosis_class=None,
+                    section=STYLE_SECTIONS)
+                samples = list(extra) + list(samples)
+            samples = pick_style_samples(samples, agitation=agitation)
         except Exception as exc:  # noqa: BLE001 — retrieval не должен ронять генерацию
             logger.warning("generate: retrieval недоступен (%s) — генерация без "
                            "few-shot образцов", type(exc).__name__)
@@ -203,8 +224,13 @@ class DiaryGenerator:
                     doc_type, result.model, len(samples),
                     result.usage.get("total_tokens"))
 
+        blob = flatten_answer_text(anon.answers)
+        if mapped.director_note:
+            blob = blob + "\n" + mapped.director_note
+        allowed = mentioned_drugs(blob)
+
         return GenerationResult(
-            content=polish_diary(result.content),
+            content=polish_diary(result.content, allowed_drugs=allowed),
             model_used=result.model,
             tokens_used=int(result.usage.get("total_tokens", 0) or 0),
             chunks_used=len(samples),

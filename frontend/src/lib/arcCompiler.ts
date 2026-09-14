@@ -35,6 +35,8 @@ export interface DayBrief {
   observations: string[];
   forbidden: string[];
   therapyToday: string | null;
+  /** Анамнез поступления — только осмотр 10 дней, никогда как «сегодня». */
+  historyNotes: string[];
   includeFinalState: boolean;
   lengthHint: "short" | "medium" | "exam";
   /** Понедельник после пропущенных сб/вс этого пакета. */
@@ -61,6 +63,7 @@ interface ExtractedFacts {
   improvement: string[];
   residual: string[];
   timed: string[];
+  history: string[];
 }
 
 const SYNDROME_LABEL: Record<string, string> = {
@@ -84,7 +87,7 @@ function splitSentences(text: string): string[] {
 function splitListish(chunk: string): string[] {
   return chunk
     .split(/,\s+(?=[а-яё])/i)
-    .map((s) => s.replace(/^[а-яё]?\s*/, "").trim())
+    .map((s) => s.trim())
     .map((s) => s.replace(/[.;]+$/, "").trim())
     .filter((s) => s.length > 12);
 }
@@ -103,8 +106,41 @@ export function isRelativeVisitSentence(s: string): boolean {
   );
 }
 
+/** Поступление / соц.анамнез — не событие сегодняшнего дня в отделении. */
+export function isAdmissionHistory(s: string): boolean {
+  const lower = s.toLowerCase();
+  if (
+    /направлен\w*\s+на\s+госпитализац|направление\s+на\s+госпитализац|пакет документов/.test(
+      lower,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /интернат|из\s+интернат|забрал[аи]\w*\s+.{0,50}интернат|школ[аеуы]\s*[-–]?\s*интернат/.test(
+      lower,
+    )
+  ) {
+    return true;
+  }
+  if (/\bдд[ие]\b|детск\w+\s+дом\s+инвалид/.test(lower)) return true;
+  if (/пребывани\w*.{0,40}\d+\s*дн.{0,30}недел/.test(lower)) return true;
+  if (/до\s+госпитализац|до\s+поступлен/.test(lower) && /интернат|дд[ие]|направлен/.test(lower)) {
+    return true;
+  }
+  return false;
+}
+
+function isTherapyLeakObservation(text: string): boolean {
+  const t = text.toLowerCase();
+  return /инъекц|мг\/сут|кап\/сут|мл\s*в\/м|левомепромазин|рисперидон|риперидон|хлорпромазин|перициазин|алимемазин|галоперидол|\bтерапи/.test(
+    t,
+  );
+}
+
 function classifySentence(s: string): keyof ExtractedFacts | "contrast" | "skip" {
   const lower = s.toLowerCase();
+  if (isAdmissionHistory(s)) return "history";
   if (
     /выходн|понедельник|вторник|сред[ауы]|четверг|пятниц|суббот|воскресень/.test(lower) ||
     isRelativeVisitSentence(s)
@@ -115,7 +151,11 @@ function classifySentence(s: string): keyof ExtractedFacts | "contrast" | "skip"
     return "contrast";
   }
   if (/в первые дни|при поступлении|с первых дней/.test(lower)) return "early";
-  if (/мг\/сут|левомепромазин|рисперидон|риперидон|вальпро|бипериден|терапи|дозировк|отмен/.test(lower)) {
+  if (
+    /мг\/сут|левомепромазин|рисперидон|риперидон|вальпро|бипериден|терапи|дозировк|отмен|инъекц|хлорпромазин|перициазин|неволептом|галоперидол|алимемазин|кветиапин/.test(
+      lower,
+    )
+  ) {
     return "therapy";
   }
   if (/\d{1,2}[./]\d{1,2}/.test(s)) return "timed";
@@ -147,6 +187,7 @@ export function extractFacts(directorContext: string): ExtractedFacts {
     improvement: [],
     residual: [],
     timed: [],
+    history: [],
   };
   if (!directorContext.trim()) return facts;
 
@@ -161,11 +202,26 @@ export function extractFacts(directorContext: string): ExtractedFacts {
         .trim();
       const laterPart = (parts.slice(1).join(" ") ?? "").replace(/^[,.\s]+/, "").trim();
       if (earlyPart) facts.early.push(earlyPart.replace(/[.;]+$/, ""));
-      if (laterPart) facts.laterBehaviors.push(...splitListish(laterPart));
+      if (laterPart) {
+        const laterBits = splitListish(laterPart).filter((b) => !isAdmissionHistory(b));
+        facts.laterBehaviors.push(...laterBits);
+      }
+      continue;
+    }
+    if (kind === "therapy") {
+      facts.therapy.push(raw.replace(/[.;]+$/, ""));
+      const clinical = stripTherapyClauses(raw);
+      if (
+        clinical &&
+        !isAdmissionHistory(clinical) &&
+        !isTherapyLeakObservation(clinical)
+      ) {
+        facts.laterBehaviors.push(clinical.replace(/[.;]+$/, ""));
+      }
       continue;
     }
     if (kind === "laterBehaviors") {
-      const bits = splitListish(raw);
+      const bits = splitListish(raw).filter((b) => !isAdmissionHistory(b));
       if (bits.length > 1) facts.laterBehaviors.push(...bits);
       else facts.laterBehaviors.push(raw.replace(/[.;]+$/, ""));
       continue;
@@ -173,8 +229,11 @@ export function extractFacts(directorContext: string): ExtractedFacts {
     facts[kind].push(raw.replace(/[.;]+$/, ""));
   }
 
-  facts.laterBehaviors = unique(facts.laterBehaviors);
+  facts.laterBehaviors = unique(
+    facts.laterBehaviors.filter((s) => !isAdmissionHistory(s) && !isTherapyLeakObservation(s)),
+  );
   facts.traits = unique(facts.traits);
+  facts.history = unique(facts.history);
   return facts;
 }
 
@@ -192,7 +251,7 @@ function unique(items: string[]): string[] {
 
 /** Полевые акты (простыни, обувь, хаос) — только ранняя/средняя фаза, не финал. */
 export function isFieldAct(text: string): boolean {
-  return /простын|обув|хаотичн|возбужд|агресс|бьёт|бьет себя|царап|головой|растормож|суетлив|таска|обирает|стаскива|разбрасыв/.test(
+  return /простын|обув|хаотичн|возбужд|агресс|бьёт|бьет себя|царап|головой|растормож|суетлив|таска|обирает|стаскива|разбрасыв|фиксац/.test(
     text.toLowerCase(),
   );
 }
@@ -470,12 +529,20 @@ export function fieldActKey(text: string): string {
   const t = text.toLowerCase();
   if (/простын/.test(t)) return "sheets";
   if (/обув/.test(t)) return "shoes";
+  if (/фиксац/.test(t)) return "fixation";
   if (/хаотичн/.test(t)) return "chaos";
   if (/каприз|плак/.test(t)) return "cry";
   if (/раздраж|вербальн\w* коррекц/.test(t)) return "irritable";
   if (/бездеятел/.test(t)) return "idle";
   if (/возбужд|агресс/.test(t)) return "agitation";
   return t.slice(0, 32);
+}
+
+function fieldActPriority(text: string): number {
+  const k = fieldActKey(text);
+  if (k === "sheets" || k === "shoes" || k === "fixation") return 0;
+  if (k === "agitation" || k === "cry" || k === "irritable") return 1;
+  return 2;
 }
 
 function takeUnused(pool: string[], used: Set<string>, count: number): string[] {
@@ -585,7 +652,10 @@ export function stripTherapyClauses(text: string): string {
     )
     .replace(/с седативной целью[^.]*?(?:\.|$)/gi, " ")
     .replace(/в связи с (?:этим|возбуждением)[^.]*инъекц[^.]*?(?:\.|$)/gi, " ")
-    .replace(/(?:выполнена|сделана) инъекц[^.]*?(?:\.|$)/gi, " ")
+    .replace(
+      /(?:дежурным врачом\s+)?(?:была |было )?(?:назначена |выполнена |сделана )?инъекц[^.]*?(?:\.|$)/gi,
+      " ",
+    )
     .replace(/дозировка[^.]*(?:\.|$)/gi, " ")
     .replace(/под контролем\s*АД,?\s*ЧСС/gi, " ")
     .replace(/\s+/g, " ")
@@ -684,8 +754,10 @@ export function assignTimedObservations(
   const inPacket = new Set(days.map((d) => d.isoDate));
 
   for (const raw of splitSentences(directorContext)) {
-    if (classifySentence(raw) === "therapy") continue;
+    const kind = classifySentence(raw);
+    if (kind === "therapy" || kind === "history" || kind === "skip") continue;
     const s = raw.replace(/[.;]+$/, "");
+    if (isAdmissionHistory(s) || isTherapyLeakObservation(s)) continue;
     const lower = s.toLowerCase();
     const dated = extractDatedSnippets(s, packetYear)
       .map((d) => d.iso)
@@ -795,9 +867,6 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
   const finalState =
     typeof batchAnswers.final_state === "string" ? batchAnswers.final_state : "";
   const speechLevel = inferSpeechLevel(directorContext, diagnosis, finalState);
-  const examIndex = days.findIndex((d) => d.documentType === "exam_10d");
-  const titrationIndex =
-    examIndex >= 0 ? examIndex : Math.min(Math.floor(n * 0.4), Math.max(0, n - 1));
   const packetYear = Number((days[0]?.isoDate ?? "").slice(0, 4)) || new Date().getFullYear();
   const medSource = [
     typeof batchAnswers.key_medications === "string" ? batchAnswers.key_medications : "",
@@ -811,11 +880,15 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
   );
   const timedByDay = assignTimedObservations(directorContext, days);
   const visitPool = unique(
-    [...facts.timed, ...splitSentences(directorContext)].filter(isRelativeVisitSentence),
+    [...facts.timed, ...splitSentences(directorContext)].filter(
+      (s) => isRelativeVisitSentence(s) && !isAdmissionHistory(s),
+    ),
   );
 
   const usedFieldKeys = new Set<string>();
-  const fieldPoolAll = facts.laterBehaviors.filter(isFieldAct);
+  const fieldPoolAll = facts.laterBehaviors
+    .filter(isFieldAct)
+    .sort((a, b) => fieldActPriority(a) - fieldActPriority(b));
   const calmPoolAll = facts.laterBehaviors.filter((s) => !isFieldAct(s) && !isOccupation(s));
 
   const briefs: DayBrief[] = days.map((day, index) => {
@@ -827,16 +900,9 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     const contact = interpolateContact(facts, role, phase, speechLevel);
     const includeFinalState = index >= n - 2 || (role === "exam" && periodPct >= 80);
     const medsToday = datedMeds.filter((m) => m.iso === day.isoDate).map((m) => m.snippet);
-    const medsToDate = datedMeds.filter((m) => m.iso <= day.isoDate).map((m) => m.snippet);
     let therapyToday: string | null = null;
     if (medsToday.length > 0) {
       therapyToday = medsToday.join(" ");
-    } else if (role === "exam" && medsToDate.length > 0) {
-      therapyToday =
-        "Схема к СЕГОДНЯШНЕЙ дате (события позже этой даты не включай): " +
-        medsToDate.join("; ");
-    } else if (datedMeds.length === 0 && (role === "exam" || index === titrationIndex)) {
-      therapyToday = facts.therapy.join(" ") || null;
     }
 
     const obsCount = role === "quiet" ? 1 : role === "exam" ? 3 : 2;
@@ -887,10 +953,14 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     const rest = unique(observations).filter((o) => !reserved.includes(o));
     const restCap =
       role === "exam" ? 7 : timedToday.length > 0 ? 3 : role === "quiet" ? 2 : 3;
-    const dayObservations = unique([...reserved, ...rest.slice(0, restCap)]);
+    const dayObservations = unique([...reserved, ...rest.slice(0, restCap)]).filter(
+      (o) => !isAdmissionHistory(o) && !isTherapyLeakObservation(o),
+    );
     if (therapyToday) {
       const clinical = stripTherapyClauses(therapyToday);
-      if (clinical) dayObservations.unshift(clinical);
+      if (clinical && !isAdmissionHistory(clinical) && !isTherapyLeakObservation(clinical)) {
+        dayObservations.unshift(clinical);
+      }
     }
     return {
       isoDate: day.isoDate,
@@ -911,6 +981,7 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
       observations: unique(dayObservations),
       forbidden: [],
       therapyToday,
+      historyNotes: role === "exam" ? facts.history.slice(0, 5) : [],
       includeFinalState,
       lengthHint: role === "exam" ? "exam" : role === "quiet" ? "short" : "medium",
       weekendRecap: priorWeekendInPacket(days, index),
@@ -1068,8 +1139,24 @@ export function formatDayBrief(
     );
   } else {
     lines.push(
-      "Терапию и дозировки сегодня НЕ перечисляй — «Назначения: см. лист назначений», «План лечения: без дополнений». Не переноси смены схемы с других дат.",
+      "Терапию и дозировки сегодня НЕ перечисляй — «Назначения: см. лист назначений», «План лечения: без дополнений». Не переноси смены схемы с других дат. Не копируй препараты из образцов корпуса (перициазин, хлорпромазин и любые другие, которых нет в брифе).",
     );
+  }
+  lines.push(
+    "ЗАПРЕЩЕНО: «физическое удержание», «удержание персоналом», иммобилизация, «требуется помощь персонала» как мера при возбуждении. " +
+      "ГРАМОТНО, как в корпусе отделения: если сегодня возбуждение / каприз / остро на замечания / вербальной коррекции не поддавался — в статусе каскад: поведение → замечания/вербальная коррекция → «в связи с этим применена мягкая фиксация конечностей на 20 минут (или срок из брифа) под контролем медперсонала» → после фиксации успокоился или не успокоился. " +
+      "Если не успокоился и в брифе сегодня есть инъекция — это коррекция в «Плане лечения», препарат только из брифа. " +
+      "Тихий день без такого эпизода — мягкую фиксацию не выдумывай. " +
+      "«с помощью персонала» — только одевание, мытьё, еда.",
+  );
+  lines.push(
+    "Интернат, ДДИ, направление на госпитализацию, «мать забрала до поступления» — анамнез жизни, не событие этого дня в отделении. Ребёнок сейчас в стационаре. Не пиши «сегодня выдан пакет документов» и «сегодня мать забрала из интерната».",
+  );
+  if (brief.historyNotes.length > 0) {
+    lines.push(
+      "Фон/анамнез поступления (НЕ событие СЕГОДНЯ). В осмотре 10 дней можно кратко в «Анамнез жизни», без «сегодня»:",
+    );
+    for (const h of brief.historyNotes) lines.push(`• ${h}`);
   }
   if (brief.includeFinalState) {
     const fs = batchAnswers.final_state;

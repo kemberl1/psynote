@@ -19,6 +19,11 @@ const OBVIOUS_TYPOS: ReadonlyArray<readonly [string, string]> = [
   ["На оклики", "На замечания"],
 ];
 
+const ILLEGAL_HOLD =
+  /(?:в такие моменты\s+)?(?:требуется\s+)?физическ[а-яё]*\s+удержани[еяю](?:\s+и\s+помощь\s+персонала)?/gi;
+
+const STAFF_HOLD = /удержива[а-яё]{0,12}\s+с\s+помощью\s+персонала/gi;
+
 /** Заменяет только однозначные опечатки вроде «Сидрос» → «Синдром». */
 export function fixObviousTypos(text: string): string {
   if (!text) return text;
@@ -26,5 +31,11 @@ export function fixObviousTypos(text: string): string {
   for (const [from, to] of OBVIOUS_TYPOS) {
     if (out.includes(from)) out = out.split(from).join(to);
   }
+  out = out.replace(
+    ILLEGAL_HOLD,
+    "применена мягкая фиксация конечностей под контролем медперсонала",
+  );
+  out = out.replace(STAFF_HOLD, "удерживается");
+  out = out.replace(/[ \t]{2,}/g, " ");
   return out;
 }

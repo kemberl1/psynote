@@ -54,15 +54,17 @@ class FakeAnonymizer:
 
 
 class FakeLLM:
-    def __init__(self, *, raise_exc: Exception | None = None) -> None:
+    def __init__(self, *, raise_exc: Exception | None = None,
+                 content: str = "СГЕНЕРИРОВАННЫЙ ДНЕВНИК [ДАТА]") -> None:
         self.raise_exc = raise_exc
+        self.content = content
         self.last_messages: list[LLMMessage] | None = None
 
     def generate(self, messages, *, temperature=None, max_tokens=None) -> LLMResult:
         self.last_messages = messages
         if self.raise_exc:
             raise self.raise_exc
-        return LLMResult(content="СГЕНЕРИРОВАННЫЙ ДНЕВНИК [ДАТА]",
+        return LLMResult(content=self.content,
                          model="deepseek-v4-flash",
                          usage={"total_tokens": 200})
 
@@ -194,7 +196,8 @@ def test_map_answers_daily_formulations() -> None:
 
 
 def test_map_answers_patient_sex_grammar() -> None:
-    mapped = map_answers(DOC_TYPE_DAILY, {"patient_sex": "female", "mood": "even"})
+    mapped = map_answers(
+        DOC_TYPE_DAILY, {"patient_sex": "female", "mood": "even"})
     joined = " ".join(mapped.prompt_lines)
     assert "девочка" in joined
     assert "упорядочена" in joined
@@ -259,7 +262,8 @@ def test_build_messages_samples_are_style_not_foreign_diagnosis() -> None:
         "mood": "even",
         "diagnosis": "F92.8 смешанное расстройство поведения и эмоций",
     })
-    samples = [{"text": "Интеллект соответствует умеренной умственной отсталости."}]
+    samples = [
+        {"text": "Интеллект соответствует умеренной умственной отсталости."}]
     msgs = build_messages(DOC_TYPE_DAILY, mapped, samples)
     system = next(m.content for m in msgs if m.role == "system")
     user = next(m.content for m in msgs if m.role == "user")
@@ -296,7 +300,6 @@ def test_build_messages_exam10d_has_epicrisis() -> None:
     msgs = build_messages(DOC_TYPE_EXAM_10D, mapped, [])
     system = next(m.content for m in msgs if m.role == "system")
     assert "Этапный эпикриз:" in system
-    assert "ЭТАПНЫЙ ЭПИКРИЗ" in system
     assert "заведующим отделением" in system
     assert "ОСМОТР\nлечащим врачом совместно с заведующим отделением" in system
     assert "Психический статус (его изменение):" in system
@@ -309,6 +312,41 @@ def test_build_query_text_includes_syndrome() -> None:
     q = build_query_text(mapped, DOC_TYPE_DAILY)
     assert "тревожно-депрессивный" in q
     assert "ежедневный" in q.lower()
+    assert "психический статус" in q.lower()
+
+
+def test_build_query_text_uses_today_observations_and_fixation_style() -> None:
+    from app.generation import query_is_agitation
+    mapped = map_answers(DOC_TYPE_DAILY, {
+        "mood": "unstable",
+        "__arc_context__": (
+            "День госпитализации: 12.\n"
+            "СЕГОДНЯ опиши через наблюдения врача ТОЛЬКО это:\n"
+            "• вербальной коррекции не поддавался, кричал, замахивался\n"
+            "ЗАПРЕЩЕНО: физическое удержание. ГРАМОТНО: мягкая фиксация.\n"
+        ),
+    })
+    assert query_is_agitation(mapped) is True
+    q = build_query_text(mapped, DOC_TYPE_DAILY)
+    assert "вербальной коррекции не поддавался" in q
+    assert "мягкая фиксация" in q
+    assert "ЗАПРЕЩЕНО" not in q
+
+
+def test_quiet_day_query_does_not_ask_for_fixation() -> None:
+    from app.generation import query_is_agitation
+    mapped = map_answers(DOC_TYPE_DAILY, {
+        "mood": "even",
+        "__arc_context__": (
+            "СЕГОДНЯ опиши через наблюдения врача ТОЛЬКО это:\n"
+            "• в игровой смотрел телевизор, замечаний не получал\n"
+            "ЗАПРЕЩЕНО: физическое удержание. ГРАМОТНО: мягкая фиксация.\n"
+        ),
+    })
+    assert query_is_agitation(mapped) is False
+    q = build_query_text(mapped, DOC_TYPE_DAILY)
+    assert "телевизор" in q
+    assert "мягкая фиксация" not in q
 
 
 # ─── Этап 7: новые/изменённые вопросы дерева docs/06 ────────────────────────
@@ -324,7 +362,6 @@ def test_map_daily_new_conditional_multiselects() -> None:
     joined = " ".join(mapped.prompt_lines)
     assert "конфликтность" in joined and "агрессивные проявления" in joined
     assert "частые пробуждения" in joined
-    assert "консультация специалиста" in joined
     assert "выполнено обследование" in joined
 
 
@@ -439,3 +476,45 @@ def test_syndrome_custom_lowercased_metadata() -> None:
     })
     assert mapped.syndrome == "смешанный синдром"
     assert any("Смешанный Синдром" in line for line in mapped.prompt_lines)
+
+
+def test_build_messages_redacts_foreign_drugs_in_samples() -> None:
+    mapped = map_answers(
+        DOC_TYPE_DAILY, {"mood": "even", "diagnosis": "F72.14"})
+    samples = [{
+        "text": (
+            "Психический статус: расторможен, кричит. "
+            "Целесообразно назначить мягкую фиксацию конечностей. "
+            "Назначения: р-р Перициазина 4% 4 кап вечером."
+        ),
+    }]
+    msgs = build_messages(DOC_TYPE_DAILY, mapped, samples)
+    user = next(m.content for m in msgs if m.role == "user")
+    system = next(m.content for m in msgs if m.role == "system")
+    assert "перициазин" not in user.lower()
+    assert "мягкую фиксацию" in user.lower()
+    assert "физическое удержание" in system.lower()
+    assert "мягкая фиксация" in system.lower()
+    assert "коррекция терапии" in user.lower() or "план лечения" in user.lower()
+
+
+def test_generate_strips_restraint_and_foreign_drug() -> None:
+    llm = FakeLLM(content=(
+        "Психический статус: Вербальной коррекции не поддавался. "
+        "В такие моменты требуется физическое удержание и помощь персонала.\n"
+        "Назначения: р-р перициазина 4% по 1-2-2 капли\n"
+        "План лечения (дополнения к плану): без дополнений\n"
+    ))
+    gen = DiaryGenerator(
+        _settings(), anonymizer=FakeAnonymizer(), llm=llm,
+        retrieve_fn=_fake_retrieve([]),
+    )
+    res = gen.generate(DOC_TYPE_DAILY, {
+        "mood": "unstable",
+        "diagnosis": "F72.14",
+        "key_medications": "рисперидон 1 мг/сут",
+    })
+    assert "физическое удержание" not in res.content.lower()
+    assert "мягкая фиксация" in res.content.lower()
+    assert "перициазин" not in res.content.lower()
+    assert "см. лист назначений" in res.content

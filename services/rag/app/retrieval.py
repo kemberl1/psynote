@@ -25,7 +25,9 @@ Qdrant С ФИЛЬТРОМ по метаданным (doc_type / syndrome / diag
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
+from typing import Sequence
 
 from qdrant_client.http import models as qmodels
 
@@ -45,7 +47,7 @@ class _Level:
     doc_type: str | None
     syndrome: str | None
     diagnosis_class: str | None
-    section: str | None
+    section: str | Sequence[str] | None
 
 
 def _build_filter(level: _Level):
@@ -56,7 +58,12 @@ def _build_filter(level: _Level):
         ("diagnosis_class", level.diagnosis_class),
         ("section", level.section),
     ):
-        if value:
+        if not value:
+            continue
+        if field_name == "section" and isinstance(value, (list, tuple)):
+            must.append(qmodels.FieldCondition(
+                key=field_name, match=qmodels.MatchAny(any=list(value))))
+        else:
             must.append(qmodels.FieldCondition(
                 key=field_name, match=qmodels.MatchValue(value=value)))
     return qmodels.Filter(must=must) if must else None
@@ -64,7 +71,7 @@ def _build_filter(level: _Level):
 
 def _fallback_levels(doc_type: str | None, syndrome: str | None,
                      diagnosis_class: str | None,
-                     section: str | None) -> list[_Level]:
+                     section: str | Sequence[str] | None) -> list[_Level]:
     """Ступени ослабления фильтра (от строгой к пустой), без дублей.
 
     Уровни, не добавляющие НИ ОДНОГО доп. условия относительно уже виденного
@@ -72,8 +79,12 @@ def _fallback_levels(doc_type: str | None, syndrome: str | None,
     """
     candidates = [
         _Level("L0_strict", doc_type, syndrome, diagnosis_class, section),
-        _Level("L1_diagnosis", doc_type, None, diagnosis_class, None),
+        _Level("L1_diagnosis", doc_type, None, diagnosis_class, section),
     ]
+    if section:
+        candidates.append(
+            _Level("L1b_any_section", doc_type, None, diagnosis_class, None),
+        )
     # Не снимаем diagnosis_class: L2/L3 подмешивают чужой МКБ-регистр.
     if not diagnosis_class:
         candidates.extend([
@@ -125,7 +136,7 @@ def search_with_fallback(client, collection: str, query_vector, top_k: int,
 
 def retrieve(query: str, doc_type: str | None = None, top_k: int = 5,
              *, syndrome: str | None = None, diagnosis_class: str | None = None,
-             section: str | None = None) -> list[dict]:
+             section: str | Sequence[str] | None = None) -> list[dict]:
     """Найти top-k обезличенных образцов со ступенчатым ослаблением фильтров.
 
     docs/03 §6 + Этап 4.1. Возвращает первый НЕПУСТОЙ результат по уровням
@@ -144,3 +155,63 @@ def retrieve(query: str, doc_type: str | None = None, top_k: int = 5,
                               diagnosis_class, section)
     return search_with_fallback(
         store.client, store.collection, query_vector, top_k, levels)
+
+
+STYLE_SECTIONS: tuple[str, ...] = ("psych_status", "full")
+
+_DROP_SECTIONS = frozenset({
+    "assignments", "diagnosis", "anamnesis", "interventions",
+    "somatic", "neuro", "complaints", "epicrisis",
+})
+
+_PRESCRIPTION_DUMP_RE = re.compile(
+    r"мг/сут|кап/сут|перициазин|назначени",
+    re.I,
+)
+_STATUS_SIGNAL_RE = re.compile(
+    r"психическ\w*\s+статус|вербальн|замечан|аффект|контакт|фиксац|"
+    r"настроен|поведен",
+    re.I,
+)
+
+_STYLE_PROMPT_LIMIT = 4
+
+
+def pick_style_samples(
+    samples: list[dict],
+    *,
+    agitation: bool = False,
+    limit: int = _STYLE_PROMPT_LIMIT,
+) -> list[dict]:
+    """Оставить чанки статуса; при возбуждении поднять «мягкую фиксацию»."""
+    kept: list[dict] = []
+    seen: set[str] = set()
+    for sample in samples:
+        text = (sample.get("text") or "").strip()
+        if not text:
+            continue
+        key = text[:180]
+        if key in seen:
+            continue
+        section = str(sample.get("section") or "full").lower()
+        if section in _DROP_SECTIONS:
+            continue
+        if _PRESCRIPTION_DUMP_RE.search(text) and not _STATUS_SIGNAL_RE.search(text):
+            continue
+        seen.add(key)
+        kept.append(sample)
+
+    if agitation:
+        kept.sort(key=lambda s: (
+            0 if "фиксац" in (s.get("text") or "").lower() else 1,
+            0 if "вербальн" in (s.get("text") or "").lower() else 1,
+            -(float(s.get("score") or 0)),
+        ))
+    return kept[:limit]
+
+
+FIXATION_RETRIEVE_QUERY = (
+    "психический статус мягкая фиксация конечностей на 20 минут "
+    "под контролем медперсонала вербальной коррекции не поддавался "
+    "после фиксации успокоился"
+)

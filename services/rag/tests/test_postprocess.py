@@ -1,6 +1,6 @@
 """Постобработка дневника: назначения, план лечения, английские утечки."""
 
-from app.postprocess import polish_diary
+from app.postprocess import polish_diary, sanitize_corpus_sample
 
 
 _SAMPLE = """Осмотр лечащим врачом
@@ -48,3 +48,71 @@ def test_polish_keeps_see_list_and_empty_plan() -> None:
         "План лечения (дополнения к плану): без дополнений\n"
     )
     assert polish_diary(src) == src
+
+
+def test_polish_rewrites_illegal_hold_to_soft_fixation() -> None:
+    src = (
+        "Психический статус: Вербальной коррекции не поддавался. "
+        "В такие моменты требуется физическое удержание и помощь персонала. "
+        "Фон настроения неустойчивый.\n"
+        "Назначения: см. лист назначений\n"
+        "План лечения (дополнения к плану): без дополнений\n"
+    )
+    out = polish_diary(src)
+    assert "физическое удержание" not in out.lower()
+    assert "мягкая фиксация" in out.lower()
+    assert "вербальной коррекции не поддавался" in out.lower()
+    assert "фон настроения неустойчивый" in out.lower()
+
+
+def test_polish_keeps_hygiene_staff_help() -> None:
+    src = (
+        "Психический статус: Одевается, гигиенические мероприятия "
+        "выполняет с помощью персонала.\n"
+        "Назначения: см. лист назначений\n"
+        "План лечения (дополнения к плану): без дополнений\n"
+    )
+    out = polish_diary(src)
+    assert "с помощью персонала" in out
+
+
+def test_polish_drops_standing_regimen_from_assignments() -> None:
+    src = (
+        "Психический статус: Сознание ясное.\n"
+        "Назначения: таб. Рисперидон 1 мг утром, р-р перициазина 4% по 1-2-2 капли\n"
+        "План лечения (дополнения к плану): без дополнений\n"
+    )
+    out = polish_diary(src, allowed_drugs={"рисперидон"})
+    assert "Назначения: см. лист назначений" in out
+    plan = next(line for line in out.splitlines()
+                if line.startswith("План лечения"))
+    assert "перициазин" not in plan.lower()
+    assert "рисперидон" not in plan.lower()
+    assert "без дополнений" in plan
+
+
+def test_polish_strips_foreign_periciazine() -> None:
+    src = (
+        "Психический статус: Сознание ясное. В связи с возбуждением "
+        "выполнена инъекция р-ра перициазина 4%.\n"
+        "Назначения: см. лист назначений\n"
+        "План лечения (дополнения к плану): без дополнений\n"
+    )
+    out = polish_diary(src, allowed_drugs={"рисперидон"})
+    assert "перициазин" not in out.lower()
+    status = next(line for line in out.splitlines()
+                  if line.startswith("Психический статус"))
+    assert "инъекц" not in status.lower()
+
+
+def test_sanitize_sample_keeps_soft_fixation_redacts_foreign_drugs() -> None:
+    raw = (
+        "Психический статус: расторможен. Целесообразно назначить мягкую "
+        "фиксацию конечностей на 20 минут. План лечения: р-р Перициазина 4% "
+        "4 кап вечером. Мать забрала из интерната."
+    )
+    out = sanitize_corpus_sample(raw)
+    assert "перициазин" not in out.lower()
+    assert "фиксац" in out.lower()
+    assert "интернат" not in out.lower()
+    assert "препарат другого пациента" in out

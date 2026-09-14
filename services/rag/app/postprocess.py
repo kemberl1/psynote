@@ -39,9 +39,71 @@ _THERAPY_RE = re.compile(
     r"(инъекц|дозировк|мг/сут|кап/сут|мл\s*в/м|мл/сут|"
     r"коррекци\w*\s+терапи|"
     r"рисперидон|галоперидол|хлорпромазин|алимемазин|"
-    r"левомепромазин|риперидон)",
+    r"левомепромазин|риперидон|перициазин|неволептом)",
     re.I,
 )
+
+_CORRECTION_RE = re.compile(
+    r"инъекц|коррекци\w*\s+терапи|дозировк\w*\s+(увеличен|снижен)|"
+    r"увеличен[ао]?\s+до|снижен[ао]?\s+до|отмен[еёа]|добавлен",
+    re.I,
+)
+
+_DRUG_STEMS = (
+    "перициазин", "неволептом", "рисперидон", "риперидон", "галоперидол",
+    "хлорпромазин", "алимемазин", "левомепромазин", "кветиапин", "арипипразол",
+    "хлорпротиксен", "хлопротиксен", "тиоридазин", "оланзапин", "клозапин",
+    "сульпирид", "зуклопентиксол", "карбамазепин", "вальпроат", "конвулекс",
+    "депакин", "бипериден", "циклодол", "диазепам", "феназепам", "гидроксизин",
+    "атаракс", "тералиджен", "сонапакс", "сероквель", "азалептин", "клопиксол",
+    "флуоксетин", "сертралин", "атомоксетин", "метилфенидат",
+    "тригексифенидил", "клоназепам",
+)
+
+_DRUG_FIND_RE = re.compile(
+    r"(?<![а-яёa-z])(" + "|".join(_DRUG_STEMS) + r")[а-яё]*",
+    re.I,
+)
+
+# «Физическое удержание» — запрещённая формулировка. «Мягкая фиксация» —
+# штатная формула отделения из корпуса, её не вырезаем.
+_ILLEGAL_HOLD_RE = re.compile(
+    r"(?:в такие моменты\s+)?(?:требуется\s+)?"
+    r"физическ\w*\s+удержани[еяю](?:\s+и\s+помощь\s+персонала)?|"
+    r"удержани[еяю]\s+(?:реб[её]нк|пациент|персонал)|"
+    r"иммобилиз\w*",
+    re.I,
+)
+_LEGAL_FIXATION = (
+    "применена мягкая фиксация конечностей под контролем медперсонала"
+)
+
+_STAFF_HOLD_RE = re.compile(
+    r"удержива\w{0,12}\s+с\s+помощью\s+персонала",
+    re.I,
+)
+
+_STAFF_HELP_SENT_RE = re.compile(
+    r"[^.!?\n]*помощ\w*\s+персонал[^.!?\n]*[.!?]?",
+    re.I,
+)
+
+_HYGIENE_RE = re.compile(
+    r"одев|мыт|гигиен|самообслуж|ест |корм|переодев|туалет|ложк",
+    re.I,
+)
+
+_ADMISSION_PLOT_RE = re.compile(
+    r"[^.!?\n]*("
+    r"направлен\w*\s+на\s+госпитализац|"
+    r"пакет документов|"
+    r"интернат|"
+    r"\bдд[ие]\b"
+    r")[^.!?\n]*[.!?]?",
+    re.I,
+)
+
+_DRUG_REDACT = "[препарат другого пациента — не копировать]"
 
 _STRIP_THERAPY_PHRASES: tuple[re.Pattern[str], ...] = (
     re.compile(
@@ -78,15 +140,115 @@ _LABEL_RE = re.compile(
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z«\"])")
 
 
-def polish_diary(text: str) -> str:
+def flatten_answer_text(value: object) -> str:
+    """Собрать весь свободный текст ответов для белого списка препаратов."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return "\n".join(flatten_answer_text(v) for v in value.values())
+    if isinstance(value, list):
+        return "\n".join(flatten_answer_text(v) for v in value)
+    return ""
+
+
+def mentioned_drugs(text: str) -> set[str]:
+    """Стемы препаратов, которые реально названы во входе этого пациента."""
+    if not text:
+        return set()
+    return {m.group(1).lower() for m in _DRUG_FIND_RE.finditer(text)}
+
+
+def sanitize_corpus_sample(text: str) -> str:
+    """Few-shot: стиль статуса без чужих лекарств и анамнеза поступления.
+
+    «Мягкая фиксация» из корпуса оставляем — это рабочая формула отделения.
+    """
+    if not text:
+        return text
+    out = _ADMISSION_PLOT_RE.sub(" ", text)
+    out = _normalize_restraint_language(out)
+    out = _DRUG_FIND_RE.sub(_DRUG_REDACT, out)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    return out.strip()
+
+
+def polish_diary(text: str, *, allowed_drugs: set[str] | None = None) -> str:
     """Исправить типовые срывы модели в уже сгенерированном тексте."""
     if not text:
         return text
     out = fix_obvious_typos(text)
     out = _replace_english_leaks(out)
     out = _OCLIKI_RE.sub("на замечания", out)
+    out = _normalize_restraint_language(out)
     out = _reroute_therapy_fields(out)
+    if allowed_drugs is not None:
+        out = _strip_unmentioned_drugs(out, allowed_drugs)
+        out = _collapse_empty_plan(out)
     return out
+
+
+def _normalize_restraint_language(text: str) -> str:
+    """«Физическое удержание» → формула корпуса; мягкую фиксацию не трогать."""
+    out = _ILLEGAL_HOLD_RE.sub(_LEGAL_FIXATION, text)
+    out = _STAFF_HOLD_RE.sub("удерживается", out)
+
+    def _staff_help(match: re.Match[str]) -> str:
+        sent = match.group(0)
+        if _HYGIENE_RE.search(sent) or re.search(r"фиксац", sent, re.I):
+            return sent
+        if re.search(
+            r"физическ\w*\s+удерж|требует\w*\s+помощ",
+            sent,
+            re.I,
+        ):
+            return " "
+        return sent
+
+    out = _STAFF_HELP_SENT_RE.sub(_staff_help, out)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r" +\n", "\n", out)
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    return out
+
+
+def _drug_clause_re(stem: str) -> re.Pattern[str]:
+    return re.compile(
+        r"(?:(?:р-?ра?|таб|капс|раствор(?:а|ом)?)\.?\s+)?"
+        + re.escape(stem)
+        + r"[а-яё]*"
+        r"(?:\s+\d+(?:[.,]\d+)?\s*%(?:\s*[-—]?\s*\d+(?:[.,]\d+)?\s*(?:мл|мг))?)?"
+        r"(?:\s+по\s+[\d\-—/]+(?:\s*кап(?:ли|\.)?)?)?"
+        r"(?:\s+\d+(?:[.,]\d+)?\s*(?:мг|кап|мл)(?:/сут)?)?",
+        re.I,
+    )
+
+
+def _strip_unmentioned_drugs(text: str, allowed: set[str]) -> str:
+    allowed_l = {a.lower() for a in allowed}
+    found = {m.group(1).lower() for m in _DRUG_FIND_RE.finditer(text)}
+    foreign = sorted(found - allowed_l)
+    if not foreign:
+        return text
+    out = text
+    for stem in foreign:
+        out = _drug_clause_re(stem).sub("", out)
+    out = re.sub(r"(?:,\s*){2,}", ", ", out)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r" ,", ",", out)
+    return out
+
+
+def _collapse_empty_plan(text: str) -> str:
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        m = _LABEL_RE.match(line)
+        if not m or m.group("label") != "План лечения (дополнения к плану)":
+            continue
+        val = (m.group("value") or "").strip(" ;,.")
+        if len(val) < 8 or val.lower() in {_PLAN_EMPTY, "нет", "-", ""}:
+            lines[i] = _rewrite_labeled(line, _PLAN_EMPTY)
+    return "\n".join(lines)
 
 
 def _replace_english_leaks(text: str) -> str:
@@ -194,7 +356,8 @@ def _reroute_therapy_fields(text: str) -> str:
         elif label == "Назначения":
             stripped = value.strip().rstrip(".")
             if stripped.lower() not in {_PRESCRIPTION_DEFAULT, ""}:
-                moved.append(value.strip())
+                if _CORRECTION_RE.search(stripped):
+                    moved.append(value.strip())
             lines[i] = _rewrite_labeled(line, _PRESCRIPTION_DEFAULT)
         elif label == "План лечения (дополнения к плану)":
             plan_idx = i
@@ -207,7 +370,8 @@ def _reroute_therapy_fields(text: str) -> str:
         )
     elif moved and plan_idx is None:
         lines.append(
-            "План лечения (дополнения к плану): " + _join_plan(_PLAN_EMPTY, moved)
+            "План лечения (дополнения к плану): " +
+            _join_plan(_PLAN_EMPTY, moved)
         )
 
     return "\n".join(lines)

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyDiaryStamp,
-  buildExportSubstitutions,
-  composeDailyDoctorLine,
-  composeHeadSignature,
-  diaryDateFromTitle,
-  formatExportDate,
-  signatureFields,
+    applyDiaryStamp,
+    buildExportSubstitutions,
+    composeDailyDoctorLine,
+    composeHeadSignature,
+    diaryDateFromTitle,
+    formatExportDate,
+    signatureFields,
 } from "./exportSubstitutions";
 import { fixObviousTypos } from "./typoFixes";
 
@@ -76,6 +76,16 @@ describe("diary date stamp", () => {
     );
     expect(out).toContain("Синдром психомоторной");
     expect(out).not.toContain("Сидрос");
+  });
+
+  it("rewrites illegal hold phrasing to departmental soft fixation", () => {
+    const out = fixObviousTypos(
+      "Вербальной коррекции не поддавался. В такие моменты требуется физическое удержание и помощь персонала. Фон настроения неустойчивый.",
+    );
+    expect(out.toLowerCase()).not.toMatch(/физическ[а-яё]*\s+удерж/);
+    expect(out).toMatch(/мягкая фиксация/i);
+    expect(out).toMatch(/Вербальной коррекции не поддавался/);
+    expect(out).toMatch(/Фон настроения/);
   });
 
   it("fills placeholders in preview text", () => {

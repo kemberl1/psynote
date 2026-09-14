@@ -129,3 +129,20 @@ def test_fallback_levels_dedup_when_no_diagnosis() -> None:
     # Минимум должно остаться: {doc_type-only, none}.
     assert ("daily", None, None, None) in keys
     assert (None, None, None, None) in keys
+
+
+def test_pick_style_samples_drops_assignments_and_boosts_fixation() -> None:
+    from app.retrieval import pick_style_samples
+    samples = [
+        {"text": "Назначения: р-р Перициазина 4% 4 кап", "section": "assignments",
+         "score": 0.99},
+        {"text": "Сознание ясное. Смотрел телевизор.", "section": "psych_status",
+         "score": 0.4},
+        {"text": "Вербальной коррекции не поддавался, применена мягкая "
+                 "фиксация конечностей на 20 минут.", "section": "full",
+         "score": 0.3},
+    ]
+    quiet = pick_style_samples(samples, agitation=False, limit=4)
+    assert all(s.get("section") != "assignments" for s in quiet)
+    hot = pick_style_samples(samples, agitation=True, limit=4)
+    assert "фиксац" in hot[0]["text"].lower()

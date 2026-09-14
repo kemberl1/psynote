@@ -4,13 +4,14 @@ import {
     extractDatedSnippets,
     extractFacts,
     inferSpeechLevel,
+    isAdmissionHistory,
     stripTherapyClauses,
     weekendDutyNote,
 } from "./arcCompiler";
 import {
-  buildGenerateAnswers,
-  intellectFromDiagnosis,
-  shouldSkipWeekendDaily,
+    buildGenerateAnswers,
+    intellectFromDiagnosis,
+    shouldSkipWeekendDaily,
 } from "./batchDiary";
 
 const DOCTOR_NARRATIVE =
@@ -167,11 +168,10 @@ describe("compileArc", () => {
     expect(arc).toMatch(/прогулки, визиты/);
   });
 
-  it("mentions therapy on exam or titration day, not on every daily", () => {
-    const withRx = briefs.filter((b) => b.therapyToday);
-    expect(withRx.length).toBeGreaterThanOrEqual(1);
-    expect(withRx.length).toBeLessThan(briefs.length);
-    expect(briefs.some((b) => b.role === "exam" && b.therapyToday)).toBe(true);
+  it("does not dump an undated standing regimen into today's treatment plan", () => {
+    for (const b of briefs) {
+      expect(b.therapyToday).toBeNull();
+    }
   });
 
   it("interpolates mood from unstable toward even", () => {
@@ -485,8 +485,7 @@ describe("patient-agnostic locks (not one diagnosis)", () => {
     expect(aug04?.therapyToday).toMatch(/1 мг/i);
     expect(jul28?.therapyToday).toBeNull();
     const exam = briefs.find((b) => b.role === "exam"); // 29.07
-    expect(exam?.therapyToday).toMatch(/алимемазин/i);
-    expect(exam?.therapyToday).not.toMatch(/04\.08|1 мг/i);
+    expect(exam?.therapyToday).toBeNull();
     expect(exam?.includeFinalState).toBe(false);
   });
 
@@ -604,6 +603,62 @@ describe("stripTherapyClauses", () => {
     expect(out).toMatch(/залезал на кровати/);
     expect(out).not.toMatch(/инъекц/i);
     expect(out).not.toMatch(/мг\/сут/);
+  });
+});
+
+describe("admission history vs in-ward day", () => {
+  const narrative =
+    "До госпитализации проживал в интернате. Сегодня мать забрала ребенка из интерната, планирует перевести его на пребывание в ДДИ 5 дней в неделю. В отделении был выдан пакет документов с направлением на госпитализацию в стационар. Двигательно расторможен, вербальной коррекции не поддавался, в связи с чем дежурным врачом была назначена инъекция раствора. Одевается, гигиенические мероприятия выполняет с помощью персонала. 07.08 выполнена инъекция р-ра хлорпромазина 2,5%-1 мл в/м.";
+
+  it("recognizes internat, DDI and admission referral as history", () => {
+    expect(isAdmissionHistory("мать забрала ребенка из интерната")).toBe(true);
+    expect(isAdmissionHistory("направление на госпитализацию в стационар")).toBe(true);
+    expect(isAdmissionHistory("пребывание в ДДИ 5 дней в неделю")).toBe(true);
+    expect(isAdmissionHistory("вербальной коррекции не поддавался")).toBe(false);
+  });
+
+  it("does not put internat pickup or referral into daily observations", () => {
+    const days = packDays();
+    const briefs = compileArc({
+      days,
+      directorContext: narrative,
+      batchAnswers: {
+        overall_dynamics: "wavy",
+        diagnosis: "F72.14 Умственная отсталость тяжелая",
+      },
+      estimatedDischargeDate: "",
+    });
+    const dailyBlob = briefs
+      .filter((b) => b.role !== "exam")
+      .map((b) => b.observations.join(" "))
+      .join("\n");
+    expect(dailyBlob).not.toMatch(/интернат/i);
+    expect(dailyBlob).not.toMatch(/\bдд[ие]\b/i);
+    expect(dailyBlob).not.toMatch(/направлен\w*\s+на\s+госпитализац/i);
+    expect(dailyBlob).not.toMatch(/пакет документов/i);
+    expect(dailyBlob).not.toMatch(/ланирует/);
+    expect(dailyBlob).not.toMatch(/инъекц/i);
+    expect(dailyBlob).toMatch(/вербальн/i);
+    const exam = briefs.find((b) => b.role === "exam");
+    expect(exam?.historyNotes.join(" ")).toMatch(/интернат|дд[ие]|госпитализац/i);
+    const injectionDay = briefs.find((b) => b.isoDate === "2026-08-07");
+    expect(injectionDay?.therapyToday).toMatch(/хлорпромазин|инъекц/i);
+    const quiet = briefs.find((b) => b.isoDate === "2026-07-28");
+    expect(quiet?.therapyToday).toBeNull();
+    const ans = buildGenerateAnswers(
+      { overall_dynamics: "wavy", diagnosis: "F72.14" },
+      quiet!.dayNumber,
+      days.length,
+      quiet!.isoDate,
+      narrative,
+      "",
+      "daily",
+      quiet,
+    );
+    const arc = String(ans.__arc_context__);
+    expect(arc).toMatch(/физическое удержание/);
+    expect(arc).toMatch(/мягкая фиксация/);
+    expect(arc).toMatch(/ЗАПРЕЩЕНО/);
   });
 });
 
