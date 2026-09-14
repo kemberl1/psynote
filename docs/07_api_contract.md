@@ -271,6 +271,51 @@
 
 ---
 
+## 8.3. Новости и релизы
+
+Посты о релизах и обновлениях. Врач видит только опубликованные. Админ создаёт, правит, публикует и удаляет. В тексте нет ПДн пациентов.
+
+Тело поста — обычный текст с лёгкой разметкой: `## заголовок`, `- список`, `**жирный**`.
+
+```jsonc
+{
+  "id": "uuid",
+  "title": "PsyNote 1.4 — пакетные дневники",
+  "summary": "Коротко, что изменилось",
+  "body": "## Что нового\n- пункт",
+  "post_type": "release",          // release | news
+  "version_label": "1.4.0",
+  "is_published": true,
+  "published_at": "2026-09-12T12:00:00Z",
+  "author_name": "Админ",
+  "created_at": "...",
+  "updated_at": "..."
+}
+```
+
+### GET /api/v1/news
+Опубликованные посты. Query: `type=release|news|all`, `limit`, `offset`. `meta.total`. В списке `body` не отдаётся.
+
+### GET /api/v1/news/{id}
+Один опубликованный пост с `body`. Черновик для врача — 404.
+
+### GET /api/v1/admin/news
+Все посты, включая черновики, с `body`. Только admin.
+
+### GET /api/v1/admin/news/{id}
+Любой пост. Только admin.
+
+### POST /api/v1/admin/news
+Создать. `{ title, summary?, body, post_type?, version_label?, is_published? }`. 201.
+
+### PATCH /api/v1/admin/news/{id}
+Частичное обновление тех же полей. Публикация выставляет `published_at`, если его ещё не было.
+
+### DELETE /api/v1/admin/news/{id}
+Удалить пост. `{ "ok": true }`.
+
+---
+
 ## 9. Сводная таблица эндпоинтов
 
 | Метод | Путь | Назначение | Auth |
@@ -302,6 +347,13 @@
 | GET | `/admin/support/threads/{id}` | диалог | ✅ admin |
 | POST | `/admin/support/threads/{id}/messages` | ответить | ✅ admin |
 | GET | `/admin/feedback` | все отзывы | ✅ admin |
+| GET | `/news` | опубликованные новости | ✅ |
+| GET | `/news/{id}` | пост | ✅ |
+| GET | `/admin/news` | все посты | ✅ admin |
+| GET | `/admin/news/{id}` | пост (админ) | ✅ admin |
+| POST | `/admin/news` | создать пост | ✅ admin |
+| PATCH | `/admin/news/{id}` | обновить пост | ✅ admin |
+| DELETE | `/admin/news/{id}` | удалить пост | ✅ admin |
 
 ---
 

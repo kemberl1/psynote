@@ -7,11 +7,14 @@ import { AppShell } from "./components/layout/AppShell";
 import { EmptyState } from "./components/ui";
 import { AdminFeedbackPage } from "./pages/AdminFeedbackPage";
 import { AdminLayout } from "./pages/AdminLayout";
+import { AdminNewsPage } from "./pages/AdminNewsPage";
 import { AdminPage } from "./pages/AdminPage";
 import { AdminSupportPage } from "./pages/AdminSupportPage";
 import { AuthPage } from "./pages/AuthPage";
 import { BatchDiaryPage } from "./pages/BatchDiaryPage";
 import { DiaryPage } from "./pages/DiaryPage";
+import { NewsDetailPage } from "./pages/NewsDetailPage";
+import { NewsPage } from "./pages/NewsPage";
 import { RequestDetailPage } from "./pages/RequestDetailPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
@@ -32,13 +35,16 @@ function App() {
           {/* Просмотр прошлого результата из истории. */}
           <Route path="requests/:id" element={<RequestDetailPage />} />
           <Route path="settings" element={<SettingsPage />} />
-          {/* Админка: корпус, поддержка, отзывы. */}
+          <Route path="news" element={<NewsPage />} />
+          <Route path="news/:id" element={<NewsDetailPage />} />
+          {/* Админка: корпус, поддержка, отзывы, новости. */}
           <Route element={<AdminRoute />}>
             <Route path="admin" element={<AdminLayout />}>
               <Route index element={<AdminPage />} />
               <Route path="support" element={<AdminSupportPage />} />
               <Route path="support/:threadId" element={<AdminSupportPage />} />
               <Route path="feedback" element={<AdminFeedbackPage />} />
+              <Route path="news" element={<AdminNewsPage />} />
             </Route>
           </Route>
           {/* Фолбэк. */}

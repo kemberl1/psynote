@@ -1,6 +1,6 @@
 // Верхняя панель: брендинг PsyNote + профиль текущего врача и выход (docs/08 §4.3).
 // Этап 10: ссылка на /admin видна только для role=admin.
-import { Link, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useAdminSupportSummary } from "../../api/queries";
 import { useAuth } from "../../auth/AuthContext";
 import { Badge, Button } from "../ui";
@@ -26,17 +26,29 @@ export function TopBar() {
 
   return (
     <header className="topbar">
-      <Link to="/" className="topbar__brand" aria-label="PsyNote — на главную">
-        <span className="topbar__logo" aria-hidden="true">
-          P
-        </span>
-        <span className="topbar__name">
-          Psy<span className="accent">Note</span>
-        </span>
-        <span className="topbar__tag">
-          <Badge>генерация дневников</Badge>
-        </span>
-      </Link>
+      <div className="topbar__left">
+        <Link to="/" className="topbar__brand" aria-label="PsyNote — на главную">
+          <span className="topbar__logo" aria-hidden="true">
+            P
+          </span>
+          <span className="topbar__name">
+            Psy<span className="accent">Note</span>
+          </span>
+          <span className="topbar__tag">
+            <Badge>генерация дневников</Badge>
+          </span>
+        </Link>
+        <nav className="topbar__nav" aria-label="Разделы">
+          <NavLink
+            to="/news"
+            className={({ isActive }) =>
+              `topbar__nav-link${isActive ? " topbar__nav-link--active" : ""}`
+            }
+          >
+            Новости
+          </NavLink>
+        </nav>
+      </div>
 
       <div className="topbar__right">
         {isAdmin && (

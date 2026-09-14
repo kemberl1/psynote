@@ -362,3 +362,36 @@ export interface AdminFeedbackListResult {
   items: AdminFeedbackItem[];
   total: number;
 }
+
+// ─── Новости и релизы ──────────────────────────────────────────────────────
+
+export type NewsPostType = "release" | "news";
+
+export interface NewsPost {
+  id: string;
+  title: string;
+  summary: string;
+  body?: string;
+  post_type: NewsPostType | string;
+  version_label: string;
+  is_published: boolean;
+  published_at?: string;
+  author_id?: string;
+  author_name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NewsListResult {
+  items: NewsPost[];
+  total: number;
+}
+
+export interface NewsWriteBody {
+  title?: string;
+  summary?: string;
+  body?: string;
+  post_type?: NewsPostType | string;
+  version_label?: string;
+  is_published?: boolean;
+}

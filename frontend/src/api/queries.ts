@@ -8,14 +8,19 @@ import {
     type UseQueryResult,
 } from "@tanstack/react-query";
 import {
+    createNewsPost,
     createPending,
+    deleteNewsPost,
     deleteRequest,
     fetchAdminFeedback,
+    fetchAdminNews,
     fetchAdminSupportSummary,
     fetchAdminSupportThread,
     fetchAdminSupportThreads,
     fetchDocumentTypes,
     fetchHistory,
+    fetchNews,
+    fetchNewsPost,
     fetchQuestionnaire,
     fetchRequestDetail,
     fetchRequestFeedback,
@@ -23,6 +28,7 @@ import {
     generate,
     markAdminSupportRead,
     markSupportRead,
+    patchNewsPost,
     patchRequest,
     replyAdminSupport,
     sendSupportMessage,
@@ -39,6 +45,9 @@ import type {
     GenerationFeedback,
     HistoryDetail,
     HistoryListResult,
+    NewsListResult,
+    NewsPost,
+    NewsWriteBody,
     PatchRequestBody,
     PendingRequest,
     PendingResult,
@@ -62,6 +71,9 @@ export const queryKeys = {
   adminSupportThreads: ["admin", "support", "threads"] as const,
   adminSupportThread: (id: string) => ["admin", "support", "thread", id] as const,
   adminFeedback: ["admin", "feedback"] as const,
+  news: (type = "all") => ["news", { type }] as const,
+  newsPost: (id: string) => ["news", id] as const,
+  adminNews: ["admin", "news"] as const,
 };
 
 function invalidateHistory(qc: ReturnType<typeof useQueryClient>) {
@@ -324,5 +336,68 @@ export function useAdminFeedback(enabled = true): UseQueryResult<AdminFeedbackLi
     queryKey: queryKeys.adminFeedback,
     queryFn: ({ signal }) => fetchAdminFeedback({ limit: 80 }, signal),
     enabled,
+  });
+}
+
+function invalidateNews(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: ["news"] });
+  void qc.invalidateQueries({ queryKey: queryKeys.adminNews });
+}
+
+export function useNews(
+  type = "all",
+  enabled = true,
+): UseQueryResult<NewsListResult> {
+  return useQuery({
+    queryKey: queryKeys.news(type),
+    queryFn: ({ signal }) =>
+      fetchNews({ limit: 50, type: type === "all" ? undefined : type }, signal),
+    enabled,
+  });
+}
+
+export function useNewsPost(id: string | undefined): UseQueryResult<NewsPost> {
+  return useQuery({
+    queryKey: queryKeys.newsPost(id ?? ""),
+    queryFn: ({ signal }) => fetchNewsPost(id!, signal),
+    enabled: Boolean(id),
+  });
+}
+
+export function useAdminNews(enabled = true): UseQueryResult<NewsListResult> {
+  return useQuery({
+    queryKey: queryKeys.adminNews,
+    queryFn: ({ signal }) => fetchAdminNews({ limit: 80 }, signal),
+    enabled,
+  });
+}
+
+export function useCreateNewsPost() {
+  const qc = useQueryClient();
+  return useMutation<NewsPost, unknown, NewsWriteBody>({
+    mutationFn: (body) => createNewsPost(body),
+    onSuccess: () => invalidateNews(qc),
+  });
+}
+
+export function usePatchNewsPost() {
+  const qc = useQueryClient();
+  return useMutation<NewsPost, unknown, { id: string; body: NewsWriteBody }>({
+    mutationFn: ({ id, body }) => patchNewsPost(id, body),
+    onSuccess: (data) => {
+      invalidateNews(qc);
+      void qc.invalidateQueries({ queryKey: queryKeys.newsPost(data.id) });
+    },
+  });
+}
+
+export function useDeleteNewsPost() {
+  const qc = useQueryClient();
+  return useMutation<{ ok: boolean }, unknown, string>({
+    mutationFn: (id) => deleteNewsPost(id),
+    onSuccess: (_data, id) => {
+      invalidateNews(qc);
+      qc.removeQueries({ queryKey: queryKeys.newsPost(id) });
+    },
   });
 }

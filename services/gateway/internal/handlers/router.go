@@ -25,6 +25,7 @@ type Deps struct {
 	AdminRepo    store.AdminRepository
 	SupportRepo  store.SupportRepository
 	FeedbackRepo store.FeedbackRepository
+	NewsRepo     store.NewsRepository
 	Tokens       *auth.TokenService
 }
 
@@ -148,6 +149,23 @@ func NewRouter(cfg config.Config, deps Deps) http.Handler {
 		mux.HandleFunc("GET "+config.APIPrefix+"/requests/{id}/feedback", protect(newFeedbackGetHandler(fd)))
 		mux.HandleFunc("PUT "+config.APIPrefix+"/requests/{id}/feedback", protect(newFeedbackPutHandler(fd)))
 		mux.HandleFunc("GET "+config.APIPrefix+"/admin/feedback", protectAdmin(newAdminFeedbackListHandler(deps.FeedbackRepo)))
+	}
+
+	// ─── Новости и релизы
+	if deps.NewsRepo != nil {
+		mux.HandleFunc("GET "+config.APIPrefix+"/news", protect(newNewsListHandler(deps.NewsRepo)))
+		mux.HandleFunc("GET "+config.APIPrefix+"/news/{id}", protect(newNewsDetailHandler(deps.NewsRepo)))
+		mux.HandleFunc("GET "+config.APIPrefix+"/admin/news", protectAdmin(newAdminNewsListHandler(deps.NewsRepo)))
+		mux.HandleFunc("GET "+config.APIPrefix+"/admin/news/{id}", protectAdmin(newAdminNewsDetailHandler(deps.NewsRepo)))
+		mux.HandleFunc("POST "+config.APIPrefix+"/admin/news", protectAdmin(newAdminNewsCreateHandler(deps.NewsRepo)))
+		mux.HandleFunc("PATCH "+config.APIPrefix+"/admin/news/{id}", protectAdmin(newAdminNewsPatchHandler(deps.NewsRepo)))
+		mux.HandleFunc("DELETE "+config.APIPrefix+"/admin/news/{id}", protectAdmin(newAdminNewsDeleteHandler(deps.NewsRepo)))
+	} else {
+		unavail := newUnavailableHandler()
+		mux.HandleFunc("GET "+config.APIPrefix+"/news", unavail)
+		mux.HandleFunc("GET "+config.APIPrefix+"/news/{id}", unavail)
+		mux.HandleFunc("GET "+config.APIPrefix+"/admin/news", unavail)
+		mux.HandleFunc("POST "+config.APIPrefix+"/admin/news", unavail)
 	}
 
 	return withCommonMiddleware(cfg, mux)

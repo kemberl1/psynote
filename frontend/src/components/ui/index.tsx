@@ -42,9 +42,11 @@ export function Button({
 }
 
 // ─── Badge ──────────────────────────────────────────────────────────────────
+type BadgeTone = "default" | "accent" | "success" | "warning";
+
 interface BadgeProps {
   children: ReactNode;
-  tone?: "default" | "accent" | "success";
+  tone?: BadgeTone;
   mono?: boolean;
 }
 

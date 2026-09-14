@@ -1,4 +1,4 @@
-// Каркас админки: вкладки «Корпус / Поддержка / Отзывы».
+// Каркас админки: вкладки «Корпус / Поддержка / Отзывы / Новости».
 import { NavLink, Outlet } from "react-router-dom";
 import { useAdminSupportSummary } from "../api/queries";
 import "./admin.css";
@@ -21,6 +21,9 @@ export function AdminLayout() {
         </NavLink>
         <NavLink to="/admin/feedback" className={tabClass}>
           Отзывы
+        </NavLink>
+        <NavLink to="/admin/news" className={tabClass}>
+          Новости
         </NavLink>
       </nav>
       <Outlet />

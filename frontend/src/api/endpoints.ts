@@ -28,6 +28,9 @@ import type {
   RegisterResult,
   SupportMessage,
   SupportSummary,
+  NewsListResult,
+  NewsPost,
+  NewsWriteBody,
   SupportThreadListItem,
   SupportThreadListResult,
   SupportThreadView,
@@ -256,4 +259,62 @@ export async function fetchAdminFeedback(
   );
   const list = items ?? [];
   return { items: list, total: total || list.length };
+}
+
+// ─── Новости и релизы ──────────────────────────────────────────────────────
+
+export async function fetchNews(
+  params: { limit?: number; offset?: number; type?: string } = {},
+  signal?: AbortSignal,
+): Promise<NewsListResult> {
+  let total = 0;
+  const items = await request<NewsPost[]>(
+    "/news",
+    { query: { limit: params.limit, offset: params.offset, type: params.type }, signal },
+    (env) => { total = env.meta?.total ?? 0; },
+  );
+  const list = items ?? [];
+  return { items: list, total: total || list.length };
+}
+
+export function fetchNewsPost(
+  id: string, signal?: AbortSignal,
+): Promise<NewsPost> {
+  return request<NewsPost>(`/news/${encodeURIComponent(id)}`, { signal });
+}
+
+export async function fetchAdminNews(
+  params: { limit?: number; offset?: number; type?: string } = {},
+  signal?: AbortSignal,
+): Promise<NewsListResult> {
+  let total = 0;
+  const items = await request<NewsPost[]>(
+    "/admin/news",
+    { query: { limit: params.limit, offset: params.offset, type: params.type }, signal },
+    (env) => { total = env.meta?.total ?? 0; },
+  );
+  const list = items ?? [];
+  return { items: list, total: total || list.length };
+}
+
+export function createNewsPost(
+  body: NewsWriteBody, signal?: AbortSignal,
+): Promise<NewsPost> {
+  return request<NewsPost>("/admin/news", { method: "POST", body, signal });
+}
+
+export function patchNewsPost(
+  id: string, body: NewsWriteBody, signal?: AbortSignal,
+): Promise<NewsPost> {
+  return request<NewsPost>(`/admin/news/${encodeURIComponent(id)}`, {
+    method: "PATCH", body, signal,
+  });
+}
+
+export function deleteNewsPost(
+  id: string, signal?: AbortSignal,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/admin/news/${encodeURIComponent(id)}`, {
+    method: "DELETE", signal,
+  });
 }

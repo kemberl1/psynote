@@ -119,6 +119,24 @@ export function formatDiaryDate(isoDate: string): string {
   return `${m[3]}.${m[2]}.${m[1]}`;
 }
 
+/** Дата новости: «сегодня», «вчера» или «12 сентября 2026». */
+export function formatNewsDate(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const startToday = new Date();
+  startToday.setHours(0, 0, 0, 0);
+  if (d >= startToday) return "сегодня";
+  const startYesterday = new Date(startToday);
+  startYesterday.setDate(startYesterday.getDate() - 1);
+  if (d >= startYesterday) return "вчера";
+  return d.toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
 /** Склонение «N персональных данных» (1 — данное, 2-4 — данных, ...). */
 export function pluralizePii(n: number): string {
   const mod10 = n % 10;

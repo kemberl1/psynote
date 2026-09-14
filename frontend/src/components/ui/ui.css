@@ -107,6 +107,11 @@
   border-color: var(--success-soft);
   background: var(--success-soft);
 }
+.ui-badge--warning {
+  color: var(--warning);
+  border-color: var(--warning-soft);
+  background: var(--warning-soft);
+}
 .ui-badge--mono {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);

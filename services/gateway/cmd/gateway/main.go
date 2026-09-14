@@ -99,9 +99,11 @@ func main() {
 
 	var supportRepo store.SupportRepository
 	var feedbackRepo store.FeedbackRepository
+	var newsRepo store.NewsRepository
 	if pgRepo != nil {
 		supportRepo = pgRepo
 		feedbackRepo = pgRepo
+		newsRepo = pgRepo
 	}
 
 	mux := handlers.NewRouter(cfg, handlers.Deps{
@@ -112,6 +114,7 @@ func main() {
 		AdminRepo:    adminRepo,
 		SupportRepo:  supportRepo,
 		FeedbackRepo: feedbackRepo,
+		NewsRepo:     newsRepo,
 		Tokens:       tokens,
 	})
 

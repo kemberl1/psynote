@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { documentTypeLabel, formatDateTimeShort } from "./format";
+import { documentTypeLabel, formatDateTimeShort, formatNewsDate } from "./format";
 
 describe("documentTypeLabel", () => {
   it("calls batch a period, not a packet", () => {
@@ -18,5 +18,12 @@ describe("formatDateTimeShort", () => {
     const out = formatDateTimeShort(local.toISOString());
     expect(out).toMatch(/14/);
     expect(out).toMatch(/15[:.]42/);
+  });
+});
+
+describe("formatNewsDate", () => {
+  it("prints a calendar date for older posts", () => {
+    expect(formatNewsDate("2026-01-15T10:00:00Z")).toMatch(/15/);
+    expect(formatNewsDate("2026-01-15T10:00:00Z")).toMatch(/2026/);
   });
 });

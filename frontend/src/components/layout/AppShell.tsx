@@ -8,7 +8,7 @@ import "./layout.css";
 
 export function AppShell() {
   const { pathname } = useLocation();
-  const wide = pathname.startsWith("/admin");
+  const wide = pathname.startsWith("/admin") || pathname.startsWith("/news");
 
   return (
     <div className="shell">
