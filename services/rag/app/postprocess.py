@@ -98,10 +98,57 @@ _ADMISSION_PLOT_RE = re.compile(
     r"направлен\w*\s+на\s+госпитализац|"
     r"пакет документов|"
     r"интернат|"
-    r"\bдд[ие]\b"
+    r"\bдд[ие]\b|"
+    r"при[её]мн\w*\s+поко|"
+    r"сантранспорт|"
+    r"доставлен\w*.{0,48}при[её]мн|"
+    r"после выписки|"
+    r"мать забрала|"
+    r"рекомендованн\w+\s+лечени\w+\s+принимал"
     r")[^.!?\n]*[.!?]?",
     re.I,
 )
+
+# Плейсхолдеры анонимайзера, которых не должно быть в готовом дневнике.
+# [ДАТА], [ФИО_ВРАЧА], [НОМЕР_ИБ] — штатные, их не трогаем.
+_LEAK_PLACEHOLDER_RE = re.compile(
+    r"\[(?:УЧРЕЖДЕНИЕ|НОМЕР_ДОКУМЕНТА|ПАЦИЕНТ|АДРЕС|ТЕЛЕФОН)\]",
+)
+
+_HOLD_ATTEMPT_RE = re.compile(r"при попытке удержани\w*", re.I)
+_HOLD_BY_HAND_RE = re.compile(r"при удержании за руку", re.I)
+
+_FULLY_CALMED_RE = re.compile(
+    r"после фиксации успокоил\w*(?!\s+непродолжительн)",
+    re.I,
+)
+_STILL_AGITATED_RE = re.compile(
+    r"не успокоил|успокоил\w*\s+непродолжительн|"
+    r"вновь\s+(?:становил\w*|стал\w*)\s+возбудим|"
+    r"затем\s+вновь",
+    re.I,
+)
+_INJECTION_SENT_RE = re.compile(
+    r"[^.!?\n]*инъекц[^.!?\n]*[.!?]?",
+    re.I,
+)
+
+_WEEKEND_FORMULA_RE = re.compile(
+    r"за период выходных дней[^.!?\n]*дежурн\w*\s+мед\s+персонал[^.!?\n]*[.!?]?",
+    re.I,
+)
+_HYGIENE_DUMP_RE = re.compile(
+    r"[^.!?\n]*одевает[^.!?\n]{0,80}гигиеническ[^.!?\n]*[.!?]?",
+    re.I,
+)
+
+_ANAMNESIS_LABELS = (
+    "Анамнез заболевания (дополнения к анамнезу)",
+    "Анамнез жизни (дополнения к анамнезу)",
+)
+_ADDITIONAL_LABEL = "Дополнительные сведения о заболевании"
+_STATUS_LABEL_PREFIX = "Психический статус"
+_EPICRISIS_LABEL = "Этапный эпикриз"
 
 _DRUG_REDACT = "[препарат другого пациента — не копировать]"
 
@@ -166,6 +213,7 @@ def sanitize_corpus_sample(text: str) -> str:
     if not text:
         return text
     out = _ADMISSION_PLOT_RE.sub(" ", text)
+    out = _LEAK_PLACEHOLDER_RE.sub("", out)
     out = _normalize_restraint_language(out)
     out = _DRUG_FIND_RE.sub(_DRUG_REDACT, out)
     out = re.sub(r"[ \t]{2,}", " ", out)
@@ -173,7 +221,13 @@ def sanitize_corpus_sample(text: str) -> str:
     return out.strip()
 
 
-def polish_diary(text: str, *, allowed_drugs: set[str] | None = None) -> str:
+def polish_diary(
+    text: str,
+    *,
+    allowed_drugs: set[str] | None = None,
+    lock_anamnesis: bool = False,
+    lock_additional_none: bool = False,
+) -> str:
     """Исправить типовые срывы модели в уже сгенерированном тексте."""
     if not text:
         return text
@@ -181,16 +235,26 @@ def polish_diary(text: str, *, allowed_drugs: set[str] | None = None) -> str:
     out = _replace_english_leaks(out)
     out = _OCLIKI_RE.sub("на замечания", out)
     out = _normalize_restraint_language(out)
+    out = _LEAK_PLACEHOLDER_RE.sub("", out)
+    out = _scrub_history_sections(
+        out,
+        lock_anamnesis=lock_anamnesis,
+        lock_additional_none=lock_additional_none,
+    )
     out = _reroute_therapy_fields(out)
+    out = _drop_injection_if_calmed(out)
     if allowed_drugs is not None:
         out = _strip_unmentioned_drugs(out, allowed_drugs)
         out = _collapse_empty_plan(out)
+    out = re.sub(r"[ \t]{2,}", " ", out)
     return out
 
 
 def _normalize_restraint_language(text: str) -> str:
     """«Физическое удержание» → формула корпуса; мягкую фиксацию не трогать."""
     out = _ILLEGAL_HOLD_RE.sub(_LEGAL_FIXATION, text)
+    out = _HOLD_ATTEMPT_RE.sub("при попытке остановить", out)
+    out = _HOLD_BY_HAND_RE.sub("если взять за руку", out)
     out = _STAFF_HOLD_RE.sub("удерживается", out)
 
     def _staff_help(match: re.Match[str]) -> str:
@@ -210,6 +274,106 @@ def _normalize_restraint_language(text: str) -> str:
     out = re.sub(r" +\n", "\n", out)
     out = re.sub(r"\n{3,}", "\n\n", out)
     return out
+
+
+def _parse_labeled(line: str) -> tuple[str | None, str]:
+    m = re.match(r"^\s*(?:\*\*)?(.+?)(?:\*\*)?:\s*(.*)$", line)
+    if not m:
+        return None, ""
+    return m.group(1).strip(), m.group(2)
+
+
+def _scrub_additional_value(value: str, *, lock_none: bool) -> str:
+    if lock_none:
+        return "нет"
+    weekend = _WEEKEND_FORMULA_RE.search(value)
+    rest = _WEEKEND_FORMULA_RE.sub(" ", value)
+    rest = _ADMISSION_PLOT_RE.sub(" ", rest)
+    rest = _HYGIENE_DUMP_RE.sub(" ", rest)
+    rest = _LEAK_PLACEHOLDER_RE.sub("", rest)
+    rest = re.sub(r"\s+", " ", rest).strip(" ;,")
+    parts: list[str] = []
+    if weekend:
+        parts.append(weekend.group(0).strip().rstrip("."))
+    for sent in _sentences(rest):
+        if not _clinical_enough(sent):
+            continue
+        if _HYGIENE_RE.search(sent) and len(sent) < 140:
+            continue
+        parts.append(sent.rstrip("."))
+        if len(parts) >= 3:
+            break
+    if not parts:
+        return "нет"
+    return ". ".join(parts) + "."
+
+
+def _scrub_history_sections(
+    text: str,
+    *,
+    lock_anamnesis: bool,
+    lock_additional_none: bool,
+) -> str:
+    """Интернат/приёмный покой не должны жить в анамнезе, статусе и доп. сведениях."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        label, value = _parse_labeled(line)
+        if not label:
+            continue
+        if label in _ANAMNESIS_LABELS:
+            if lock_anamnesis:
+                lines[i] = _rewrite_labeled(line, "без дополнений")
+                continue
+            cleaned = _ADMISSION_PLOT_RE.sub(" ", value)
+            cleaned = _LEAK_PLACEHOLDER_RE.sub("", cleaned)
+            cleaned = re.sub(r"\s+", " ", cleaned).strip(" ;,.")
+            lines[i] = _rewrite_labeled(line, cleaned or "без дополнений")
+        elif label == _ADDITIONAL_LABEL:
+            lines[i] = _rewrite_labeled(
+                line,
+                _scrub_additional_value(
+                    value, lock_none=lock_additional_none,
+                ),
+            )
+        elif label.startswith(_STATUS_LABEL_PREFIX) or label == _EPICRISIS_LABEL:
+            cleaned = _ADMISSION_PLOT_RE.sub(" ", value)
+            cleaned = _LEAK_PLACEHOLDER_RE.sub("", cleaned)
+            cleaned = re.sub(r"\s+", " ", cleaned).strip()
+            if cleaned:
+                lines[i] = _rewrite_labeled(line, cleaned)
+    return "\n".join(lines)
+
+
+def _drop_injection_if_calmed(text: str) -> str:
+    """После фиксации успокоился полностью — инъекцию на тот же эпизод не оставляем."""
+    lines = text.split("\n")
+    status = ""
+    plan_idx: int | None = None
+    for i, line in enumerate(lines):
+        label, value = _parse_labeled(line)
+        if not label:
+            continue
+        if label.startswith(_STATUS_LABEL_PREFIX):
+            status = value
+        elif label == "План лечения (дополнения к плану)":
+            plan_idx = i
+    if plan_idx is None or not status:
+        return text
+    if _STILL_AGITATED_RE.search(status):
+        return text
+    if not _FULLY_CALMED_RE.search(status):
+        return text
+    plan_line = lines[plan_idx]
+    _, plan_val = _parse_labeled(plan_line)
+    cleaned = _INJECTION_SENT_RE.sub(" ", plan_val)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ;,.")
+    if not cleaned or not _CORRECTION_RE.search(cleaned):
+        lines[plan_idx] = _rewrite_labeled(plan_line, _PLAN_EMPTY)
+    else:
+        if cleaned[-1] not in ".!?":
+            cleaned += "."
+        lines[plan_idx] = _rewrite_labeled(plan_line, cleaned)
+    return "\n".join(lines)
 
 
 def _drug_clause_re(stem: str) -> re.Pattern[str]:

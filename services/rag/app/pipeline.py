@@ -222,9 +222,17 @@ class DiaryGenerator:
         if mapped.director_note:
             blob = blob + "\n" + mapped.director_note
         allowed = mentioned_drugs(blob)
+        prompt_joined = "\n".join(mapped.prompt_lines)
 
         return GenerationResult(
-            content=polish_diary(result.content, allowed_drugs=allowed),
+            content=polish_diary(
+                result.content,
+                allowed_drugs=allowed,
+                lock_anamnesis="Анамнез жизни: без дополнений." in prompt_joined,
+                lock_additional_none=(
+                    "Дополнительные сведения о заболевании: нет." in prompt_joined
+                ),
+            ),
             model_used=result.model,
             tokens_used=int(result.usage.get("total_tokens", 0) or 0),
             chunks_used=len(samples),

@@ -3,6 +3,7 @@
 // Режиссёрский контекст передаётся как __arc_context__ — специальное поле,
 // которое RAG-сервис инжектирует в системный промпт, а НЕ в текст дневника.
 import type { Answers } from "../api/types";
+import { fixObviousTypos } from "./typoFixes";
 import {
     applyBriefToAnswers,
     compileArc,
@@ -473,7 +474,7 @@ export function buildGenerateAnswers(
   const diagnosisStr =
     typeof diagnosisValue === "string" ? diagnosisValue.trim() : "";
   if (diagnosisStr) {
-    withBrief.diagnosis = diagnosisStr;
+    withBrief.diagnosis = fixObviousTypos(diagnosisStr);
   }
   withBrief.diary_date = isoDate;
   if (typeof batchAnswers.patient_sex === "string" && batchAnswers.patient_sex) {

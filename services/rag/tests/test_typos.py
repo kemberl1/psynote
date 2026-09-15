@@ -9,6 +9,14 @@ def test_fix_obvious_typos_syndrome() -> None:
     assert "Синдром психомоторной расторможенности" in out
 
 
+def test_fix_psikhomotonoy_typo() -> None:
+    src = "Синдром психомотоной расторможенности. убгает через забор."
+    out = fix_obvious_typos(src)
+    assert "психомотоной" not in out
+    assert "психомоторной" in out
+    assert "убегает" in out
+
+
 def test_fix_obvious_typos_leaves_correct_text() -> None:
     src = "Синдром психомоторной расторможенности"
     assert fix_obvious_typos(src) == src

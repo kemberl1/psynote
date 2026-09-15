@@ -3,6 +3,7 @@
 // с 1–2 новыми наблюдениями. Этот модуль «допетривает» дугу без копипаста.
 
 import type { Answers } from "../api/types";
+import { fixObviousTypos } from "./typoFixes";
 
 export interface ArcDayPlan {
   isoDate: string;
@@ -46,6 +47,8 @@ export interface DayBrief {
    * после выходных (не первые 3 дня госпитализации). Иначе null.
    */
   weekendDutyNote: string | null;
+  /** События сб–вс — только в доп. сведения понедельника, не как «сегодня». */
+  weekendRecapNotes: string[];
 }
 
 export interface CompileArcInput {
@@ -128,6 +131,11 @@ export function isAdmissionHistory(s: string): boolean {
   if (/до\s+госпитализац|до\s+поступлен/.test(lower) && /интернат|дд[ие]|направлен/.test(lower)) {
     return true;
   }
+  if (/при[её]мн\w*\s+поко|в при[её]мн/.test(lower)) return true;
+  if (/сантранспорт/.test(lower)) return true;
+  if (/доставлен/.test(lower) && /при[её]мн|стационар|госпитализ/.test(lower)) return true;
+  if (/после выписки/.test(lower)) return true;
+  if (/рекомендованн\w+\s+лечени\w+\s+принимал/.test(lower)) return true;
   return false;
 }
 
@@ -269,7 +277,16 @@ function calendarFor(iso: string): DayCalendar {
 
 function diagnosisText(batchAnswers: Answers): string {
   const raw = batchAnswers.diagnosis;
-  return typeof raw === "string" ? raw.trim() : "";
+  return typeof raw === "string" ? fixObviousTypos(raw.trim()) : "";
+}
+
+/** Возбуждение СЕГОДНЯ — повод для каскада мягкой фиксации, не «с трудом поддаётся». */
+export function observationsNeedFixation(observations: string[]): boolean {
+  const blob = observations.join(" ").toLowerCase();
+  if (!blob.trim()) return false;
+  return /возбужд|агресс|не подда|замах|кричал|кричит|остро.{0,20}замечан|фиксац/.test(
+    blob,
+  );
 }
 
 function cognitiveLockLines(diagnosis: string): string[] {
@@ -840,19 +857,24 @@ function attachWeekendRecaps(briefs: DayBrief[]): void {
       weekendDutyNote(target.isoDate, target.dayNumber) ??
       dutyFormulaFromWeekend(b.isoDate);
     if (!formula) continue;
-    const extra = b.observations
-      .filter((o) => o.length > 24 && !/^За период/.test(o))
-      .slice(0, 2)
-      .join(" ");
-    if (!target.weekendDutyNote) {
-      target.weekendDutyNote = extra ? `${formula.replace(/\.$/, "")}. ${extra}` : formula;
-    } else if (extra && !target.weekendDutyNote.includes(extra.slice(0, 24))) {
-      target.weekendDutyNote = `${target.weekendDutyNote.replace(/\.$/, "")}. ${extra}`;
+    const extras = b.observations.filter(
+      (o) =>
+        o.length > 24 &&
+        !/^За период/.test(o) &&
+        !isAdmissionHistory(o) &&
+        !isTherapyLeakObservation(o),
+    );
+    if (!target.weekendDutyNote) target.weekendDutyNote = formula;
+    for (const o of extras.slice(0, 2)) {
+      if (!target.weekendRecapNotes.some((x) => x.slice(0, 24) === o.slice(0, 24))) {
+        target.weekendRecapNotes.push(o);
+      }
     }
   }
   for (const b of briefs) {
     if (b.calendar === "saturday" || b.calendar === "sunday") {
       b.weekendDutyNote = null;
+      b.weekendRecapNotes = [];
     }
   }
 }
@@ -981,13 +1003,14 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
       observations: unique(dayObservations),
       forbidden: [],
       therapyToday,
-      historyNotes: role === "exam" ? facts.history.slice(0, 5) : [],
+      historyNotes: [],
       includeFinalState,
       lengthHint: role === "exam" ? "exam" : role === "quiet" ? "short" : "medium",
       weekendRecap: priorWeekendInPacket(days, index),
       weekendDutyNote: priorWeekendInPacket(days, index)
         ? weekendDutyNote(day.isoDate, day.dayNumber)
         : null,
+      weekendRecapNotes: [],
     };
   });
 
@@ -1131,39 +1154,59 @@ export function formatDayBrief(
     for (const o of brief.observations) lines.push(`• ${o}`);
   }
   if (brief.therapyToday) {
+    const injection = /инъекц/i.test(brief.therapyToday);
+    const agitated = observationsNeedFixation(brief.observations);
     lines.push(
       `Сегодня коррекция/инъекция — пиши ТОЛЬКО в «План лечения (дополнения к плану)». ` +
         `«Назначения» всегда: «см. лист назначений». ` +
         `В психический статус — эпизод поведения БЕЗ препаратов, доз и инъекций. ` +
         `Текст для плана лечения: ${brief.therapyToday}`,
     );
+    if (injection && agitated) {
+      lines.push(
+        "Инъекция на сегодня — только если после мягкой фиксации НЕ успокоился (или успокоился непродолжительно). Если после фиксации успокоился — «План лечения: без дополнений», инъекцию не пиши.",
+      );
+    }
   } else {
     lines.push(
       "Терапию и дозировки сегодня НЕ перечисляй — «Назначения: см. лист назначений», «План лечения: без дополнений». Не переноси смены схемы с других дат. Не копируй препараты из образцов корпуса (перициазин, хлорпромазин и любые другие, которых нет в брифе).",
     );
   }
-  lines.push(
-    "ЗАПРЕЩЕНО: «физическое удержание», «удержание персоналом», иммобилизация, «требуется помощь персонала» как мера при возбуждении. " +
-      "ГРАМОТНО, как в корпусе отделения: если сегодня возбуждение / каприз / остро на замечания / вербальной коррекции не поддавался — в статусе каскад: поведение → замечания/вербальная коррекция → «в связи с этим применена мягкая фиксация конечностей на 20 минут (или срок из брифа) под контролем медперсонала» → после фиксации успокоился или не успокоился. " +
-      "Если не успокоился и в брифе сегодня есть инъекция — это коррекция в «Плане лечения», препарат только из брифа. " +
-      "Тихий день без такого эпизода — мягкую фиксацию не выдумывай. " +
-      "«с помощью персонала» — только одевание, мытьё, еда.",
-  );
-  lines.push(
-    "Интернат, ДДИ, направление на госпитализацию, «мать забрала до поступления» — анамнез жизни, не событие этого дня в отделении. Ребёнок сейчас в стационаре. Не пиши «сегодня выдан пакет документов» и «сегодня мать забрала из интерната».",
-  );
-  if (brief.historyNotes.length > 0) {
+  if (observationsNeedFixation(brief.observations)) {
     lines.push(
-      "Фон/анамнез поступления (НЕ событие СЕГОДНЯ). В осмотре 10 дней можно кратко в «Анамнез жизни», без «сегодня»:",
+      "ЗАПРЕЩЕНО: «физическое удержание», «удержание персоналом», «при попытке удержания», иммобилизация. " +
+        "ГРАМОТНО: сегодня есть возбуждение — в статусе каскад: поведение → замечания/вербальная коррекция → «в связи с этим применена мягкая фиксация конечностей на 20 минут (или срок из брифа) под контролем медперсонала» → после фиксации успокоился или не успокоился. " +
+        "Если не успокоился и в брифе сегодня есть инъекция — это коррекция в «Плане лечения», препарат только из брифа. " +
+        "«с помощью персонала» — только одевание, мытьё, еда.",
     );
-    for (const h of brief.historyNotes) lines.push(`• ${h}`);
+  } else {
+    lines.push(
+      "ЗАПРЕЩЕНО: «физическое удержание», «при попытке удержания». Сегодня нет эпизода возбуждения (крик / замах / не поддавался коррекции) — мягкую фиксацию не выдумывай, даже если она есть в образцах корпуса. «с помощью персонала» — только одевание, мытьё, еда.",
+    );
+  }
+  lines.push(
+    "Интернат, ДДИ, направление на госпитализацию, «мать забрала до поступления», приёмный покой, сантранспорт, «после выписки» — не событие этого дня и не дополнение анамнеза этого бланка. Ребёнок сейчас в стационаре. Анамнез жизни и заболевания: «без дополнений». Не пиши «сегодня выдан пакет документов» и «сегодня мать забрала из интерната». Не оставляй [УЧРЕЖДЕНИЕ] / [НОМЕР_ДОКУМЕНТА].",
+  );
+  if (brief.role === "exam") {
+    lines.push(
+      "Осмотр 10 дней: «Анамнез жизни» и «Анамнез заболевания» оставь «без дополнений». Не копируй интернат/ДДИ/направление даже «для полноты».",
+    );
+  }
+  if (brief.weekendRecapNotes.length > 0) {
+    lines.push(
+      "За выходные (ТОЛЬКО строка «Дополнительные сведения о заболевании», не статус сегодня и не анамнез). Перескажи 1–2 предложениями, не копируй сырые заметки:",
+    );
+    for (const n of brief.weekendRecapNotes) lines.push(`• ${n}`);
   }
   if (brief.includeFinalState) {
     const fs = batchAnswers.final_state;
     if (typeof fs === "string" && fs.trim()) {
-      lines.push(
-        `Целевое/текущее состояние (можно опереться, не копировать дословно): ${fs.trim()}`,
-      );
+      const usable = splitSentences(fs).filter((s) => !isAdmissionHistory(s));
+      if (usable.length > 0) {
+        lines.push(
+          `Целевое/текущее состояние (можно опереться, не копировать дословно): ${usable.join(" ")}`,
+        );
+      }
     }
   } else {
     lines.push(
@@ -1227,11 +1270,17 @@ export function applyBriefToAnswers(
   if (brief.weekendDutyNote) {
     out.additional_info = "present";
     out.additional_info_detail = brief.weekendDutyNote;
+  } else {
+    out.additional_info = "none";
   }
+  out.anamnesis_disease = "no_additions";
+  out.anamnesis_life = "no_additions";
   out.prescriptions = "see_list";
   if (brief.therapyToday) {
     out.treatment_plan = "adjusted";
     out.treatment_plan_detail = brief.therapyToday;
+  } else {
+    out.treatment_plan = "no_change";
   }
   if (brief.moodDetail.length > 0) out.mood_detail = brief.moodDetail;
   if (brief.behavior === "violates" || brief.behavior === "restless") {

@@ -144,5 +144,19 @@ def test_pick_style_samples_drops_assignments_and_boosts_fixation() -> None:
     ]
     quiet = pick_style_samples(samples, agitation=False, limit=4)
     assert all(s.get("section") != "assignments" for s in quiet)
+    assert all("фиксац" not in (s.get("text") or "").lower() for s in quiet)
     hot = pick_style_samples(samples, agitation=True, limit=4)
     assert "фиксац" in hot[0]["text"].lower()
+
+
+def test_pick_style_samples_drops_admission_plot() -> None:
+    from app.retrieval import pick_style_samples
+    samples = [
+        {"text": "В приёмном покое метался, доставлен сантранспортом.",
+         "section": "full", "score": 0.9},
+        {"text": "Сознание ясное. В игровой смотрел телевизор.",
+         "section": "psych_status", "score": 0.4},
+    ]
+    out = pick_style_samples(samples, agitation=False, limit=4)
+    assert len(out) == 1
+    assert "телевизор" in out[0]["text"]

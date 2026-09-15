@@ -168,6 +168,11 @@ _PRESCRIPTION_DUMP_RE = re.compile(
     r"мг/сут|кап/сут|перициазин|назначени",
     re.I,
 )
+_ADMISSION_STYLE_RE = re.compile(
+    r"интернат|\bдд[ие]\b|при[её]мн\w*\s+поко|сантранспорт|"
+    r"после выписки|направлен\w*\s+на\s+госпитализац|мать забрала",
+    re.I,
+)
 _STATUS_SIGNAL_RE = re.compile(
     r"психическ\w*\s+статус|вербальн|замечан|аффект|контакт|фиксац|"
     r"настроен|поведен",
@@ -197,6 +202,10 @@ def pick_style_samples(
         if section in _DROP_SECTIONS:
             continue
         if _PRESCRIPTION_DUMP_RE.search(text) and not _STATUS_SIGNAL_RE.search(text):
+            continue
+        if _ADMISSION_STYLE_RE.search(text):
+            continue
+        if not agitation and "фиксац" in text.lower():
             continue
         seen.add(key)
         kept.append(sample)

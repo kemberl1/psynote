@@ -365,6 +365,22 @@ def test_field_behavior_query_does_not_ask_for_fixation() -> None:
     assert "мягкая фиксация" not in q
 
 
+def test_hard_verbal_correction_query_does_not_ask_for_fixation() -> None:
+    from app.generation import query_is_agitation
+    mapped = map_answers(DOC_TYPE_DAILY, {
+        "mood": "unstable",
+        "__arc_context__": (
+            "СЕГОДНЯ опиши через наблюдения врача ТОЛЬКО это:\n"
+            "• вербальной коррекции поддаётся с трудом, на замечания реагирует "
+            "непродолжительно, разрушает игрушки\n"
+            "ЗАПРЕЩЕНО: физическое удержание. ГРАМОТНО: мягкая фиксация.\n"
+        ),
+    })
+    assert query_is_agitation(mapped) is False
+    q = build_query_text(mapped, DOC_TYPE_DAILY)
+    assert "мягкая фиксация" not in q
+
+
 def test_agitation_retrieve_is_single_call() -> None:
     retrieve = _fake_retrieve([{"text": "Сознание ясное. Смотрел телевизор."}])
     gen = DiaryGenerator(

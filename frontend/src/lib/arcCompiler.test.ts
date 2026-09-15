@@ -5,6 +5,7 @@ import {
     extractFacts,
     inferSpeechLevel,
     isAdmissionHistory,
+    observationsNeedFixation,
     stripTherapyClauses,
     weekendDutyNote,
 } from "./arcCompiler";
@@ -205,7 +206,7 @@ describe("compileArc", () => {
     );
     expect(String(satAns.__arc_context__)).toMatch(/суббота|выходн/i);
     expect(sat?.weekendDutyNote).toBeNull();
-    expect(satAns.additional_info).toBeUndefined();
+    expect(satAns.additional_info).toBe("none");
     expect(String(satAns.__arc_context__)).toMatch(/отдельный дневник за сегодня НЕ пишется/i);
     expect(sun?.weekendDutyNote).toBeNull();
   });
@@ -589,7 +590,7 @@ describe("weekendDutyNote", () => {
       "daily",
       briefs[0],
     );
-    expect(early.additional_info).toBeUndefined();
+    expect(early.additional_info).toBe("none");
     expect(String(early.__arc_context__)).toMatch(/первых трёх дней/);
     expect(String(early.__arc_context__)).not.toMatch(/напиши РОВНО/);
   });
@@ -614,7 +615,11 @@ describe("admission history vs in-ward day", () => {
     expect(isAdmissionHistory("мать забрала ребенка из интерната")).toBe(true);
     expect(isAdmissionHistory("направление на госпитализацию в стационар")).toBe(true);
     expect(isAdmissionHistory("пребывание в ДДИ 5 дней в неделю")).toBe(true);
+    expect(isAdmissionHistory("в приёмном покое был неусидчив")).toBe(true);
+    expect(isAdmissionHistory("доставлен сантранспортом в приемное отделение")).toBe(true);
+    expect(isAdmissionHistory("после выписки рекомендованное лечение принимал неделю")).toBe(true);
     expect(isAdmissionHistory("вербальной коррекции не поддавался")).toBe(false);
+    expect(isAdmissionHistory("в палате ходил, залезал на кровати")).toBe(false);
   });
 
   it("does not put internat pickup or referral into daily observations", () => {
@@ -640,7 +645,22 @@ describe("admission history vs in-ward day", () => {
     expect(dailyBlob).not.toMatch(/инъекц/i);
     expect(dailyBlob).toMatch(/вербальн/i);
     const exam = briefs.find((b) => b.role === "exam");
-    expect(exam?.historyNotes.join(" ")).toMatch(/интернат|дд[ие]|госпитализац/i);
+    expect(exam?.historyNotes).toEqual([]);
+    const examAns = buildGenerateAnswers(
+      { overall_dynamics: "wavy", diagnosis: "F72.14 Умственная отсталость тяжелая" },
+      exam!.dayNumber,
+      days.length,
+      exam!.isoDate,
+      narrative,
+      "",
+      "exam_10d",
+      exam,
+    );
+    const examArc = String(examAns.__arc_context__);
+    expect(examArc).not.toMatch(/Фон\/анамнез поступления/);
+    expect(examArc).not.toMatch(/проживал в интернате/i);
+    expect(examArc).toMatch(/без дополнений/);
+    expect(examAns.anamnesis_life).toBe("no_additions");
     const injectionDay = briefs.find((b) => b.isoDate === "2026-08-07");
     expect(injectionDay?.therapyToday).toMatch(/хлорпромазин|инъекц/i);
     const quiet = briefs.find((b) => b.isoDate === "2026-07-28");
@@ -657,8 +677,26 @@ describe("admission history vs in-ward day", () => {
     );
     const arc = String(ans.__arc_context__);
     expect(arc).toMatch(/физическое удержание/);
-    expect(arc).toMatch(/мягкая фиксация/);
+    expect(arc).toMatch(/мягк[а-яё]* фиксац/);
     expect(arc).toMatch(/ЗАПРЕЩЕНО/);
+    expect(arc).toMatch(/не выдумывай/);
+    expect(arc).not.toMatch(/сегодня есть возбуждение/);
+  });
+});
+
+describe("observationsNeedFixation", () => {
+  it("flags a real agitation cascade, not mere hard verbal correction", () => {
+    expect(
+      observationsNeedFixation([
+        "кричал, замахивался, вербальной коррекции не поддавался",
+      ]),
+    ).toBe(true);
+    expect(
+      observationsNeedFixation([
+        "вербальной коррекции поддаётся с трудом, на замечания реагирует непродолжительно",
+      ]),
+    ).toBe(false);
+    expect(observationsNeedFixation(["в игровой смотрел телевизор"])).toBe(false);
   });
 });
 
