@@ -35,7 +35,7 @@ type Config struct {
 	// RAG service (Python FastAPI).
 	RAGBaseURL string
 	// RAGGenerateTimeout — щедрый таймаут на оркестрацию генерации (LLM долгая,
-	// docs/03 §10). Из ENV RAG_GENERATE_TIMEOUT_S (по умолчанию 120s).
+	// docs/03 §10). Из ENV RAG_GENERATE_TIMEOUT_S (по умолчанию 210s).
 	RAGGenerateTimeout time.Duration
 	// RAGHealthTimeout — короткий таймаут для health-проверки RAG.
 	RAGHealthTimeout time.Duration
@@ -79,7 +79,7 @@ func Load() Config {
 		// RAG_URL — предпочтительное имя (задание Этапа 5); RAG_BASE_URL —
 		// исторический алиас (каркас). Поддерживаем оба, RAG_URL выигрывает.
 		RAGBaseURL:         getEnv("RAG_URL", getEnv("RAG_BASE_URL", "http://rag:8000")),
-		RAGGenerateTimeout: getEnvDuration("RAG_GENERATE_TIMEOUT_S", 120*time.Second),
+		RAGGenerateTimeout: getEnvDuration("RAG_GENERATE_TIMEOUT_S", 210*time.Second),
 		RAGHealthTimeout:   getEnvDuration("RAG_HEALTH_TIMEOUT_S", 5*time.Second),
 		JWTSecret:          getEnv("JWT_SECRET", ""),
 		AccessTokenTTL:     getEnvDuration("ACCESS_TOKEN_TTL_S", 15*time.Minute),

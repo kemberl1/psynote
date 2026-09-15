@@ -89,8 +89,8 @@ services:
       LLM_MODEL_LARGE: ${LLM_MODEL_LARGE:-deepseek-v4-flash}
       LLM_MODEL_MEDIUM: ${LLM_MODEL_MEDIUM:-deepseek-v4-pro}
       LLM_MODEL_SMALL: ${LLM_MODEL_SMALL:-}
-      LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-60}
-      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
+      LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-170}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.4}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-2048}
       LLM_THINKING: ${LLM_THINKING:-disabled}
@@ -101,8 +101,9 @@ services:
       # Корпус мед.документов — ТОЛЬКО чтение (:ro). НЕ копируется в образ,
       # НЕ коммитится в git (.gitignore: Документы/). docs/03 §5.
       - ./Документы:/data/corpus:ro
-      # Кэш HF-моделей e5 — чтобы не качать модель при каждом запуске ingestion.
       - rag_hf_cache:/app/.cache/huggingface
+      # Живой код RAG без пересборки образа (только локальный compose).
+      - ./services/rag/app:/app/app
       # Опционально: кастомный CA-bundle для корпоративного прокси
       # (LLM_CA_BUNDLE=/app/certs/custom_ca.pem):
       # - ./deploy/certs/custom_ca.pem:/app/certs/custom_ca.pem:ro
@@ -125,7 +126,7 @@ services:
       QDRANT_URL: http://qdrant:6333
       # RAG-оркестрация (Этап 5): URL RAG-сервиса + щедрый таймаут на генерацию.
       RAG_URL: http://rag:8000
-      RAG_GENERATE_TIMEOUT_S: ${RAG_GENERATE_TIMEOUT_S:-120}
+      RAG_GENERATE_TIMEOUT_S: ${RAG_GENERATE_TIMEOUT_S:-210}
       RAG_HEALTH_TIMEOUT_S: ${RAG_HEALTH_TIMEOUT_S:-5}
       # Аутентификация (Этап 9, docs/09 §1). JWT_SECRET ОБЯЗАТЕЛЕН на проде.
       JWT_SECRET: ${JWT_SECRET:-change_me_dev_secret}

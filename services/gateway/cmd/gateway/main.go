@@ -118,18 +118,28 @@ func main() {
 		Tokens:       tokens,
 	})
 
+	writeTimeout := cfg.RAGGenerateTimeout + 30*time.Second
+	if writeTimeout < 90*time.Second {
+		writeTimeout = 90 * time.Second
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      120 * time.Second,
+		WriteTimeout:      writeTimeout,
 		IdleTimeout:       120 * time.Second,
 	}
 
 	// Graceful shutdown on SIGINT/SIGTERM.
 	go func() {
-		slog.Info("gateway starting", "addr", cfg.HTTPAddr, "api_prefix", config.APIPrefix)
+		slog.Info("gateway starting",
+			"addr", cfg.HTTPAddr,
+			"api_prefix", config.APIPrefix,
+			"generate_timeout", cfg.RAGGenerateTimeout.String(),
+			"write_timeout", writeTimeout.String(),
+		)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("http server failed", "error", err)
 			os.Exit(1)

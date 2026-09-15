@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
@@ -181,24 +182,12 @@ class DiaryGenerator:
         query = build_query_text(mapped, doc_type)
         agitation = query_is_agitation(mapped)
         try:
-            from app.retrieval import (
-                FIXATION_RETRIEVE_QUERY,
-                STYLE_SECTIONS,
-                pick_style_samples,
-            )
+            from app.retrieval import STYLE_SECTIONS, pick_style_samples
             retrieve = self._get_retrieve()
             samples = retrieve(
                 query, doc_type=doc_type, top_k=k,
                 syndrome=mapped.syndrome, diagnosis_class=mapped.diagnosis_class,
                 section=STYLE_SECTIONS)
-            if agitation and not any(
-                "фиксац" in (s.get("text") or "").lower() for s in samples
-            ):
-                extra = retrieve(
-                    FIXATION_RETRIEVE_QUERY, doc_type=doc_type, top_k=k,
-                    syndrome=None, diagnosis_class=None,
-                    section=STYLE_SECTIONS)
-                samples = list(extra) + list(samples)
             samples = pick_style_samples(samples, agitation=agitation)
         except Exception as exc:  # noqa: BLE001 — retrieval не должен ронять генерацию
             logger.warning("generate: retrieval недоступен (%s) — генерация без "
@@ -218,11 +207,16 @@ class DiaryGenerator:
         # Пакетный бриф: не даём температуре упасть до «канцелярита» из .env=0.4.
         if doc_type == DOC_TYPE_DAILY and mapped.director_note:
             temp = max(temp, 0.7)
+        prompt_chars = sum(len(m.content) for m in messages)
+        t0 = time.perf_counter()
         result: LLMResult = self._get_llm().generate(messages, temperature=temp)
+        llm_s = time.perf_counter() - t0
 
-        logger.info("generate: doc_type=%s, модель=%s, образцов=%d, токенов=%s",
-                    doc_type, result.model, len(samples),
-                    result.usage.get("total_tokens"))
+        logger.info(
+            "generate: doc_type=%s, модель=%s, образцов=%d, prompt_chars=%d, "
+            "llm_s=%.1f, токенов=%s",
+            doc_type, result.model, len(samples), prompt_chars, llm_s,
+            result.usage.get("total_tokens"))
 
         blob = flatten_answer_text(anon.answers)
         if mapped.director_note:

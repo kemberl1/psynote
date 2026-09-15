@@ -228,12 +228,15 @@ export function useDeleteRequest() {
   });
 }
 
-export function useSupportThread(enabled = true): UseQueryResult<SupportThreadView> {
+export function useSupportThread(
+  enabled = true,
+  refetchInterval: number | false = 8000,
+): UseQueryResult<SupportThreadView> {
   return useQuery({
     queryKey: queryKeys.supportThread,
     queryFn: ({ signal }) => fetchSupportThread(signal),
     enabled,
-    refetchInterval: 8000,
+    refetchInterval,
   });
 }
 

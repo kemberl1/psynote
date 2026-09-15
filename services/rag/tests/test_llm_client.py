@@ -20,6 +20,7 @@ from app.config import Settings
 from app.llm_client import (
     AllModelsUnavailableError,
     LLMAuthError,
+    LLMError,
     LLMMessage,
     LLMNotConfiguredError,
     OpenAICompatibleClient,
@@ -121,7 +122,8 @@ def test_success_first_model() -> None:
     def behavior(kwargs, n):
         return _Response("готовый дневник", kwargs["model"])
 
-    client = OpenAICompatibleClient(_settings(), openai_client=FakeOpenAI(behavior))
+    client = OpenAICompatibleClient(
+        _settings(), openai_client=FakeOpenAI(behavior))
     res = client.generate(_msgs())
     assert res.content == "готовый дневник"
     assert res.model == _MODEL_LARGE
@@ -144,16 +146,16 @@ def test_fallback_large_to_medium_to_small() -> None:
     assert used_models == [_MODEL_LARGE, _MODEL_MEDIUM, _MODEL_SMALL]
 
 
-def test_fallback_on_timeout() -> None:
-    """Timeout основной модели → фолбэк на следующую."""
+def test_timeout_does_not_retry_or_fallback() -> None:
+    """Timeout не ретраится и не гоняет вторую модель — иначе шлюз обрывает пакет."""
     def behavior(kwargs, n):
-        if kwargs["model"] == _MODEL_LARGE:
-            raise _timeout_error()
-        return _Response("ok", kwargs["model"])
+        raise _timeout_error()
 
-    client = OpenAICompatibleClient(_settings(), openai_client=FakeOpenAI(behavior))
-    res = client.generate(_msgs())
-    assert res.model == _MODEL_MEDIUM
+    fake = FakeOpenAI(behavior)
+    client = OpenAICompatibleClient(_settings(), openai_client=fake)
+    with pytest.raises(LLMError, match="timeout"):
+        client.generate(_msgs())
+    assert len(fake.chat.completions.calls) == 1
 
 
 def test_auth_error_no_retry_no_fallback() -> None:
@@ -190,7 +192,8 @@ def test_retries_within_model_before_fallback() -> None:
         return _Response("ok", kwargs["model"])
 
     fake = FakeOpenAI(behavior)
-    client = OpenAICompatibleClient(_settings(llm_max_retries=2), openai_client=fake)
+    client = OpenAICompatibleClient(
+        _settings(llm_max_retries=2), openai_client=fake)
     res = client.generate(_msgs())
     assert res.model == _MODEL_MEDIUM
     calls = [c["model"] for c in fake.chat.completions.calls]

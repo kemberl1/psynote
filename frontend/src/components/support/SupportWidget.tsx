@@ -26,7 +26,7 @@ export function SupportWidget() {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
-  const { data, isPending } = useSupportThread();
+  const { data, isPending } = useSupportThread(true, open ? 5000 : 30_000);
   const send = useSendSupportMessage();
   const markRead = useMarkSupportRead();
   const messages = data?.messages ?? [];

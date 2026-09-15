@@ -103,8 +103,8 @@ class Settings:
     # У DeepSeek сейчас две модели — small по умолчанию пустой (фолбэк flash→pro).
     llm_model_small: str = os.getenv("LLM_MODEL_SMALL", "")
     # Тайм-аут одного запроса к LLM (сек) и число ретраев ВНУТРИ одной модели.
-    llm_timeout_s: float = float(os.getenv("LLM_TIMEOUT_S", "60"))
-    llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", "3"))
+    llm_timeout_s: float = float(os.getenv("LLM_TIMEOUT_S", "170"))
+    llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
     # Backoff: начальная задержка и максимум (экспоненциальный с джиттером).
     llm_backoff_initial_s: float = float(
         os.getenv("LLM_BACKOFF_INITIAL_S", "1.0"))

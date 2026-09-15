@@ -349,6 +349,37 @@ def test_quiet_day_query_does_not_ask_for_fixation() -> None:
     assert "мягкая фиксация" not in q
 
 
+def test_field_behavior_query_does_not_ask_for_fixation() -> None:
+    from app.generation import query_is_agitation
+    mapped = map_answers(DOC_TYPE_DAILY, {
+        "mood": "even",
+        "__arc_context__": (
+            "СЕГОДНЯ опиши через наблюдения врача ТОЛЬКО это:\n"
+            "• полевое поведение, ходил по палате, расторможен\n"
+            "ЗАПРЕЩЕНО: физическое удержание. ГРАМОТНО: мягкая фиксация.\n"
+        ),
+    })
+    assert query_is_agitation(mapped) is False
+    q = build_query_text(mapped, DOC_TYPE_DAILY)
+    assert "полевое" in q
+    assert "мягкая фиксация" not in q
+
+
+def test_agitation_retrieve_is_single_call() -> None:
+    retrieve = _fake_retrieve([{"text": "Сознание ясное. Смотрел телевизор."}])
+    gen = DiaryGenerator(
+        _settings(), anonymizer=FakeAnonymizer(), llm=FakeLLM(),
+        retrieve_fn=retrieve)
+    gen.generate(DOC_TYPE_DAILY, {
+        "mood": "unstable",
+        "__arc_context__": (
+            "СЕГОДНЯ опиши через наблюдения врача ТОЛЬКО это:\n"
+            "• вербальной коррекции не поддавался, кричал\n"
+        ),
+    })
+    assert len(retrieve.calls) == 1
+
+
 # ─── Этап 7: новые/изменённые вопросы дерева docs/06 ────────────────────────
 def test_map_daily_new_conditional_multiselects() -> None:
     """Новые условные multiselect daily (sleep_detail, events, behavior_detail)."""

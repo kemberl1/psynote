@@ -220,7 +220,10 @@ class OpenAICompatibleClient(LLMClient):
                     "LLM: ошибка авторизации — прекращаю перебор моделей")
                 raise
             except LLMError as exc:
-                # Исчерпаны ретраи этой модели / она недоступна — следующая.
+                # Таймаут уже съел бюджет запроса — вторая модель = двойное ожидание
+                # и обрыв шлюзом. 5xx/сеть — пробуем следующую.
+                if not exc.retryable:
+                    raise
                 failures.append(model)
                 logger.warning("LLM: модель '%s' недоступна (%s) — пробую следующую",
                                model, type(exc).__name__)
@@ -277,7 +280,7 @@ class OpenAICompatibleClient(LLMClient):
             raise LLMError("LLM rate limit", status_code=getattr(exc, "status_code", 429),
                            retryable=True) from exc
         except APITimeoutError as exc:
-            raise LLMError("LLM timeout", retryable=True) from exc
+            raise LLMError("LLM timeout", retryable=False) from exc
         except APIConnectionError as exc:
             raise LLMError("LLM connection error", retryable=True) from exc
         except APIStatusError as exc:

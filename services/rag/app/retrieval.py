@@ -174,7 +174,7 @@ _STATUS_SIGNAL_RE = re.compile(
     re.I,
 )
 
-_STYLE_PROMPT_LIMIT = 4
+_STYLE_PROMPT_LIMIT = 2
 
 
 def pick_style_samples(

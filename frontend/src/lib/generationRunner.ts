@@ -2,25 +2,49 @@
 // пользователь может уйти на другой экран — задача доживёт до конца.
 import type { QueryClient } from "@tanstack/react-query";
 import { createPending, fetchRequestDetail, generate, patchRequest } from "../api/endpoints";
+import { ApiError } from "../api/errors";
 import type { Answers, GenerateRequest, HistoryChild, HistoryDetail } from "../api/types";
 import { rebuildBatchDayJobs } from "./batchDiary";
 import { formatDiaryDate } from "./format";
 import {
-    batchDayTitle,
-    batchSessionTitle,
-    displayHistoryTitle,
-    isAutoBatchTitle,
-    packBatchAnswers,
-    pendingTitle,
-    stripTitleStatus,
-    withPendingSuffix,
-    type BatchMeta,
+  batchDayTitle,
+  batchSessionTitle,
+  displayHistoryTitle,
+  isAutoBatchTitle,
+  packBatchAnswers,
+  pendingTitle,
+  stripTitleStatus,
+  withPendingSuffix,
+  type BatchMeta,
 } from "./historyTitles";
 
 const running = new Set<string>();
 
 export function isGenerationRunning(requestId: string): boolean {
   return running.has(requestId);
+}
+
+function isHardGenerateFailure(err: unknown): boolean {
+  if (err instanceof ApiError) {
+    return (
+      err.code === "LLM_UNAVAILABLE" ||
+      err.code === "SERVICE_UNAVAILABLE" ||
+      err.code === "NETWORK"
+    );
+  }
+  return true;
+}
+
+async function markFailed(id: string, title: string): Promise<void> {
+  const base = title.replace(/\s·\s(?:Формируется…|Ошибка)$/u, "");
+  try {
+    await patchRequest(id, {
+      status: "failed",
+      title_safe: `${base} · Ошибка`,
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
 function invalidateAll(qc: QueryClient, requestId: string) {
@@ -156,6 +180,7 @@ export async function startBatchGeneration(opts: {
   const parent = parentId;
   void (async () => {
     let failed = 0;
+    let aborted = false;
     try {
       for (const day of opts.days) {
         const dayTitle = batchDayTitle(
@@ -163,32 +188,50 @@ export async function startBatchGeneration(opts: {
           day.isoDate,
           day.documentType,
         );
+        let childId = "";
         try {
           const childPending = await createPending({
             document_type: day.documentType,
             title_safe: `${dayTitle} · Формируется…`,
             parent_request_id: parent,
           });
+          childId = childPending.request_id;
           invalidateAll(opts.qc, parent);
           await generate({
             document_type: day.documentType,
             answers: day.answers,
-            request_id: childPending.request_id,
+            request_id: childId,
             parent_request_id: parent,
             title_safe: dayTitle,
           } satisfies GenerateRequest);
-        } catch {
+        } catch (err) {
           failed += 1;
+          if (childId) await markFailed(childId, dayTitle);
+          invalidateAll(opts.qc, parent);
+          if (isHardGenerateFailure(err)) {
+            aborted = true;
+            break;
+          }
         }
         invalidateAll(opts.qc, parent);
       }
 
       const fallback = customOrAutoTitle(opts.meta, dayCount);
-      await patchRequest(parent, {
-        status: failed === dayCount ? "failed" : "done",
-        title_safe: await finalizeParentTitle(parent, fallback, failed),
-        answers_anonymized: packed,
-      });
+      if (aborted) {
+        await patchRequest(parent, {
+          status: "pending",
+          title_safe: withPendingSuffix(
+            await finalizeParentTitle(parent, fallback, 0),
+          ),
+          answers_anonymized: packed,
+        });
+      } else {
+        await patchRequest(parent, {
+          status: failed === dayCount ? "failed" : "done",
+          title_safe: await finalizeParentTitle(parent, fallback, failed),
+          answers_anonymized: packed,
+        });
+      }
     } catch {
       try {
         await patchRequest(parent, {
@@ -244,6 +287,7 @@ export async function resumeBatchGeneration(opts: {
 
   void (async () => {
     let failed = 0;
+    let aborted = false;
     try {
       for (const day of rebuilt.days) {
         const existing = children.find((c) =>
@@ -252,8 +296,8 @@ export async function resumeBatchGeneration(opts: {
         if (existing && childIsDone(existing)) continue;
 
         const dayTitle = batchDayTitle(day.dayNumber, day.isoDate, day.documentType);
+        let childId = existing?.request_id;
         try {
-          let childId = existing?.request_id;
           if (!childId) {
             const created = await createPending({
               document_type: day.documentType,
@@ -275,8 +319,14 @@ export async function resumeBatchGeneration(opts: {
             parent_request_id: parent,
             title_safe: dayTitle,
           } satisfies GenerateRequest);
-        } catch {
+        } catch (err) {
           failed += 1;
+          if (childId) await markFailed(childId, dayTitle);
+          invalidateAll(opts.qc, parent);
+          if (isHardGenerateFailure(err)) {
+            aborted = true;
+            break;
+          }
         }
         invalidateAll(opts.qc, parent);
       }
@@ -286,11 +336,21 @@ export async function resumeBatchGeneration(opts: {
         dayCount,
         opts.detail.title_safe,
       );
-      await patchRequest(parent, {
-        status: failed === dayCount ? "failed" : "done",
-        title_safe: await finalizeParentTitle(parent, fallback, failed),
-        answers_anonymized: packed,
-      });
+      if (aborted) {
+        await patchRequest(parent, {
+          status: "pending",
+          title_safe: withPendingSuffix(
+            await finalizeParentTitle(parent, fallback, 0),
+          ),
+          answers_anonymized: packed,
+        });
+      } else {
+        await patchRequest(parent, {
+          status: failed === dayCount ? "failed" : "done",
+          title_safe: await finalizeParentTitle(parent, fallback, failed),
+          answers_anonymized: packed,
+        });
+      }
     } catch {
       try {
         await patchRequest(parent, {

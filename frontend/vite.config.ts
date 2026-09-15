@@ -15,6 +15,8 @@ export default defineConfig({
       "/api": {
         target: process.env.VITE_GATEWAY_URL ?? "http://gateway:8080",
         changeOrigin: true,
+        timeout: 240_000,
+        proxyTimeout: 240_000,
       },
     },
   },

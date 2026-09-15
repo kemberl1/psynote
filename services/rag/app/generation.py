@@ -459,6 +459,8 @@ def _format_samples(samples: list[dict]) -> str:
         text = sanitize_corpus_sample((s.get("text") or "").strip())
         if not text:
             continue
+        if len(text) > 700:
+            text = text[:700].rsplit(" ", 1)[0] + "…"
         meta_bits = []
         for key in ("syndrome", "diagnosis_class", "dynamics"):
             if s.get(key):
@@ -579,8 +581,8 @@ FIXATION_STYLE_QUERY = (
 )
 
 _AGITATION_RE = re.compile(
-    r"возбужд|агресс|растормож|не подда|вербальн|каприз|плаксив|"
-    r"замах|фиксац|остро.{0,20}замечан|полевое|кричал",
+    r"возбужд|агресс|не подда|вербальн.{0,24}коррекц|каприз|плаксив|"
+    r"замах|фиксац|остро.{0,20}замечан|кричал",
     re.I,
 )
 

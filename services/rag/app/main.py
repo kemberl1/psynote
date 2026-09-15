@@ -33,6 +33,11 @@ from app.qdrant_store import QdrantStore
 from app.templates import SUPPORTED_DOC_TYPES
 
 logger = logging.getLogger(__name__)
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
 settings = get_settings()
 
 app = FastAPI(
@@ -86,6 +91,8 @@ def health() -> dict:
 
 @app.post("/generate", tags=["generation"])
 def generate(req: GenerateRequest) -> JSONResponse:
+    logger.info("generate: start doc_type=%s llm_timeout=%.0fs retries=%d",
+                req.document_type, settings.llm_timeout_s, settings.llm_max_retries)
     generator = DiaryGenerator(settings)
     try:
         result = generator.generate(req.document_type, req.answers)

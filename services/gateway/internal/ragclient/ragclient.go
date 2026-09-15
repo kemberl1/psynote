@@ -117,7 +117,7 @@ type Options struct {
 func New(opts Options) *HTTPClient {
 	gt := opts.GenerateTimeout
 	if gt <= 0 {
-		gt = 120 * time.Second
+		gt = 210 * time.Second
 	}
 	ht := opts.HealthTimeout
 	if ht <= 0 {
