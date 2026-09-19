@@ -851,5 +851,97 @@ describe("narrative parsing (prod regression 16.09)", () => {
       expect(b.observations.join(" ")).not.toMatch(/выписан по требованию/);
     }
   });
+
+  it("reads «агрессию не проявлял» as a negation, not as agitation", () => {
+    const briefs = compileArc({
+      days: depressiveDays(),
+      directorContext:
+        "При поступлении был напряжен, тревожен, плаксив. Был тих, малозаметен. В общении со сверстниками в конфликтные ситуации не вступал, агрессию не проявлял.",
+      batchAnswers: { leading_syndrome: "depressive" },
+      estimatedDischargeDate: "2026-09-16",
+    });
+    for (const b of briefs) {
+      expect(b.behavior).not.toBe("restless");
+      expect(b.moodDetail).not.toContain("irritability");
+    }
+    expect(observationsAgitated(["агрессию не проявлял, возбуждений не было"])).toBe(false);
+  });
+});
+
+// Синтетический нарратив в стиле «92.0»: статус при поступлении + анамнез
+// суицидального поведения в начале текста.
+const ADMISSION_BLOCK_NARRATIVE =
+  "Статус при поступлении: Сознание ясное. Внешний вид неопрятный, волосы длинные, лицо закрыто волосами. Собственная речь развернутыми фразами, тихим голосом. В беседе причины госпитализации объяснил: «суицидальные мысли». Со слов, такие мысли появились около 2 лет назад после смерти отца. Со слов было 2 попытки суицида, наносил порезы, «купил лезвия, порезал руку». Критика к своему состоянию снижена. " +
+  "Первое время был понур, тревожен. Постепенно адаптировался к режиму отделения, начал понемногу контактировать с другими ребятами. В течение дня занимал себя в игровой комнате, рисовал, читал.";
+
+function admissionBlockBriefs() {
+  const days = [5, 7, 8, 9, 10, 11, 14, 15, 16, 17, 18].map((d, i) => ({
+    isoDate: `2026-09-${String(d).padStart(2, "0")}`,
+    dayNumber: d - 2,
+    documentType: "daily" as const,
+  }));
+  return compileArc({
+    days,
+    directorContext: ADMISSION_BLOCK_NARRATIVE,
+    batchAnswers: { leading_syndrome: "anxious", diagnosis: "F92.0" },
+    estimatedDischargeDate: "2026-09-18",
+  });
+}
+
+describe("admission status and suicidal history (prod 92.0)", () => {
+  it("never turns suicide attempts / self-harm history into a day event", () => {
+    for (const b of admissionBlockBriefs()) {
+      expect(b.observations.join(" ")).not.toMatch(
+        /суицид|лезви|порез|убить себя|лет назад|смерти отца/i,
+      );
+    }
+  });
+
+  it("keeps the admission status on the first days only", () => {
+    const briefs = admissionBlockBriefs();
+    expect(briefs[0].observations.join(" ")).toMatch(/неопрятный|развернутыми фразами|понур/);
+    for (const b of briefs.filter((x) => x.phase !== "admission")) {
+      expect(b.observations.join(" ")).not.toMatch(/лицо закрыто волосами|неопрятный/);
+    }
+    expect(briefs.flatMap((b) => b.observations).join(" ")).not.toMatch(/статус при поступлении/i);
+  });
+
+  it("does not make «тихим голосом» a standalone observation", () => {
+    for (const b of admissionBlockBriefs()) {
+      for (const o of b.observations) {
+        expect(o.trim()).not.toMatch(/^(?:тихим голосом|волосы длинные|лицо закрыто волосами)$/);
+      }
+    }
+  });
+
+  it("treats reported suicidal thoughts as history but keeps their denial", () => {
+    expect(isAdmissionHistory("Сообщал о снижении настроения, суицидальных мыслях.")).toBe(true);
+    expect(
+      isAdmissionHistory("Суицидные и парасуицидные тенденции категорически отрицал."),
+    ).toBe(false);
+    const briefs = compileArc({
+      days: depressiveDays(),
+      directorContext:
+        "Был тих. В беседе сообщал о длительном ухудшении состояния, суицидальных мыслях. Суицидные тенденции категорически отрицал. В течение дня читал книги в игровой комнате.",
+      batchAnswers: { leading_syndrome: "depressive" },
+      estimatedDischargeDate: "2026-09-16",
+    });
+    for (const b of briefs) {
+      expect(b.observations.join(" ")).not.toMatch(/о длительном ухудшении|суицидальных мыслях/);
+    }
+    expect(briefs.flatMap((b) => b.observations).join(" ")).toMatch(/отрицал/);
+  });
+
+  it("does not drag a mid-stay «на момент осмотра» sentence to the discharge day", () => {
+    const briefs = compileArc({
+      days: depressiveDays(),
+      directorContext:
+        "Был тих, малозаметен. Психопродуктивной симптоматики на момент осмотра не выявлено. В течение дня читал книги в игровой комнате.",
+      batchAnswers: { leading_syndrome: "depressive" },
+      estimatedDischargeDate: "2026-09-16",
+    });
+    const early = briefs.slice(0, -1).flatMap((b) => b.observations).join(" ");
+    expect(early).toMatch(/на момент осмотра/);
+  });
 });
 

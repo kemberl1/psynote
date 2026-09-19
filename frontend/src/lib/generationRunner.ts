@@ -184,6 +184,7 @@ export async function startBatchGeneration(opts: {
   void (async () => {
     let failed = 0;
     let aborted = false;
+    let hardStreak = 0;
     try {
       for (const day of opts.days) {
         const dayTitle = batchDayTitle(
@@ -207,11 +208,15 @@ export async function startBatchGeneration(opts: {
             parent_request_id: parent,
             title_safe: dayTitle,
           } satisfies GenerateRequest);
+          hardStreak = 0;
         } catch (err) {
           failed += 1;
           if (childId) await markFailed(childId, dayTitle);
           invalidateAll(opts.qc, parent);
-          if (isHardGenerateFailure(err)) {
+          // Один медленный день (таймаут модели) не повод бросать период:
+          // прерываемся, только если подряд сорвались два дня — сервис лежит.
+          hardStreak = isHardGenerateFailure(err) ? hardStreak + 1 : 0;
+          if (hardStreak >= 2) {
             aborted = true;
             break;
           }
@@ -224,8 +229,16 @@ export async function startBatchGeneration(opts: {
         await patchRequest(parent, {
           status: "pending",
           title_safe: withPendingSuffix(
-            await finalizeParentTitle(parent, fallback, 0),
+            await finalizeParentTitle(parent, fallback, failed),
           ),
+          answers_anonymized: packed,
+        });
+      } else if (failed > 0 && failed < dayCount) {
+        // Часть дней не получилась — оставляем период «продолжаемым»,
+        // чтобы врач мог дозапустить только их.
+        await patchRequest(parent, {
+          status: "pending",
+          title_safe: await finalizeParentTitle(parent, fallback, failed),
           answers_anonymized: packed,
         });
       } else {
@@ -292,6 +305,7 @@ export async function resumeBatchGeneration(opts: {
   void (async () => {
     let failed = 0;
     let aborted = false;
+    let hardStreak = 0;
     try {
       for (const day of rebuilt.days) {
         const existing = children.find((c) =>
@@ -323,11 +337,15 @@ export async function resumeBatchGeneration(opts: {
             parent_request_id: parent,
             title_safe: dayTitle,
           } satisfies GenerateRequest);
+          hardStreak = 0;
         } catch (err) {
           failed += 1;
           if (childId) await markFailed(childId, dayTitle);
           invalidateAll(opts.qc, parent);
-          if (isHardGenerateFailure(err)) {
+          // Один медленный день (таймаут модели) не повод бросать период:
+          // прерываемся, только если подряд сорвались два дня — сервис лежит.
+          hardStreak = isHardGenerateFailure(err) ? hardStreak + 1 : 0;
+          if (hardStreak >= 2) {
             aborted = true;
             break;
           }
@@ -344,8 +362,16 @@ export async function resumeBatchGeneration(opts: {
         await patchRequest(parent, {
           status: "pending",
           title_safe: withPendingSuffix(
-            await finalizeParentTitle(parent, fallback, 0),
+            await finalizeParentTitle(parent, fallback, failed),
           ),
+          answers_anonymized: packed,
+        });
+      } else if (failed > 0 && failed < dayCount) {
+        // Часть дней не получилась — оставляем период «продолжаемым»,
+        // чтобы врач мог дозапустить только их.
+        await patchRequest(parent, {
+          status: "pending",
+          title_safe: await finalizeParentTitle(parent, fallback, failed),
           answers_anonymized: packed,
         });
       } else {

@@ -177,11 +177,11 @@ export function daysToGenerate(plan: BatchPlan): BatchDayPlan[] {
 }
 
 export function intellectFromDiagnosis(diagnosisStr: string): string {
-  if (/F72|F73|тяжёл\w* умственн|выраженн\w* умственн/i.test(diagnosisStr)) {
+  if (/F72|F73|тяжёл[а-яё]* умственн|выраженн[а-яё]* умственн/i.test(diagnosisStr)) {
     return "severe_id";
   }
-  if (/F71|умеренн\w* умственн/i.test(diagnosisStr)) return "moderate_id";
-  if (/F70|лёгк\w* умственн|легк\w* умственн|лёгк\w* УО|легк\w* УО/i.test(diagnosisStr)) {
+  if (/F71|умеренн[а-яё]* умственн/i.test(diagnosisStr)) return "moderate_id";
+  if (/F70|лёгк[а-яё]* умственн|легк[а-яё]* умственн|лёгк[а-яё]* УО|легк[а-яё]* УО/i.test(diagnosisStr)) {
     return "mild_id";
   }
   if (/\bF7\d/i.test(diagnosisStr)) return "reduced";
@@ -499,12 +499,12 @@ export function buildGenerateAnswers(
       ...withBrief,
       physical_status: "unremarkable",
       neuro_status: "no_acute",
-      criticism: /F71|F72|F73|умеренн\w* умственн|выраженн\w* умственн|тяжёл\w* умственн/i.test(
+      criticism: /F71|F72|F73|умеренн[а-яё]* умственн|выраженн[а-яё]* умственн|тяжёл[а-яё]* умственн/i.test(
         diagnosisStr,
       )
         ? "absent"
         : "formal",
-      thinking: /F71|F72|F73|умеренн\w* умственн|выраженн\w* умственн|тяжёл\w* умственн/i.test(
+      thinking: /F71|F72|F73|умеренн[а-яё]* умственн|выраженн[а-яё]* умственн|тяжёл[а-яё]* умственн/i.test(
         diagnosisStr,
       )
         ? "visual_action"
