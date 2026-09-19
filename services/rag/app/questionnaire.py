@@ -368,9 +368,9 @@ _EXAM_QUESTIONS: dict[str, dict] = {
             "anxious": "тревожный синдром",
             "depressive": "депрессивный синдром",
             "psychomotor_aggression": (
-                "синдром психомоторной расторможенности (с агрессией)"),
+                "синдром психомоторной расторможенности с агрессией"),
             "psychomotor_autoaggression": (
-                "синдром психомоторной расторможенности (с аутоагрессией)"),
+                "синдром психомоторной расторможенности с аутоагрессией"),
             "affective_volitional": "синдром аффективно-волевой неустойчивости",
             "psychopathic": "психопатоподобный синдром",
             "asthenic": "астенический синдром",
@@ -576,6 +576,72 @@ def normalize_syndrome(raw: str | None) -> str | None:
     return lower
 
 
+AGE_QUESTION_ID = "patient_age"
+
+
+def _age_word(age: int) -> str:
+    """«17 лет», «21 год», «3 года» — без этого строка читается нелепо."""
+    tail = age % 100
+    if 11 <= tail <= 14:
+        return "лет"
+    last = age % 10
+    if last == 1:
+        return "год"
+    if 2 <= last <= 4:
+        return "года"
+    return "лет"
+
+
+def age_prompt_lines(age: int) -> list[str]:
+    """Возраст задаёт лексику досуга и обращения.
+
+    Лексика взята из корпуса отделения: там про подростков пишут «читал»,
+    «смотрел телевизор», «настольные игры», «общался со сверстниками», а
+    «песочница» не встречается ни разу — её модель выдумывает сама.
+    """
+    lines = [f"Возраст пациента: {age} {_age_word(age)}."]
+    if age >= 15:
+        lines.append(
+            "Это подросток. Досуг и поведение описывай по возрасту: читал, "
+            "смотрел телевизор, настольные игры, слушал музыку, общался со "
+            "сверстниками. ЗАПРЕЩЕНО, если врач не написал иного: песочница, "
+            "игрушки, кубики, сюжетно-ролевая игра, «играл с игрушками». "
+            "В тексте — «подросток», «юноша» / «девушка», не «мальчик» / «девочка»."
+        )
+    elif age >= 12:
+        lines.append(
+            "Это подросток младшего возраста: настольные игры, книги, "
+            "телевизор, общение со сверстниками. Песочницу, игрушки и кубики "
+            "не пиши, если врач не написал иного."
+        )
+    elif age >= 7:
+        lines.append(
+            "Школьный возраст: игровая комната, настольные игры, рисование, "
+            "книги, телевизор, конструктор. Песочницу не пиши, если врача "
+            "не указал иного."
+        )
+    else:
+        lines.append(
+            "Дошкольный возраст: игрушки, кубики, рисование, мультфильмы, "
+            "простые игры. Не приписывай подростковых занятий и рассуждений."
+        )
+    return lines
+
+
+def parse_age(raw: object) -> int | None:
+    """Возраст из ответа опросника: число или строка «17», «17 лет»."""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        age = int(raw)
+    else:
+        match = re.search(r"\d{1,2}", str(raw or ""))
+        if not match:
+            return None
+        age = int(match.group(0))
+    return age if 0 < age < 100 else None
+
+
 def map_answers(doc_type: str, answers: dict) -> MappedAnswers:
     """Смаппить ответы опросника в промпт-строки + метаданные (docs/06 §6).
 
@@ -627,6 +693,12 @@ def map_answers(doc_type: str, answers: dict) -> MappedAnswers:
             # Извлекаем метаданное синдрома (select-код → каноническая форма).
             if qid == "syndrome" and sval in _SYNDROME_META:
                 result.syndrome = normalize_syndrome(_SYNDROME_META[sval])
+
+    # Возраст — отдельным полем: он не свободный текст (анонимайзер его
+    # не трогает) и задаёт возрастную лексику дневника.
+    age = parse_age(answers.get(AGE_QUESTION_ID))
+    if age is not None:
+        result.prompt_lines.extend(age_prompt_lines(age))
 
     # Свободнотекстовые/уточняющие поля (уже обезличены).
     for qid, label in freetext_q.items():

@@ -623,3 +623,30 @@ def test_llm_client_and_anonymizer_survive_between_generations() -> None:
     gen.generate(DOC_TYPE_DAILY, {"mood": "even"})
     assert gen._get_llm() is first
     assert anon.closed is False
+
+
+def test_age_lines_fit_the_patient_age() -> None:
+    """17-летнему не пишем песочницу и игрушки; дошкольнику — не подростковый досуг."""
+    from app.questionnaire import age_prompt_lines
+    teen = " ".join(age_prompt_lines(17))
+    assert "17 лет" in teen
+    assert "песочниц" in teen.lower() and "игрушк" in teen.lower()  # как запрет
+    assert "подросток" in teen.lower()
+
+    kid = " ".join(age_prompt_lines(5))
+    assert "5 лет" in kid
+    assert "подросток" not in kid.lower()
+
+
+def test_age_reaches_prompt_lines() -> None:
+    mapped = map_answers(DOC_TYPE_DAILY, {"mood": "even", "patient_age": 17})
+    joined = " ".join(mapped.prompt_lines)
+    assert "Возраст пациента: 17 лет" in joined
+    assert "песочниц" in joined.lower()
+
+
+def test_age_is_not_free_text_for_anonymizer() -> None:
+    """Возраст — не свободный текст: анонимайзер не должен его трогать."""
+    from app.questionnaire import iter_free_text
+    paths = [p for p, _ in iter_free_text(DOC_TYPE_DAILY, {"patient_age": 17})]
+    assert paths == []

@@ -539,15 +539,69 @@ function syndromeLockLines(syndrome: string): string[] {
   return [];
 }
 
-function sexLockLines(sex: unknown): string[] {
+/** Возраст пациента из ответов: число или «17», «17 лет». */
+export function parseAge(raw: unknown): number | null {
+  if (typeof raw === "boolean") return null;
+  const digits = typeof raw === "number" ? String(raw) : /\d{1,2}/.exec(String(raw ?? ""))?.[0];
+  const age = Number(digits);
+  return Number.isFinite(age) && age > 0 && age < 100 ? Math.trunc(age) : null;
+}
+
+function ageWord(age: number): string {
+  const tail = age % 100;
+  if (tail >= 11 && tail <= 14) return "лет";
+  const last = age % 10;
+  if (last === 1) return "год";
+  if (last >= 2 && last <= 4) return "года";
+  return "лет";
+}
+
+/**
+ * Досуг и обращение по возрасту. В корпусе отделения про подростков пишут
+ * «читал», «телевизор», «настольные игры», «общался со сверстниками», а
+ * «песочница» не встречается ни разу — её выдумывает модель.
+ */
+export function ageLockLines(age: number | null): string[] {
+  if (age === null) return [];
+  const lines = [`Возраст пациента: ${age} ${ageWord(age)}.`];
+  if (age >= 15) {
+    lines.push(
+      "Это подросток: читал, смотрел телевизор, настольные игры, слушал музыку, " +
+        "общался со сверстниками. ЗАПРЕЩЕНО, если врач не написал иного: песочница, " +
+        "игрушки, кубики, сюжетно-ролевая игра, «играл с игрушками». " +
+        "В тексте — «подросток», «юноша» / «девушка», не «мальчик» / «девочка».",
+    );
+  } else if (age >= 12) {
+    lines.push(
+      "Подросток младшего возраста: настольные игры, книги, телевизор, общение " +
+        "со сверстниками. Песочницу, игрушки и кубики не пиши, если врач не написал иного.",
+    );
+  } else if (age >= 7) {
+    lines.push(
+      "Школьный возраст: игровая комната, настольные игры, рисование, книги, " +
+        "телевизор, конструктор. Песочницу не пиши, если врач не указал иного.",
+    );
+  } else {
+    lines.push(
+      "Дошкольный возраст: игрушки, кубики, рисование, мультфильмы, простые игры. " +
+        "Подростковых занятий и рассуждений не приписывай.",
+    );
+  }
+  return lines;
+}
+
+function sexLockLines(sex: unknown, age: number | null): string[] {
+  const teen = age !== null && age >= 15;
   if (sex === "female") {
     return [
-      "Пациент — девочка. Согласуй род во всём тексте: она, упорядочена, беспокойна, получала замечания, капризничала. Не пиши «он/упорядочен».",
+      `Пациент — ${teen ? "девушка-подросток" : "девочка"}. Согласуй род во всём тексте: ` +
+        "она, упорядочена, беспокойна, получала замечания. Не пиши «он/упорядочен».",
     ];
   }
   if (sex === "male") {
     return [
-      "Пациент — мальчик. Согласуй род во всём тексте: он, упорядочен, беспокоен, получал замечания, капризничал. Не пиши «она/упорядочена».",
+      `Пациент — ${teen ? "юноша-подросток" : "мальчик"}. Согласуй род во всём тексте: ` +
+        "он, упорядочен, беспокоен, получал замечания. Не пиши «она/упорядочена».",
     ];
   }
   return [];
@@ -1548,7 +1602,9 @@ export function formatDayBrief(
     ...steadyStateLines(diagnosis, finalStateText(batchAnswers), brief.phase),
   );
   lines.push(...speechLockLines(brief.speechLevel));
-  lines.push(...sexLockLines(batchAnswers.patient_sex));
+  const patientAge = parseAge(batchAnswers.patient_age);
+  lines.push(...ageLockLines(patientAge));
+  lines.push(...sexLockLines(batchAnswers.patient_sex, patientAge));
 
   const syndrome = batchAnswers.leading_syndrome;
   if (typeof syndrome === "string" && syndrome) {

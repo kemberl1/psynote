@@ -130,6 +130,11 @@ func dailyQuestions() []Question {
 	return []Question{
 		// ─── Группа «Состояние» ──────────────────────────────────────────────
 		{
+			ID: "patient_age", Label: "Возраст, лет", Type: "number",
+			Required: false, Group: grpState,
+			Help: "Задаёт возрастную лексику: подростку не припишут игрушки и песочницу.",
+		},
+		{
 			ID: "patient_sex", Label: "Пол", Type: "select",
 			Required: true, AllowCustom: false, Group: grpState,
 			Help: "Согласование рода в тексте дневника (он/она).",
@@ -558,8 +563,8 @@ func examQuestions() []Question {
 				{Value: "behavioral", Label: "поведенческих нарушений", Prompt: "синдром поведенческих нарушений"},
 				{Value: "anxious", Label: "тревожный", Prompt: "тревожный синдром"},
 				{Value: "depressive", Label: "депрессивный", Prompt: "депрессивный синдром"},
-				{Value: "psychomotor_aggression", Label: "психомоторной расторможенности (с агрессией)", Prompt: "синдром психомоторной расторможенности (с агрессией)"},
-				{Value: "psychomotor_autoaggression", Label: "психомоторной расторможенности (с аутоагрессией)", Prompt: "синдром психомоторной расторможенности (с аутоагрессией)"},
+				{Value: "psychomotor_aggression", Label: "психомоторной расторможенности с агрессией", Prompt: "синдром психомоторной расторможенности с агрессией"},
+				{Value: "psychomotor_autoaggression", Label: "психомоторной расторможенности с аутоагрессией", Prompt: "синдром психомоторной расторможенности с аутоагрессией"},
 				{Value: "affective_volitional", Label: "аффективно-волевой неустойчивости", Prompt: "синдром аффективно-волевой неустойчивости"},
 				{Value: "psychopathic", Label: "психопатоподобный", Prompt: "психопатоподобный синдром"},
 				{Value: "asthenic", Label: "астенический", Prompt: "астенический синдром"},

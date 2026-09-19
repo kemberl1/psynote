@@ -190,6 +190,9 @@ _STRIP_THERAPY_PHRASES: tuple[re.Pattern[str], ...] = (
     ),
 )
 
+# Врач просил короткие тире во всём тексте дневника.
+_LONG_DASH_RE = re.compile(r"[—–]")
+
 # Врач: «на оклики» не пишем — это замечания персонала.
 _OCLIKI_RE = re.compile(r"(на|после|при)\s+оклик\w*", re.I)
 
@@ -314,6 +317,7 @@ def polish_diary(
     out = fix_obvious_typos(out)
     out = _replace_english_leaks(out)
     out = _OCLIKI_RE.sub(_rewrite_okliki, out)
+    out = _LONG_DASH_RE.sub("-", out)
     out = _normalize_restraint_language(out)
     out = _LEAK_PLACEHOLDER_RE.sub("", out)
     out = _WEEKEND_SPAN_RE.sub(rf"\1 {PLACEHOLDER_WEEKEND}", out)

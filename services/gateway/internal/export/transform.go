@@ -89,6 +89,9 @@ func DiaryStamp(title string, answers map[string]any, generatedAt time.Time) (da
 	return officialDate(d), clock
 }
 
+// longDashRE — врач просил короткие тире во всём тексте дневника.
+var longDashRE = regexp.MustCompile(`[—–]`)
+
 // weekendDateRE — старые дневники: даты сб–вс анонимайзер сделал [ДАТА],
 // которая при экспорте стала бы датой осмотра. Новые несут [ВЫХОДНЫЕ].
 var weekendDateRE = regexp.MustCompile(`(за период выходных дней\s+с)\s+\[ДАТА\](?:\s*[-–]\s*\[ДАТА\])?`)
@@ -174,6 +177,7 @@ func transformContent(doc Document, subs map[string]string) string {
 	content = tidySignatureCommas(content)
 	content = fixObviousTypos(content)
 	content = dropEmptySections(content)
+	content = longDashRE.ReplaceAllString(content, "-")
 	content = normalizeDailySpacing(content)
 	content = rewriteDailyForm(content)
 	return ensureExam10dCaseNo(content, caseNoFromContent(content, merged))

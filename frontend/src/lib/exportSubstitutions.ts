@@ -137,6 +137,9 @@ export function buildExportSubstitutions(opts: {
 const WEEKEND_DATE_PLACEHOLDER_RE =
   /(за период выходных дней\s+с)\s+\[ДАТА\](?:\s*[-–]\s*\[ДАТА\])?/gi;
 
+/** Врач просил короткие тире во всём тексте дневника. */
+const LONG_DASH_RE = /[—–]/g;
+
 /** [ВЫХОДНЫЕ] → «12-13.09»: сб–вс перед датой осмотра. */
 export function fillWeekendSpan(content: string, diaryDate?: string, title?: string): string {
   const p = partsFromIsoOrDmy(diaryDate) ?? partsFromIsoOrDmy(diaryDateFromTitle(title));
@@ -241,6 +244,7 @@ export function applyDiaryStamp(
   if (opts.doctor) {
     out = tidySignatureCommas(out);
   }
+  out = out.replace(LONG_DASH_RE, "-");
   return ensureExam10dCaseNo(rewriteDailyForm(fixObviousTypos(out)), opts.caseNumber);
 }
 

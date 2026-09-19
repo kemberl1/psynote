@@ -6,8 +6,10 @@ import {
     extractFacts,
     inferSpeechLevel,
     isAdmissionHistory,
+    ageLockLines,
     isRelativeVisitSentence,
     observationsAgitated,
+    parseAge,
     steadyStateLines,
     observationsNeedFixation,
     stripTherapyClauses,
@@ -1008,6 +1010,57 @@ describe("admission status and suicidal history (prod 92.0)", () => {
       "residual",
     );
     expect(lines.join(" ")).toMatch(/низкой возрастной нормы/);
+  });
+
+  it("does not let a 17-year-old play in a sandbox", () => {
+    const lines = ageLockLines(parseAge("17"));
+    expect(lines.join(" ")).toMatch(/Возраст пациента: 17 лет/);
+    expect(lines.join(" ")).toMatch(/песочница/);
+    expect(lines.join(" ")).toMatch(/подросток/i);
+  });
+
+  it("gives a preschooler age-appropriate play", () => {
+    const lines = ageLockLines(parseAge(5));
+    expect(lines.join(" ")).toMatch(/Возраст пациента: 5 лет/);
+    expect(lines.join(" ")).toMatch(/игрушки, кубики/);
+    expect(lines.join(" ")).not.toMatch(/подросток/i);
+  });
+
+  it("says «год» and «года» correctly", () => {
+    expect(ageLockLines(1)[0]).toContain("1 год");
+    expect(ageLockLines(3)[0]).toContain("3 года");
+    expect(ageLockLines(11)[0]).toContain("11 лет");
+    expect(parseAge("")).toBeNull();
+  });
+
+  it("puts the age rule into every day brief", () => {
+    const briefs = compileArc({
+      days: depressiveDays(),
+      directorContext: "Был тих. В течение дня читал книги.",
+      batchAnswers: { leading_syndrome: "depressive", patient_age: 17 },
+      estimatedDischargeDate: "2026-09-16",
+    });
+    for (const b of briefs) {
+      const arc = String(
+        applyBriefToAnswers({}, b, { patient_age: 17 }, "2026-09-16").__arc_context__,
+      );
+      expect(arc).toMatch(/Возраст пациента: 17 лет/);
+    }
+  });
+
+  it("calls a 17-year-old a teenager, not a little boy", () => {
+    const briefs = compileArc({
+      days: depressiveDays(),
+      directorContext: "Был тих. В течение дня читал книги.",
+      batchAnswers: { leading_syndrome: "depressive", patient_age: 17, patient_sex: "male" },
+      estimatedDischargeDate: "2026-09-16",
+    });
+    const arc = String(
+      applyBriefToAnswers({}, briefs[0], { patient_age: 17, patient_sex: "male" },
+        "2026-09-16").__arc_context__,
+    );
+    expect(arc).toMatch(/юноша-подросток/);
+    expect(arc).not.toMatch(/Пациент — мальчик/);
   });
 });
 

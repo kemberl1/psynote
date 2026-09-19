@@ -430,3 +430,19 @@ func TestWeekendSpanAcrossMonths(t *testing.T) {
 		t.Fatalf("weekendSpan = %q", got)
 	}
 }
+
+func TestTransformDaily_ReplacesLongDashes(t *testing.T) {
+	doc := Document{
+		DocumentTypeCode: "daily",
+		Title:            "День 6 · 14.09.2026 · Ежедневный осмотр",
+		Content: "Осмотр лечащим врачом\nДата: [ДАТА] [ВРЕМЯ]\n\n" +
+			"Психический статус: Настроение ровное — без колебаний. Т – 36,6 С.",
+	}
+	out := transformContent(doc, nil)
+	if strings.ContainsAny(out, "—–") {
+		t.Fatalf("длинные тире остались:\n%s", out)
+	}
+	if !strings.Contains(out, "ровное - без колебаний") {
+		t.Fatalf("тире заменено неверно:\n%s", out)
+	}
+}

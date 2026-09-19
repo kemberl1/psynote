@@ -9,6 +9,15 @@ export const BATCH_QUESTIONNAIRE: QuestionnaireSchema = {
   questions: [
     // ── Клинический старт ─────────────────────────────────────────────────────
     {
+      id: "patient_age",
+      label: "Возраст, лет",
+      type: "number",
+      required: false,
+      allow_custom: false,
+      group: "Клинический старт",
+      help: "Задаёт возрастную лексику: подростку не припишут игрушки и песочницу",
+    },
+    {
       id: "patient_sex",
       label: "Пол",
       type: "select",
@@ -34,8 +43,8 @@ export const BATCH_QUESTIONNAIRE: QuestionnaireSchema = {
         { value: "behavioral", label: "поведенческих нарушений" },
         { value: "anxious", label: "тревожный" },
         { value: "depressive", label: "депрессивный" },
-        { value: "psychomotor_aggression", label: "психомоторной расторможенности (с агрессией)" },
-        { value: "psychomotor_autoaggression", label: "психомоторной расторможенности (с аутоагрессией)" },
+        { value: "psychomotor_aggression", label: "психомоторной расторможенности с агрессией" },
+        { value: "psychomotor_autoaggression", label: "психомоторной расторможенности с аутоагрессией" },
         { value: "affective_volitional", label: "аффективно-волевой неустойчивости" },
         { value: "psychopathic", label: "психопатоподобный" },
         { value: "asthenic", label: "астенический" },

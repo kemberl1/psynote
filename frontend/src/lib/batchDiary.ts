@@ -477,6 +477,9 @@ export function buildGenerateAnswers(
     withBrief.diagnosis = fixObviousTypos(diagnosisStr);
   }
   withBrief.diary_date = isoDate;
+  if (batchAnswers.patient_age !== undefined && batchAnswers.patient_age !== "") {
+    withBrief.patient_age = batchAnswers.patient_age;
+  }
   if (typeof batchAnswers.patient_sex === "string" && batchAnswers.patient_sex) {
     withBrief.patient_sex = batchAnswers.patient_sex;
   }

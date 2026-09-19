@@ -207,3 +207,16 @@ def test_okliki_are_rewritten_in_any_form() -> None:
     assert "оклик" not in out.lower()
     assert "на замечания реагирует" in out
     assert "После замечание" not in out
+
+
+def test_long_dashes_become_short() -> None:
+    """Врач просил короткие тире во всех текстах генерации."""
+    src = (
+        "Психический статус: Настроение ровное — без колебаний. "
+        "Т – 36,6 С. Контакт – доступен.\n"
+        "План лечения (дополнения к плану): без дополнений"
+    )
+    out = polish_diary(src)
+    assert "—" not in out and "–" not in out
+    assert "ровное - без колебаний" in out
+    assert "Т - 36,6 С" in out
