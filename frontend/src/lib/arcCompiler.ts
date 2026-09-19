@@ -383,6 +383,11 @@ function calendarFor(iso: string): DayCalendar {
   return "weekday";
 }
 
+function finalStateText(batchAnswers: Answers): string {
+  const raw = batchAnswers.final_state;
+  return typeof raw === "string" ? raw : "";
+}
+
 function diagnosisText(batchAnswers: Answers): string {
   const raw = batchAnswers.diagnosis;
   return typeof raw === "string" ? fixObviousTypos(raw.trim()) : "";
@@ -401,6 +406,39 @@ export function observationsAgitated(observations: string[]): boolean {
  */
 export function observationsNeedFixation(observations: string[]): boolean {
   return /фиксац/.test(observations.join(" ").toLowerCase());
+}
+
+const ID_DIAGNOSIS_RE = /F7\d|умственн[а-яё]*\s+отстал/i;
+
+/**
+ * Ориентировка и критика — константы пациента, а не переменная дня.
+ * На проде они прыгали: «ориентирован верно» → «в дате затрудняется» →
+ * снова «верно»; критика «формальная → достаточная → формируется».
+ */
+export function steadyStateLines(
+  diagnosis: string,
+  finalState: string,
+  phase: DayPhase,
+): string[] {
+  const lines: string[] = [];
+  if (!ID_DIAGNOSIS_RE.test(diagnosis)) {
+    lines.push(
+      "Ориентировка — константа всех дней: в месте, времени и собственной личности " +
+        "верно. НЕ пиши «в дате затрудняется», «дату называет с ошибкой», " +
+        "«ориентирован частично», если этого нет в наблюдениях СЕГОДНЯ.",
+    );
+  }
+  const finalCriticism = /критик[а-яё]*[^.]*\./i.exec(finalState)?.[0]?.trim();
+  const target =
+    phase === "improving" || phase === "residual"
+      ? finalCriticism ?? "критика к своему состоянию формируется"
+      : "критика к своему состоянию формальная";
+  lines.push(
+    `Критика — обязательный элемент статуса, пиши её КАЖДЫЙ день одной ` +
+      `формулировкой: «${target}». Не чередуй «формальная / частично сохранна / ` +
+      "достаточная / формируется» от дня к дню.",
+  );
+  return lines;
 }
 
 function cognitiveLockLines(diagnosis: string): string[] {
@@ -1238,6 +1276,7 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
   const pickCalm = (pct: number, count: number) =>
     pickByPosition(calmPoolAll, directorContext, pct, count, calmUse);
 
+  let lastOccupation = "";
   const briefs: DayBrief[] = days.map((day, index) => {
     const periodPct = n <= 1 ? 100 : Math.round((index / (n - 1)) * 100);
     const phase = phaseFor(periodPct, day.dayNumber);
@@ -1290,7 +1329,15 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
       observations.push(...pickCalm(periodPct, obsCount));
     }
     if (phase !== "admission") {
-      observations.push(...pickRotated(occupationPool, index, 1));
+      // Одно и то же занятие («в игровой рисовал, читал») в соседних днях
+      // читается как копипаст — через день пропускаем.
+      const occupation = pickRotated(occupationPool, index, 1);
+      if (occupation[0] && occupation[0] !== lastOccupation) {
+        observations.push(...occupation);
+        lastOccupation = occupation[0];
+      } else {
+        lastOccupation = "";
+      }
     }
     if (role !== "quiet") {
       observations.push(...pickRotated(facts.traits, index, 1));
@@ -1485,6 +1532,9 @@ export function formatDayBrief(
         "Интеллект и речь — только из ответов/брифа ЭТОГО пациента, не из образцов корпуса.",
     );
   }
+  lines.push(
+    ...steadyStateLines(diagnosis, finalStateText(batchAnswers), brief.phase),
+  );
   lines.push(...speechLockLines(brief.speechLevel));
   lines.push(...sexLockLines(batchAnswers.patient_sex));
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    applyBriefToAnswers,
     compileArc,
     extractDatedSnippets,
     extractFacts,
@@ -7,6 +8,7 @@ import {
     isAdmissionHistory,
     isRelativeVisitSentence,
     observationsAgitated,
+    steadyStateLines,
     observationsNeedFixation,
     stripTherapyClauses,
     weekendDutyNote,
@@ -942,6 +944,60 @@ describe("admission status and suicidal history (prod 92.0)", () => {
     });
     const early = briefs.slice(0, -1).flatMap((b) => b.observations).join(" ");
     expect(early).toMatch(/на момент осмотра/);
+  });
+
+  it("locks orientation and criticism so they do not drift between days", () => {
+    const days = [11, 12, 13, 14, 15, 16].map((d, i) => ({
+      isoDate: `2026-09-${d}`,
+      dayNumber: i + 3,
+      documentType: "daily" as const,
+    }));
+    const briefs = compileArc({
+      days,
+      directorContext: "Был тих, малозаметен. В течение дня читал книги в игровой комнате.",
+      batchAnswers: {
+        leading_syndrome: "depressive",
+        diagnosis: "F32.1 депрессивный эпизод",
+        final_state: "Критика к своему состоянию и заболеванию формируется.",
+      },
+      estimatedDischargeDate: "2026-09-16",
+    });
+    for (const b of briefs) {
+      const arc = String(
+        applyBriefToAnswers({}, b, { diagnosis: "F32.1 депрессивный эпизод",
+          final_state: "Критика к своему состоянию и заболеванию формируется." },
+          "2026-09-16").__arc_context__,
+      );
+      expect(arc).toMatch(/Ориентировка — константа всех дней/);
+      expect(arc).toMatch(/Критика — обязательный элемент статуса/);
+      expect(arc).toMatch(/Не чередуй/);
+    }
+  });
+
+  it("keeps the intellectual-disability orientation wording free", () => {
+    const lines = steadyStateLines("F71.18 умственная отсталость умеренная", "", "field");
+    expect(lines.join(" ")).not.toMatch(/Ориентировка — константа/);
+    expect(lines.join(" ")).toMatch(/Критика/);
+  });
+
+  it("does not repeat the same occupation on consecutive days", () => {
+    const days = [11, 12, 13, 14, 15, 16].map((d, i) => ({
+      isoDate: `2026-09-${d}`,
+      dayNumber: i + 4,
+      documentType: "daily" as const,
+    }));
+    const briefs = compileArc({
+      days,
+      directorContext:
+        "Был тих, малозаметен. В течение дня занимал себя в игровой комнате, рисовал, читал. Постепенно стал спокойнее.",
+      batchAnswers: { leading_syndrome: "depressive" },
+      estimatedDischargeDate: "2026-09-16",
+    });
+    for (let i = 1; i < briefs.length; i++) {
+      const prev = briefs[i - 1].observations.filter((o) => /игрово/.test(o));
+      const cur = briefs[i].observations.filter((o) => /игрово/.test(o));
+      expect(prev.length && cur.length ? prev[0] !== cur[0] : true).toBe(true);
+    }
   });
 });
 
