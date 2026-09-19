@@ -421,6 +421,14 @@ export function steadyStateLines(
   phase: DayPhase,
 ): string[] {
   const lines: string[] = [];
+  // Формулировку интеллекта врач часто уточняет («низкой возрастной нормы») —
+  // берём её дословно, иначе модель округляет до «возрастной нормы».
+  const finalIntellect = /интеллектуальн[а-яё]*[^.]*\./i.exec(finalState)?.[0]?.trim();
+  if (finalIntellect && !ID_DIAGNOSIS_RE.test(diagnosis)) {
+    lines.push(
+      `Интеллект пиши формулировкой врача, без округления: «${finalIntellect}»`,
+    );
+  }
   if (!ID_DIAGNOSIS_RE.test(diagnosis)) {
     lines.push(
       "Ориентировка — константа всех дней: в месте, времени и собственной личности " +
@@ -1276,7 +1284,7 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
   const pickCalm = (pct: number, count: number) =>
     pickByPosition(calmPoolAll, directorContext, pct, count, calmUse);
 
-  let lastOccupation = "";
+  const recentOccupations: string[] = [];
   const briefs: DayBrief[] = days.map((day, index) => {
     const periodPct = n <= 1 ? 100 : Math.round((index / (n - 1)) * 100);
     const phase = phaseFor(periodPct, day.dayNumber);
@@ -1332,11 +1340,15 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
       // Одно и то же занятие («в игровой рисовал, читал») в соседних днях
       // читается как копипаст — через день пропускаем.
       const occupation = pickRotated(occupationPool, index, 1);
-      if (occupation[0] && occupation[0] !== lastOccupation) {
+      const usedRecently =
+        occupation[0] !== undefined && recentOccupations.includes(occupation[0]);
+      if (occupation[0] && !usedRecently) {
         observations.push(...occupation);
-        lastOccupation = occupation[0];
+        recentOccupations.push(occupation[0]);
+        if (recentOccupations.length > 3) recentOccupations.shift();
       } else {
-        lastOccupation = "";
+        recentOccupations.push("");
+        if (recentOccupations.length > 3) recentOccupations.shift();
       }
     }
     if (role !== "quiet") {

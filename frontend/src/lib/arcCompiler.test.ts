@@ -994,10 +994,20 @@ describe("admission status and suicidal history (prod 92.0)", () => {
       estimatedDischargeDate: "2026-09-16",
     });
     for (let i = 1; i < briefs.length; i++) {
-      const prev = briefs[i - 1].observations.filter((o) => /игрово/.test(o));
-      const cur = briefs[i].observations.filter((o) => /игрово/.test(o));
-      expect(prev.length && cur.length ? prev[0] !== cur[0] : true).toBe(true);
+      const window = briefs.slice(Math.max(0, i - 3), i).flatMap((b) => b.observations);
+      for (const o of briefs[i].observations.filter((x) => /игрово/.test(x))) {
+        expect(window).not.toContain(o);
+      }
     }
+  });
+
+  it("keeps the doctor's intellect wording instead of rounding it", () => {
+    const lines = steadyStateLines(
+      "F92.0 расстройство поведения",
+      "Интеллектуально-мнестически на уровне низкой возрастной нормы. Критика формируется.",
+      "residual",
+    );
+    expect(lines.join(" ")).toMatch(/низкой возрастной нормы/);
   });
 });
 
