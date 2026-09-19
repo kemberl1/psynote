@@ -194,3 +194,16 @@ def test_polish_rewrites_hold_attempt_without_inventing_fixation() -> None:
     assert "при попытке остановить" in out.lower()
     assert "если взять за руку" in out.lower()
     assert "мягкая фиксация" not in out.lower()
+
+
+def test_okliki_are_rewritten_in_any_form() -> None:
+    """Врач просил не писать «оклики» — ни в одной форме."""
+    src = (
+        "Психический статус: на оклики реагирует непродолжительно. "
+        "После оклика возвращался к занятию. При оклике поворачивает голову.\n"
+        "План лечения (дополнения к плану): без дополнений"
+    )
+    out = polish_diary(src)
+    assert "оклик" not in out.lower()
+    assert "на замечания реагирует" in out
+    assert "После замечание" not in out

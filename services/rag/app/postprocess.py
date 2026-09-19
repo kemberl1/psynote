@@ -190,7 +190,8 @@ _STRIP_THERAPY_PHRASES: tuple[re.Pattern[str], ...] = (
     ),
 )
 
-_OCLIKI_RE = re.compile(r"на оклики", re.I)
+# Врач: «на оклики» не пишем — это замечания персонала.
+_OCLIKI_RE = re.compile(r"(на|после|при)\s+оклик\w*", re.I)
 
 _LABEL_RE = re.compile(
     r"^(?P<indent>\s*)(?P<bold>\*\*)?(?P<label>"
@@ -312,7 +313,7 @@ def polish_diary(
     out = _split_merged_labels(out, doc_type)
     out = fix_obvious_typos(out)
     out = _replace_english_leaks(out)
-    out = _OCLIKI_RE.sub("на замечания", out)
+    out = _OCLIKI_RE.sub(_rewrite_okliki, out)
     out = _normalize_restraint_language(out)
     out = _LEAK_PLACEHOLDER_RE.sub("", out)
     out = _WEEKEND_SPAN_RE.sub(rf"\1 {PLACEHOLDER_WEEKEND}", out)
@@ -332,6 +333,14 @@ def polish_diary(
     if doc_type in SUPPORTED_DOC_TYPES:
         out = _restore_blank_lines(out, doc_type)
     return re.sub(r"\n{3,}", "\n\n", out)
+
+
+_OKLIKI_FORMS = {"на": "замечания", "после": "замечания", "при": "замечании"}
+
+
+def _rewrite_okliki(match: re.Match[str]) -> str:
+    prep = match.group(1)
+    return f"{prep} {_OKLIKI_FORMS[prep.lower()]}"
 
 
 def _normalize_restraint_language(text: str) -> str:

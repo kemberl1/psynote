@@ -288,7 +288,8 @@ def test_build_messages_allows_grounded_coloring_not_pure_invention() -> None:
     assert "без агрессивных, аутоагрессивных" in lower
     assert "каркас" in system.lower() or "шаблон" in system.lower()
     user = next(m.content for m in msgs if m.role == "user")
-    assert "палата" in user.lower() or "игровая" in user.lower()
+    # Правило «дорисовать быт отделения» живёт в системной части и в брифе.
+    assert "палате" in system.lower() or "игровой" in system.lower()
 
 
 def test_build_messages_exam10d_has_epicrisis() -> None:
