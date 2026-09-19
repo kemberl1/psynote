@@ -19,6 +19,7 @@ import { GenerationResult } from "../components/result/GenerationResult";
 import "../components/result/result.css";
 import { Badge, Banner, Button, Skeleton, Spinner } from "../components/ui";
 import { useConfirm } from "../components/ui/confirm";
+import { StaleBuildError } from "../lib/buildVersion";
 import { downloadBatchExport, downloadExport } from "../lib/download";
 import { buildExportSubstitutions } from "../lib/exportSubstitutions";
 import {
@@ -229,7 +230,12 @@ export function RequestDetailPage() {
                           answers: data.answers_anonymized ?? {},
                           requestId: data.request_id,
                         });
-                    void run.finally(() => setResuming(false));
+                    void run
+                      .catch((err: unknown) => {
+                        // Данные пакета на сервере — перезагрузка ничего не теряет.
+                        if (err instanceof StaleBuildError) window.location.reload();
+                      })
+                      .finally(() => setResuming(false));
                   }}
                 >
                   Продолжить генерацию

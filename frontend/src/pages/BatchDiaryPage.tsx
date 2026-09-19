@@ -3,7 +3,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { deleteRequest } from "../api/endpoints";
 import { friendlyError } from "../api/errors";
 import type { Answers } from "../api/types";
 import { QuestionnaireRenderer } from "../components/questionnaire/QuestionnaireRenderer";
@@ -16,6 +15,7 @@ import {
   validateBatchDates,
 } from "../lib/batchDiary";
 import { BATCH_QUESTIONNAIRE } from "../lib/batchQuestionnaire";
+import { assertFreshBuild } from "../lib/buildVersion";
 import { startBatchGeneration } from "../lib/generationRunner";
 import { batchAutoTitle, type EditDiaryState } from "../lib/historyTitles";
 import {
@@ -168,16 +168,12 @@ export function BatchDiaryPage() {
     }
 
     try {
-      // При повторной генерации пакета удаляем старую запись (дети cascade),
-      // чтобы не копились дубликаты дней.
-      if (replaceRequestId) {
-        try {
-          await deleteRequest(replaceRequestId);
-        } catch {
-          /* если уже удалена — продолжаем */
-        }
-        setReplaceRequestId(undefined);
-      }
+      // Устаревшая вкладка не должна ничего запускать.
+      await assertFreshBuild();
+      // Старый пакет при повторной генерации НЕ удаляем: на его дневники
+      // могут быть отзывы врачей, а удаление уносило тексты вместе с ними.
+      // Лишнюю версию врач удалит из истории сам.
+      if (replaceRequestId) setReplaceRequestId(undefined);
 
       const parentId = await startBatchGeneration({
         qc,

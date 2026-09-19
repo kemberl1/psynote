@@ -89,6 +89,46 @@ func DiaryStamp(title string, answers map[string]any, generatedAt time.Time) (da
 	return officialDate(d), clock
 }
 
+// weekendDateRE — старые дневники: даты сб–вс анонимайзер сделал [ДАТА],
+// которая при экспорте стала бы датой осмотра. Новые несут [ВЫХОДНЫЕ].
+var weekendDateRE = regexp.MustCompile(`(за период выходных дней\s+с)\s+\[ДАТА\](?:\s*[-–]\s*\[ДАТА\])?`)
+
+// examDay is the examination day of the diary (answers diary_date, then title).
+func examDay(doc Document) (time.Time, bool) {
+	if iso := answerString(doc.Answers, "diary_date"); iso != "" {
+		if t, err := time.Parse("2006-01-02", iso); err == nil {
+			return t, true
+		}
+		if t, ok := parseDMY(iso); ok {
+			return t, true
+		}
+	}
+	return parseDMY(doc.Title)
+}
+
+// weekendSpan formats the Saturday–Sunday before day as «12-13.09»
+// (as arcCompiler.weekendSpanLabel on the client).
+func weekendSpan(day time.Time) string {
+	sat := day.AddDate(0, 0, -((int(day.Weekday()) + 1) % 7))
+	sun := sat.AddDate(0, 0, 1)
+	if sat.Month() == sun.Month() {
+		return fmt.Sprintf("%d-%d.%02d", sat.Day(), sun.Day(), int(sat.Month()))
+	}
+	return fmt.Sprintf("%d.%02d-%d.%02d", sat.Day(), int(sat.Month()), sun.Day(), int(sun.Month()))
+}
+
+// fillWeekendSpan replaces [ВЫХОДНЫЕ] (and the legacy [ДАТА] in the weekend
+// duty formula) with the weekend before the examination day.
+func fillWeekendSpan(doc Document, content string) string {
+	day, ok := examDay(doc)
+	if !ok {
+		return content
+	}
+	span := weekendSpan(day)
+	content = weekendDateRE.ReplaceAllString(content, "${1} "+span)
+	return strings.ReplaceAll(content, "[ВЫХОДНЫЕ]", span)
+}
+
 // mergeSubstitutions fills [ДАТА]/[ВРЕМЯ] from the examination day (not generate-now)
 // and applies other client placeholders (doctor name, case number).
 func mergeSubstitutions(doc Document, client map[string]string) map[string]string {
@@ -124,7 +164,7 @@ func applySubstitutionsMap(content string, subs map[string]string) string {
 // transformContent keeps the template layout the UI shows, fills
 // placeholders, and rewrites a numeric date header into the MIS form.
 func transformContent(doc Document, subs map[string]string) string {
-	content := rewriteNumericDateHeaders(doc.Content)
+	content := rewriteNumericDateHeaders(fillWeekendSpan(doc, doc.Content))
 	content = rewriteExam10dHeader(content)
 	content = rewriteHeadSignatureCaption(content)
 	content = rewriteSignaturePlaceholders(content)

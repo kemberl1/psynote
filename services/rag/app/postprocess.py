@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from app.templates import SUPPORTED_DOC_TYPES, get_template
 from app.typos import fix_obvious_typos
 
 _PRESCRIPTION_DEFAULT = "см. лист назначений"
@@ -137,6 +138,21 @@ _WEEKEND_FORMULA_RE = re.compile(
     r"за период выходных дней[^.!?\n]*дежурн\w*\s+мед\s+персонал[^.!?\n]*[.!?]?",
     re.I,
 )
+# Даты выходных анонимайзер превращает в [ДАТА], а при показе [ДАТА] —
+# это дата осмотра. Отдельный плейсхолдер: сб–вс считаются от даты осмотра
+# при показе и экспорте (exportSubstitutions.ts, export/transform.go).
+PLACEHOLDER_WEEKEND = "[ВЫХОДНЫЕ]"
+WEEKEND_DUTY_FORMULA = (
+    f"за период выходных дней с {PLACEHOLDER_WEEKEND} "
+    "под наблюдением дежурного мед персонала"
+)
+_WEEKEND_SPAN_RE = re.compile(
+    r"(за период выходных дней\s+с)\s+(?:"
+    r"\[ДАТА\](?:\s*[-–]\s*\[ДАТА\])?"
+    r"|\d{1,2}(?:\.\d{1,2})?\s*[-–]\s*\d{1,2}\.\d{1,2}(?:\.\d{2,4})?"
+    r")",
+    re.I,
+)
 _HYGIENE_DUMP_RE = re.compile(
     r"[^.!?\n]*одевает[^.!?\n]{0,80}гигиеническ[^.!?\n]*[.!?]?",
     re.I,
@@ -221,25 +237,90 @@ def sanitize_corpus_sample(text: str) -> str:
     return out.strip()
 
 
+def _line_key(line: str) -> str:
+    s = line.strip().replace("**", "")
+    return s.split(":", 1)[0].strip() if ":" in s else s
+
+
+def _skeleton_layout(doc_type: str) -> tuple[list[str], set[str]]:
+    """Метки строк бланка и строки, перед которыми в бланке пустая строка."""
+    lines = get_template(doc_type).render_skeleton().splitlines()
+    labels = [_line_key(x) for x in lines if ":" in x and x.strip()]
+    blank_before = {
+        _line_key(lines[i]) for i in range(1, len(lines))
+        if lines[i].strip() and not lines[i - 1].strip()
+    }
+    return labels, blank_before
+
+
+def _merged_label_re(labels: list[str]) -> re.Pattern[str]:
+    ordered = sorted(set(labels), key=len, reverse=True)
+    return re.compile(
+        r"(?<=\S)[ \t]+(?=(?:\*\*)?(?:"
+        + "|".join(re.escape(label) for label in ordered)
+        + r")(?:\*\*)?:)"
+        r"|(?<=\S)[ \t]+(?=\[ДОЛЖНОСТЬ_ВРАЧА\]\s*\[ФИО_ВРАЧА\]\s*$)",
+        re.M,
+    )
+
+
+# Метка бланка посреди строки (модель или старая постобработка склеила
+# строки). Метки только своего типа: «Синдром:» и «Этапный эпикриз:»
+# в ежедневном дневнике — не повод резать текст.
+_MERGED_LABEL_RES: dict[str | None, re.Pattern[str]] = {
+    dt: _merged_label_re(_skeleton_layout(dt)[0]) for dt in SUPPORTED_DOC_TYPES
+}
+_MERGED_LABEL_RES[None] = _merged_label_re(
+    [label for dt in SUPPORTED_DOC_TYPES for label in _skeleton_layout(dt)[0]],
+)
+
+
+def _split_merged_labels(text: str, doc_type: str | None) -> str:
+    pattern = _MERGED_LABEL_RES.get(doc_type, _MERGED_LABEL_RES[None])
+    return pattern.sub("\n", text)
+
+
+def _restore_blank_lines(text: str, doc_type: str) -> str:
+    """Пустые строки ровно там, где они есть в бланке МИС."""
+    _, blank_before = _skeleton_layout(doc_type)
+    out: list[str] = []
+    for line in text.split("\n"):
+        if (
+            out
+            and out[-1].strip()
+            and line.strip()
+            and _line_key(line) in blank_before
+        ):
+            out.append("")
+        out.append(line)
+    return "\n".join(out)
+
+
 def polish_diary(
     text: str,
     *,
     allowed_drugs: set[str] | None = None,
     lock_anamnesis: bool = False,
     lock_additional_none: bool = False,
+    doc_type: str | None = None,
+    expect_weekend: bool = False,
 ) -> str:
     """Исправить типовые срывы модели в уже сгенерированном тексте."""
     if not text:
         return text
-    out = fix_obvious_typos(text)
+    out = re.sub(r"[ \t]+\n", "\n", text)
+    out = _split_merged_labels(out, doc_type)
+    out = fix_obvious_typos(out)
     out = _replace_english_leaks(out)
     out = _OCLIKI_RE.sub("на замечания", out)
     out = _normalize_restraint_language(out)
     out = _LEAK_PLACEHOLDER_RE.sub("", out)
+    out = _WEEKEND_SPAN_RE.sub(rf"\1 {PLACEHOLDER_WEEKEND}", out)
     out = _scrub_history_sections(
         out,
         lock_anamnesis=lock_anamnesis,
         lock_additional_none=lock_additional_none,
+        expect_weekend=expect_weekend,
     )
     out = _reroute_therapy_fields(out)
     out = _drop_injection_if_calmed(out)
@@ -247,7 +328,10 @@ def polish_diary(
         out = _strip_unmentioned_drugs(out, allowed_drugs)
         out = _collapse_empty_plan(out)
     out = re.sub(r"[ \t]{2,}", " ", out)
-    return out
+    out = re.sub(r"[ \t]+\n", "\n", out)
+    if doc_type in SUPPORTED_DOC_TYPES:
+        out = _restore_blank_lines(out, doc_type)
+    return re.sub(r"\n{3,}", "\n\n", out)
 
 
 def _normalize_restraint_language(text: str) -> str:
@@ -283,7 +367,9 @@ def _parse_labeled(line: str) -> tuple[str | None, str]:
     return m.group(1).strip(), m.group(2)
 
 
-def _scrub_additional_value(value: str, *, lock_none: bool) -> str:
+def _scrub_additional_value(
+    value: str, *, lock_none: bool, expect_weekend: bool = False,
+) -> str:
     if lock_none:
         return "нет"
     weekend = _WEEKEND_FORMULA_RE.search(value)
@@ -295,6 +381,9 @@ def _scrub_additional_value(value: str, *, lock_none: bool) -> str:
     parts: list[str] = []
     if weekend:
         parts.append(weekend.group(0).strip().rstrip("."))
+    elif expect_weekend:
+        # Понедельник после выходных: формула бланка обязательна.
+        parts.append(WEEKEND_DUTY_FORMULA)
     for sent in _sentences(rest):
         if not _clinical_enough(sent):
             continue
@@ -313,6 +402,7 @@ def _scrub_history_sections(
     *,
     lock_anamnesis: bool,
     lock_additional_none: bool,
+    expect_weekend: bool = False,
 ) -> str:
     """Интернат/приёмный покой не должны жить в анамнезе, статусе и доп. сведениях."""
     lines = text.split("\n")
@@ -333,6 +423,7 @@ def _scrub_history_sections(
                 line,
                 _scrub_additional_value(
                     value, lock_none=lock_additional_none,
+                    expect_weekend=expect_weekend,
                 ),
             )
         elif label.startswith(_STATUS_LABEL_PREFIX) or label == _EPICRISIS_LABEL:
@@ -420,7 +511,8 @@ def _replace_english_leaks(text: str) -> str:
     for src, dst in _ENGLISH_REPLACEMENTS:
         if src in out:
             out = out.replace(src, dst)
-    out = re.sub(r"\s{2,}", " ", out)
+    # Только пробелы/табы: \s съедал переводы строк и склеивал строки бланка.
+    out = re.sub(r"[ \t]{2,}", " ", out)
 
     def _drop_latin(match: re.Match[str]) -> str:
         word = match.group(0)
@@ -497,7 +589,10 @@ def _rewrite_labeled(line: str, new_value: str) -> str:
     if colon < 0:
         return line
     # Сохраняем «**Метка:**» / «Метка:» как было у модели.
-    return line[: colon + 1] + " " + new_value
+    end = colon + 1
+    if line.startswith("**", end):
+        end += 2
+    return line[:end] + " " + new_value
 
 
 def _reroute_therapy_fields(text: str) -> str:

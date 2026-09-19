@@ -27,7 +27,7 @@ from typing import Callable, Protocol
 
 from app.anonymizer_client import AnonymizerClient
 from app.config import Settings
-from app.generation import build_messages, build_query_text, query_is_agitation
+from app.generation import build_messages, build_query_text, query_mentions_fixation
 from app.llm_client import LLMClient, LLMResult, OpenAICompatibleClient
 from app.questionnaire import iter_free_text, map_answers
 from app.templates import SUPPORTED_DOC_TYPES, DOC_TYPE_DAILY
@@ -180,7 +180,7 @@ class DiaryGenerator:
         # 3. Retrieval few-shot образцов нужного типа/регистра (docs/03 §6).
         k = top_k if top_k is not None else self._settings.retrieval_top_k
         query = build_query_text(mapped, doc_type)
-        agitation = query_is_agitation(mapped)
+        agitation = query_mentions_fixation(mapped)
         try:
             from app.retrieval import STYLE_SECTIONS, pick_style_samples
             retrieve = self._get_retrieve()
@@ -232,6 +232,8 @@ class DiaryGenerator:
                 lock_additional_none=(
                     "Дополнительные сведения о заболевании: нет." in prompt_joined
                 ),
+                doc_type=doc_type,
+                expect_weekend="за период выходных дней" in prompt_joined,
             ),
             model_used=result.model,
             tokens_used=int(result.usage.get("total_tokens", 0) or 0),

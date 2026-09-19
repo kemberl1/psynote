@@ -352,6 +352,10 @@ export interface FeedbackUpsertBody {
 }
 
 export interface AdminFeedbackItem extends GenerationFeedback {
+  /** Текст дневника, который оценивал врач (переживает перегенерацию и удаление). */
+  content_snapshot: string;
+  /** Снимок взят задним числом — мог отличаться от оценённого текста. */
+  snapshot_backfilled: boolean;
   doctor_email: string;
   doctor_name: string;
   title_safe: string;

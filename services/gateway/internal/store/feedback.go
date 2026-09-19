@@ -21,10 +21,16 @@ type GenerationFeedback struct {
 // AdminFeedbackItem is a feedback row for the admin inbox (joins doctor + diary).
 type AdminFeedbackItem struct {
 	GenerationFeedback
-	DoctorEmail  string `json:"doctor_email"`
-	DoctorName   string `json:"doctor_name"`
-	TitleSafe    string `json:"title_safe"`
-	DocumentType string `json:"document_type"`
+	// ContentSnapshot — текст дневника, на который врач оставил отзыв
+	// (сохраняется, даже если дневник перегенерировали или удалили).
+	ContentSnapshot string `json:"content_snapshot"`
+	// SnapshotBackfilled — снимок взят задним числом при миграции и может
+	// не совпадать с текстом, который врач видел при оценке.
+	SnapshotBackfilled bool   `json:"snapshot_backfilled"`
+	DoctorEmail        string `json:"doctor_email"`
+	DoctorName         string `json:"doctor_name"`
+	TitleSafe          string `json:"title_safe"`
+	DocumentType       string `json:"document_type"`
 }
 
 // FeedbackRepository persists generation ratings and comments.

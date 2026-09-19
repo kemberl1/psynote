@@ -55,6 +55,10 @@ func NewPgxRepository(ctx context.Context, dsn string) (*PgxRepository, error) {
 		pool.Close()
 		return nil, err
 	}
+	if err := repo.EnsureHistorySchema(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
 	return repo, nil
 }
 
@@ -139,6 +143,24 @@ func (r *PgxRepository) CompleteGeneration(ctx context.Context, id string, docto
 		return fmt.Errorf("store: begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Перегенерация: прежний текст и бриф — в версии, а не в никуда
+	// (на них могут ссылаться отзывы врачей).
+	_, err = tx.Exec(ctx, `
+		INSERT INTO generated_document_version
+		    (request_id, content_anonymized, answers_anonymized, llm_model_used, tokens_used)
+		SELECT gd.request_id, gd.content_anonymized, gr.answers_anonymized,
+		       gr.llm_model_used, gd.tokens_used
+		FROM generated_document gd
+		JOIN generation_request gr ON gr.id = gd.request_id
+		WHERE gd.request_id = $1
+		  AND gd.content_anonymized <> ''
+		  AND gd.content_anonymized IS DISTINCT FROM $2`,
+		id, rec.ContentAnonymized,
+	)
+	if err != nil {
+		return fmt.Errorf("store: archive generated_document: %w", err)
+	}
 
 	var tag interface{ RowsAffected() int64 }
 	if doctorID != nil {

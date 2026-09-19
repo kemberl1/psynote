@@ -80,11 +80,32 @@ const SYNDROME_LABEL: Record<string, string> = {
   asthenic: "астенический",
 };
 
+// «мед. персоналом», «таб. Сертралина», «ст. 29», «т. д.», инициалы —
+// точка не конец предложения (иначе в бриф шли обрывки «С мед»).
+const NO_BREAK_BEFORE_DOT =
+  /(?:^|[\s(«"])(?:мед|таб|капс|р-ра|р-р|ст|им|др|см|кап|гр|т\.\s?[дпе]|[а-яё])$/i;
+
 function splitSentences(text: string): string[] {
+  const out: string[] = [];
+  const re = /\.\s+|\n/g;
+  let start = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const isDot = m[0] !== "\n";
+    if (isDot && NO_BREAK_BEFORE_DOT.test(text.slice(start, m.index))) continue;
+    out.push(text.slice(start, isDot ? m.index + 1 : m.index));
+    start = m.index + m[0].length;
+  }
+  out.push(text.slice(start));
+  return out.map((s) => s.trim()).filter(Boolean);
+}
+
+/** Абзацы нарратива → предложения (эпизод не выходит за свой абзац). */
+function splitParagraphs(text: string): string[][] {
   return text
-    .split(/(?<=\.)\s+|(?<=\n)/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+    .split(/\n+/)
+    .map((p) => splitSentences(p))
+    .filter((p) => p.length > 0);
 }
 
 function splitListish(chunk: string): string[] {
@@ -104,8 +125,15 @@ export function isRelativeVisitSentence(s: string): boolean {
   const lower = s.toLowerCase();
   if (isParentDaySentence(s)) return true;
   return (
-    /встреч|визит|приход|приехала|приехал/.test(lower) &&
-    /мам[аоыуе]|матер|отц[аеу]|родител|родствен/.test(lower)
+    /встреч|визит|приход|пришл[аи]|пришёл|пришел|приехала|приехал/.test(lower) &&
+    /мам[аоыуе]|матер|мать|отц[аеу]|отец|родител|родствен/.test(lower)
+  );
+}
+
+/** Требование выписки / заключение о выписке — событие дня выписки, не «фон». */
+export function isDischargeSentence(s: string): boolean {
+  return /по\s+(?:категорическому\s+)?требовани|настаива\w*\s+на\s+выписк|недобровольн|ст\.\s*29|выписан\w*\s+по\s+требовани|преждевременн\w*\s+выписк|желани\w*\s+выписаться/i.test(
+    s,
   );
 }
 
@@ -280,13 +308,19 @@ function diagnosisText(batchAnswers: Answers): string {
   return typeof raw === "string" ? fixObviousTypos(raw.trim()) : "";
 }
 
-/** Возбуждение СЕГОДНЯ — повод для каскада мягкой фиксации, не «с трудом поддаётся». */
-export function observationsNeedFixation(observations: string[]): boolean {
+/** Возбуждение СЕГОДНЯ (крик, замах, не поддавался коррекции), не «с трудом поддаётся». */
+export function observationsAgitated(observations: string[]): boolean {
   const blob = observations.join(" ").toLowerCase();
   if (!blob.trim()) return false;
-  return /возбужд|агресс|не подда|замах|кричал|кричит|остро.{0,20}замечан|фиксац/.test(
-    blob,
-  );
+  return /возбужд|агресс|не подда|замах|кричал|кричит|остро.{0,20}замечан/.test(blob);
+}
+
+/**
+ * Мягкая фиксация — только если врач сам написал о ней в наблюдениях дня.
+ * Мера стеснения в медицинском документе не выводится из «возбуждения».
+ */
+export function observationsNeedFixation(observations: string[]): boolean {
+  return /фиксац/.test(observations.join(" ").toLowerCase());
 }
 
 function cognitiveLockLines(diagnosis: string): string[] {
@@ -433,10 +467,40 @@ function roleFor(day: ArcDayPlan, index: number, n: number): DayRole {
   return index % 3 === 0 ? "event" : "quiet";
 }
 
+/**
+ * Тихий портрет: депрессивный/тревожный/астенический регистр или «тих,
+ * малозаметен» без возбуждений. Шаблон «первые дни = двигательно беспокоен,
+ * раздражителен» таким детям приписывал чужую клинику.
+ */
+export function isQuietPortrait(syndrome: unknown, directorContext: string): boolean {
+  const lower = directorContext.toLowerCase();
+  const agitated = /возбужд|агресс|растормож|суетлив|хаотичн|двигательно беспокоен/.test(lower);
+  if (agitated) return false;
+  if (syndrome === "depressive" || syndrome === "anxious" || syndrome === "asthenic") return true;
+  return /\bтих|малозаметн|пассивн|вял|заторможен/.test(lower);
+}
+
 function interpolateMood(
   dynamics: unknown,
   phase: DayPhase,
+  quiet = false,
+  syndrome: unknown = "",
 ): { mood: string; moodDetail: string[] } {
+  if (quiet) {
+    const low = syndrome === "depressive" ? "lowered" : "unstable";
+    if (dynamics === "stable") return { mood: "even", moodDetail: [] };
+    if (dynamics === "negative") return { mood: low, moodDetail: ["anxiety"] };
+    switch (phase) {
+      case "admission":
+        return { mood: low, moodDetail: ["anxiety", "tearfulness"] };
+      case "field":
+      case "titration":
+        return { mood: low, moodDetail: ["anxiety"] };
+      case "improving":
+      case "residual":
+        return { mood: "even", moodDetail: [] };
+    }
+  }
   if (dynamics === "negative") {
     return { mood: "unstable", moodDetail: ["irritability"] };
   }
@@ -461,7 +525,8 @@ function interpolateMood(
   }
 }
 
-function interpolateBehavior(phase: DayPhase, role: DayRole): string {
+function interpolateBehavior(phase: DayPhase, role: DayRole, quiet = false): string {
+  if (quiet) return "ordered";
   if (phase === "admission") return "restless";
   if (phase === "field") return role === "event" ? "restless" : "minor_remarks";
   if (phase === "titration") return "minor_remarks";
@@ -585,12 +650,22 @@ function priorWeekendInPacket(days: ArcDayPlan[], index: number): boolean {
   return false;
 }
 
-function fieldStopsForDay(observations: string[], includeFinalState: boolean): string[] {
+function fieldStopsForDay(
+  observations: string[],
+  includeFinalState: boolean,
+  portrait: string,
+): string[] {
   const obs = observations.join(" ").toLowerCase();
   const stops: string[] = [];
-  if (!/простын/.test(obs)) stops.push("простыни / стаскивание белья — не сегодня");
-  if (!/обув/.test(obs)) stops.push("обувь / обирание обуви — не сегодня");
-  if (!includeFinalState && !/двер|за руку/.test(obs)) {
+  // Стоп только для того, что есть в портрете ЭТОГО пациента: чужие
+  // «простыни» у тихого ребёнка лишь подсказывают модели выдумку.
+  if (/простын/.test(portrait) && !/простын/.test(obs)) {
+    stops.push("простыни / стаскивание белья — не сегодня");
+  }
+  if (/обув/.test(portrait) && !/обув/.test(obs)) {
+    stops.push("обувь / обирание обуви — не сегодня");
+  }
+  if (/двер|за руку/.test(portrait) && !includeFinalState && !/двер|за руку/.test(obs)) {
     stops.push("ведёт к двери / «гулять по отделению» — не сегодня");
   }
   return stops;
@@ -640,6 +715,14 @@ function formatWeekendSpan(sat: Date, sun: Date): string {
   return `${sD}.${String(sM).padStart(2, "0")}-${eD}.${String(eM).padStart(2, "0")}`;
 }
 
+/** «12-13.09» — последние сб–вс на дату осмотра (для плейсхолдера [ВЫХОДНЫЕ]). */
+export function weekendSpanLabel(date: Date): string {
+  const sat = saturdayOf(date);
+  const sun = new Date(sat);
+  sun.setDate(sat.getDate() + 1);
+  return formatWeekendSpan(sat, sun);
+}
+
 /**
  * Формула бланка после диагноза — на ПОНЕДЕЛЬНИКЕ после выходных.
  * Первые 3 дня госпитализации — без формулы. Суббота/воскресенье — null
@@ -657,6 +740,25 @@ export function weekendDutyNote(isoDate: string, dayNumber: number): string | nu
     `за период выходных дней с ${formatWeekendSpan(sat, sun)} ` +
     "под наблюдением дежурного мед персонала."
   );
+}
+
+function isTherapyText(text: string): boolean {
+  return (
+    isTherapyLeakObservation(text) ||
+    /\d\s*(?:мг|мл)\b|кап\/|таб\.|р-р|инъекц|терапи|дозиров|препарат|антидепрессант/i.test(text)
+  );
+}
+
+/** «НЕ повторяй»: узнаваемое начало эпизода, не его полный текст. */
+function forbidFragment(text: string): string {
+  const clean = text
+    .replace(/^За период \(не новый эпизод сегодня\):\s*/, "")
+    .replace(/[.;]+$/, "")
+    .trim();
+  const words = clean.split(/\s+/);
+  let out = words.slice(0, 8).join(" ");
+  if (out.length > 70) out = out.slice(0, 70).replace(/\s+\S*$/, "");
+  return out.length < clean.length ? `${out}…` : out;
 }
 
 /** Убрать из текста препараты/инъекции — оставить наблюдаемое поведение. */
@@ -770,52 +872,113 @@ export function assignTimedObservations(
   const packetYear = Number(days[0].isoDate.slice(0, 4)) || new Date().getFullYear();
   const inPacket = new Set(days.map((d) => d.isoDate));
 
-  for (const raw of splitSentences(directorContext)) {
-    const kind = classifySentence(raw);
-    if (kind === "therapy" || kind === "history" || kind === "skip") continue;
-    const s = raw.replace(/[.;]+$/, "");
-    if (isAdmissionHistory(s) || isTherapyLeakObservation(s)) continue;
-    const lower = s.toLowerCase();
-    const dated = extractDatedSnippets(s, packetYear)
-      .map((d) => d.iso)
-      .filter((iso) => inPacket.has(iso));
-    const mentioned = WEEKDAY_RES.filter((x) => x.re.test(lower)).map((x) => x.dow);
-    const parent = isParentDaySentence(s);
-    const weekendKw = /выходн/.test(lower);
-    const visit = isRelativeVisitSentence(s);
-    const late = /перед выпиской|в последние дни|ближе к выписке|накануне выписки/.test(lower);
-    const anchor = narrativeAnchorIso(s, directorContext, days, packetYear);
+  const consumed = new Set<string>();
+  for (const para of splitParagraphs(directorContext)) {
+    for (let i = 0; i < para.length; i++) {
+      const raw = para[i];
+      if (consumed.has(normSentence(raw))) continue;
+      const kind = classifySentence(raw);
+      if (kind === "therapy" || kind === "history" || kind === "skip") continue;
+      let s = raw.replace(/[.;]+$/, "");
+      if (isAdmissionHistory(s) || isTherapyLeakObservation(s)) continue;
+      const lower = s.toLowerCase();
+      const dated = extractDatedSnippets(s, packetYear)
+        .map((d) => d.iso)
+        .filter((iso) => inPacket.has(iso));
+      // Недатированная выписка уходит в день выписки (compileArc).
+      if (dated.length === 0 && isDischargeSentence(s)) continue;
+      if (dated.length > 0) {
+        // Эпизод целиком: «пришла мать» + требование выписки + беседа.
+        const cont = episodeContinuation(para, i, packetYear);
+        for (const c of cont) consumed.add(normSentence(c));
+        if (cont.length > 0) s = [s, ...cont].join(". ");
+      }
+      const mentioned = WEEKDAY_RES.filter((x) => x.re.test(lower)).map((x) => x.dow);
+      const parent = isParentDaySentence(s);
+      const weekendKw = /выходн/.test(lower);
+      const visit = isRelativeVisitSentence(s);
+      const late = /перед выпиской|в последние дни|ближе к выписке|накануне выписки/.test(lower);
+      const anchor = narrativeAnchorIso(s, directorContext, days, packetYear);
 
-    let targets: ArcDayPlan[] = [];
-    if (dated.length > 0) {
-      targets = days.filter((d) => dated.includes(d.isoDate));
-    } else if (mentioned.length === 1) {
-      targets = closestDays(days, (d) => dowOf(d.isoDate) === mentioned[0], anchor);
-    } else if (mentioned.length > 1) {
-      const hit = closestDays(
-        days,
-        (d) => mentioned.includes(dowOf(d.isoDate) ?? -1),
-        anchor,
-      );
-      targets =
-        mentioned.includes(0) && mentioned.includes(6) && hit[0]
-          ? weekendPairInPacket(days, hit[0])
-          : hit;
-    } else if (parent || (visit && !weekendKw)) {
-      targets = closestDays(days, (d) => dowOf(d.isoDate) === 3, anchor);
-    } else if (weekendKw) {
-      const hit = closestDays(days, (d) => {
-        const dow = dowOf(d.isoDate);
-        return dow === 0 || dow === 6;
-      }, anchor);
-      targets = hit[0] ? weekendPairInPacket(days, hit[0]) : [];
-    } else if (late) {
-      targets = days.slice(-2);
-    } else {
-      continue;
+      let targets: ArcDayPlan[] = [];
+      if (dated.length > 0) {
+        targets = days.filter((d) => dated.includes(d.isoDate));
+      } else if (mentioned.length === 1) {
+        targets = closestDays(days, (d) => dowOf(d.isoDate) === mentioned[0], anchor);
+      } else if (mentioned.length > 1) {
+        const hit = closestDays(
+          days,
+          (d) => mentioned.includes(dowOf(d.isoDate) ?? -1),
+          anchor,
+        );
+        targets =
+          mentioned.includes(0) && mentioned.includes(6) && hit[0]
+            ? weekendPairInPacket(days, hit[0])
+            : hit;
+      } else if (parent || (visit && !weekendKw)) {
+        targets = closestDays(days, (d) => dowOf(d.isoDate) === 3, anchor);
+      } else if (weekendKw) {
+        const hit = closestDays(days, (d) => {
+          const dow = dowOf(d.isoDate);
+          return dow === 0 || dow === 6;
+        }, anchor);
+        targets = hit[0] ? weekendPairInPacket(days, hit[0]) : [];
+      } else if (late) {
+        targets = days.slice(-2);
+      } else {
+        continue;
+      }
+
+      for (const t of targets) add(t.isoDate, s);
     }
+  }
+  return out;
+}
 
-    for (const t of targets) add(t.isoDate, s);
+function normSentence(s: string): string {
+  return s.replace(/[.;]+$/, "").trim().toLowerCase();
+}
+
+// Продолжение эпизода ссылается на его участников/ход: «мать и пациент…»,
+// «с мамой проведена беседа», «решения не поменяли». Фон периода («фон
+// настроения был снижен») к эпизоду не относится.
+const EPISODE_LINK_RE =
+  /мам|мат(?:ь|ер)|отец|отц|пап|родител|родствен|\bони\b|\bих\b|\bим\b|решени|беседа|выписк|требовани|после (?:этого|визита|встречи|ухода|беседы)|в ответ|\bзатем\b/;
+
+/** Следующие предложения абзаца, продолжающие эпизод с датой. */
+function episodeContinuation(para: string[], i: number, packetYear: number): string[] {
+  const out: string[] = [];
+  for (let j = i + 1; j < para.length && out.length < 4; j++) {
+    const t = para[j];
+    const lower = t.toLowerCase();
+    if (!EPISODE_LINK_RE.test(lower)) break;
+    if (extractDatedSnippets(t, packetYear).length > 0) break;
+    if (WEEKDAY_RES.some((x) => x.re.test(lower))) break;
+    if (/в первые дни|при поступлении|в дальнейшем|в течение госпитализ|на фоне|в целом/.test(lower)) break;
+    if (isAdmissionHistory(t) || isTherapyLeakObservation(t) || classifySentence(t) === "therapy") {
+      break;
+    }
+    out.push(t.replace(/[.;]+$/, ""));
+  }
+  return out;
+}
+
+/** Предложения, ушедшие в эпизоды с датой: в общие пулы дней их не кладём. */
+export function datedEpisodeSentences(
+  directorContext: string,
+  days: ArcDayPlan[],
+): Set<string> {
+  const out = new Set<string>();
+  if (!directorContext.trim() || days.length === 0) return out;
+  const packetYear = Number(days[0].isoDate.slice(0, 4)) || new Date().getFullYear();
+  const inPacket = new Set(days.map((d) => d.isoDate));
+  for (const para of splitParagraphs(directorContext)) {
+    para.forEach((s, i) => {
+      const dated = extractDatedSnippets(s, packetYear).some((d) => inPacket.has(d.iso));
+      if (!dated) return;
+      out.add(normSentence(s));
+      for (const c of episodeContinuation(para, i, packetYear)) out.add(normSentence(c));
+    });
   }
   return out;
 }
@@ -884,6 +1047,30 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
   const { days, directorContext, batchAnswers } = input;
   const n = days.length;
   const facts = extractFacts(directorContext);
+  // Эпизоды с датой и выписка живут только в своём дне — не в общих пулах.
+  const episodeParts = datedEpisodeSentences(directorContext, days);
+  const dischargeNotes = unique(
+    splitSentences(directorContext)
+      .filter((s) => isDischargeSentence(s) && !episodeParts.has(normSentence(s)))
+      .map((s) => s.replace(/[.;]+$/, "")),
+  );
+  const ownDaySentence = (item: string): boolean => {
+    const k = normSentence(item);
+    if (!k) return false;
+    if (isDischargeSentence(item)) return true;
+    for (const part of episodeParts) if (part.includes(k)) return true;
+    return false;
+  };
+  for (const key of ["early", "laterBehaviors", "traits", "improvement", "residual", "timed"] as const) {
+    facts[key] = facts[key].filter((x) => !ownDaySentence(x));
+  }
+  const dischargeIso =
+    input.estimatedDischargeDate && days.some((d) => d.isoDate === input.estimatedDischargeDate)
+      ? input.estimatedDischargeDate
+      : input.estimatedDischargeDate
+        ? null
+        : (days[n - 1]?.isoDate ?? null);
+  const quiet = isQuietPortrait(batchAnswers.leading_syndrome, directorContext);
   const dynamics = batchAnswers.overall_dynamics;
   const diagnosis = diagnosisText(batchAnswers);
   const finalState =
@@ -903,7 +1090,8 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
   const timedByDay = assignTimedObservations(directorContext, days);
   const visitPool = unique(
     [...facts.timed, ...splitSentences(directorContext)].filter(
-      (s) => isRelativeVisitSentence(s) && !isAdmissionHistory(s),
+      (s) =>
+        isRelativeVisitSentence(s) && !isAdmissionHistory(s) && !ownDaySentence(s),
     ),
   );
 
@@ -917,8 +1105,13 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     const periodPct = n <= 1 ? 100 : Math.round((index / (n - 1)) * 100);
     const phase = phaseFor(periodPct, day.dayNumber);
     const role = roleFor(day, index, n);
-    const { mood, moodDetail } = interpolateMood(dynamics, phase);
-    const behavior = interpolateBehavior(phase, role);
+    const { mood, moodDetail } = interpolateMood(
+      dynamics,
+      phase,
+      quiet,
+      batchAnswers.leading_syndrome,
+    );
+    const behavior = interpolateBehavior(phase, role, quiet);
     const contact = interpolateContact(facts, role, phase, speechLevel);
     const includeFinalState = index >= n - 2 || (role === "exam" && periodPct >= 80);
     const medsToday = datedMeds.filter((m) => m.iso === day.isoDate).map((m) => m.snippet);
@@ -931,7 +1124,10 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
     const canTakeField =
       role === "event" &&
       (phase === "admission" || phase === "field" || phase === "titration");
-    const timedToday = timedByDay.get(day.isoDate) ?? [];
+    const timedToday = [
+      ...(timedByDay.get(day.isoDate) ?? []),
+      ...(day.isoDate === dischargeIso ? dischargeNotes : []),
+    ];
     const visitToday =
       role === "exam"
         ? visitPool
@@ -1016,33 +1212,47 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
 
   attachWeekendRecaps(briefs);
 
+  const portraitBlob = `${directorContext} ${finalState}`.toLowerCase();
+  const hasDischargeEvent =
+    dischargeNotes.length > 0 || [...episodeParts].some((p) => isDischargeSentence(p));
   for (let i = 0; i < briefs.length; i++) {
-    const others = briefs
-      .filter((_, j) => j !== i)
-      .flatMap((b) => b.observations);
+    const b = briefs[i];
+    const others = briefs.filter((_, j) => j !== i).flatMap((x) => x.observations);
+    const today = b.observations.join(" ");
+    const labels: string[] = [];
+    const timedHere = new Set(timedByDay.get(b.isoDate) ?? []);
+    if (
+      b.role !== "exam" &&
+      visitPool.some((v) => !timedHere.has(v)) &&
+      !isRelativeVisitSentence(today)
+    ) {
+      labels.push("визиты родственников — не сегодня");
+    }
+    if (hasDischargeEvent && b.isoDate !== dischargeIso) {
+      labels.push("требование выписки / беседа о выписке — не сегодня");
+    }
     const extra: string[] = [];
-    if (!briefs[i].includeFinalState) {
-      const fs = batchAnswers.final_state;
-      if (typeof fs === "string" && fs.trim()) extra.push(fs.trim());
-    }
-    if (!briefs[i].therapyToday) extra.push(...facts.therapy);
-    extra.push(
-      ...datedMeds
-        .filter((m) => m.iso > briefs[i].isoDate)
-        .map((m) => m.snippet),
-    );
-    const timedHere = new Set(timedByDay.get(briefs[i].isoDate) ?? []);
-    if (briefs[i].role !== "exam") {
-      extra.push(...visitPool.filter((s) => !timedHere.has(s)));
-    }
-    if (briefs[i].phase === "admission" || briefs[i].phase === "field") {
+    if (b.phase === "admission" || b.phase === "field") {
       extra.push(...facts.improvement, ...facts.residual);
     }
-    if (briefs[i].phase === "improving" || briefs[i].phase === "residual") {
+    if (b.phase === "improving" || b.phase === "residual") {
       extra.push(...facts.laterBehaviors.filter(isFieldAct), ...facts.early);
     }
-    const stops = fieldStopsForDay(briefs[i].observations, briefs[i].includeFinalState);
-    briefs[i].forbidden = unique([...stops, ...extra, ...others]).slice(0, 22);
+    // Только короткие ярлыки: полный текст чужих эпизодов и схемы терапии
+    // в «НЕ повторяй» модель как раз и переносила в сегодняшний дневник.
+    // Терапию и целевое состояние запрещают отдельные строки брифа.
+    const fragments = unique([...extra, ...others])
+      .filter(
+        (t) =>
+          !isTherapyText(t) &&
+          !isAdmissionHistory(t) &&
+          !isDischargeSentence(t) &&
+          !isRelativeVisitSentence(t) &&
+          !today.includes(t),
+      )
+      .map(forbidFragment);
+    const stops = fieldStopsForDay(b.observations, b.includeFinalState, portraitBlob);
+    b.forbidden = unique([...stops, ...labels, ...fragments]).slice(0, 8);
   }
 
   return briefs;
@@ -1155,14 +1365,14 @@ export function formatDayBrief(
   }
   if (brief.therapyToday) {
     const injection = /инъекц/i.test(brief.therapyToday);
-    const agitated = observationsNeedFixation(brief.observations);
+    const fixated = observationsNeedFixation(brief.observations);
     lines.push(
       `Сегодня коррекция/инъекция — пиши ТОЛЬКО в «План лечения (дополнения к плану)». ` +
         `«Назначения» всегда: «см. лист назначений». ` +
         `В психический статус — эпизод поведения БЕЗ препаратов, доз и инъекций. ` +
         `Текст для плана лечения: ${brief.therapyToday}`,
     );
-    if (injection && agitated) {
+    if (injection && fixated) {
       lines.push(
         "Инъекция на сегодня — только если после мягкой фиксации НЕ успокоился (или успокоился непродолжительно). Если после фиксации успокоился — «План лечения: без дополнений», инъекцию не пиши.",
       );
@@ -1175,13 +1385,18 @@ export function formatDayBrief(
   if (observationsNeedFixation(brief.observations)) {
     lines.push(
       "ЗАПРЕЩЕНО: «физическое удержание», «удержание персоналом», «при попытке удержания», иммобилизация. " +
-        "ГРАМОТНО: сегодня есть возбуждение — в статусе каскад: поведение → замечания/вербальная коррекция → «в связи с этим применена мягкая фиксация конечностей на 20 минут (или срок из брифа) под контролем медперсонала» → после фиксации успокоился или не успокоился. " +
+        "Врач сегодня указал мягкую фиксацию — в статусе каскад: поведение → замечания/вербальная коррекция → «в связи с этим применена мягкая фиксация конечностей под контролем медперсонала» (срок — только если он есть в наблюдениях) → после фиксации успокоился или не успокоился. " +
         "Если не успокоился и в брифе сегодня есть инъекция — это коррекция в «Плане лечения», препарат только из брифа. " +
         "«с помощью персонала» — только одевание, мытьё, еда.",
     );
+  } else if (observationsAgitated(brief.observations)) {
+    lines.push(
+      "ЗАПРЕЩЕНО: «физическое удержание», «при попытке удержания». Сегодня возбуждение — опиши поведение и реакцию на замечания / вербальную коррекцию. " +
+        "Мягкую фиксацию и другие меры стеснения не выдумывай: врач их сегодня не указал, а в медицинском документе они только со слов врача. «с помощью персонала» — только одевание, мытьё, еда.",
+    );
   } else {
     lines.push(
-      "ЗАПРЕЩЕНО: «физическое удержание», «при попытке удержания». Сегодня нет эпизода возбуждения (крик / замах / не поддавался коррекции) — мягкую фиксацию не выдумывай, даже если она есть в образцах корпуса. «с помощью персонала» — только одевание, мытьё, еда.",
+      "ЗАПРЕЩЕНО: «физическое удержание», «при попытке удержания». Сегодня мягкую фиксацию не выдумывай — врач её не указал, даже если она есть в образцах корпуса. «с помощью персонала» — только одевание, мытьё, еда.",
     );
   }
   lines.push(

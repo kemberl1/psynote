@@ -401,3 +401,32 @@ func TestTransformExam10d_DoesNotInsertDailyBlanks(t *testing.T) {
 		t.Errorf("10-day must not get daily anamnesis blank: %q", out)
 	}
 }
+
+func TestTransformDaily_FillsWeekendSpanFromExamDay(t *testing.T) {
+	for _, body := range []string{
+		"за период выходных дней с [ВЫХОДНЫЕ] под наблюдением дежурного мед персонала.",
+		// Старый дневник: даты сб–вс анонимайзер превратил в [ДАТА].
+		"за период выходных дней с [ДАТА] под наблюдением дежурного мед персонала.",
+	} {
+		doc := Document{
+			DocumentTypeCode: "daily",
+			Title:            "День 6 · 14.09.2026 · Ежедневный осмотр",
+			Content: "Осмотр лечащим врачом\nДата: [ДАТА] [ВРЕМЯ]\n\n" +
+				"Дополнительные сведения о заболевании: " + body,
+		}
+		out := transformContent(doc, nil)
+		if !strings.Contains(out, "за период выходных дней с 12-13.09 под наблюдением") {
+			t.Fatalf("span not filled:\n%s", out)
+		}
+		if !strings.Contains(out, "Дата: 14.09.2026") {
+			t.Fatalf("exam date lost:\n%s", out)
+		}
+	}
+}
+
+func TestWeekendSpanAcrossMonths(t *testing.T) {
+	got := weekendSpan(time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC))
+	if got != "31.10-1.11" {
+		t.Fatalf("weekendSpan = %q", got)
+	}
+}

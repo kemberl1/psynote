@@ -5,6 +5,7 @@ import { createPending, fetchRequestDetail, generate, patchRequest } from "../ap
 import { ApiError } from "../api/errors";
 import type { Answers, GenerateRequest, HistoryChild, HistoryDetail } from "../api/types";
 import { rebuildBatchDayJobs } from "./batchDiary";
+import { assertFreshBuild } from "./buildVersion";
 import { formatDiaryDate } from "./format";
 import {
   batchDayTitle,
@@ -60,6 +61,7 @@ export async function startSingleGeneration(opts: {
   /** Регенерация существующей записи. */
   requestId?: string;
 }): Promise<string> {
+  await assertFreshBuild();
   let requestId = opts.requestId;
   if (requestId) {
     await patchRequest(requestId, {
@@ -152,6 +154,7 @@ export async function startBatchGeneration(opts: {
   days: BatchDayJob[];
   replaceRequestId?: string;
 }): Promise<string> {
+  await assertFreshBuild();
   const dayCount = opts.days.length;
   const titlePending = withPendingSuffix(customOrAutoTitle(opts.meta, dayCount));
   const packed = packBatchAnswers(opts.narrativeAnswers, opts.meta);
@@ -263,6 +266,7 @@ export async function resumeBatchGeneration(opts: {
   qc: QueryClient;
   detail: HistoryDetail;
 }): Promise<string> {
+  await assertFreshBuild();
   const rebuilt = rebuildBatchDayJobs(opts.detail.answers_anonymized ?? {});
   if (!rebuilt) {
     throw new Error("не удалось восстановить данные пакета");

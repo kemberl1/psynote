@@ -1,4 +1,5 @@
 // Единая модель ошибок API + человекочитаемые сообщения (docs/07 §1, docs/08 §7).
+import { StaleBuildError } from "../lib/buildVersion";
 import type { ApiErrorCode } from "./types";
 
 /**
@@ -38,6 +39,15 @@ export interface FriendlyError {
  * PII_DETECTED — спокойный «warning»-тон (это не сбой, а защита приватности).
  */
 export function friendlyError(err: unknown): FriendlyError {
+  if (err instanceof StaleBuildError) {
+    return {
+      title: "Вышла новая версия PsyNote",
+      detail:
+        "Обновите страницу (Ctrl+Shift+R или Cmd+Shift+R) и запустите генерацию снова — " +
+        "иначе дневники соберутся по старым правилам. Заполненные поля перед обновлением скопируйте.",
+      tone: "warning",
+    };
+  }
   const code: ApiErrorCode =
     err instanceof ApiError ? err.code : "UNKNOWN";
 

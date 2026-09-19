@@ -5,6 +5,8 @@ import {
     extractFacts,
     inferSpeechLevel,
     isAdmissionHistory,
+    isRelativeVisitSentence,
+    observationsAgitated,
     observationsNeedFixation,
     stripTherapyClauses,
     weekendDutyNote,
@@ -79,7 +81,7 @@ describe("compileArc", () => {
     const early = briefs.filter((b) => b.role !== "exam").slice(0, 4);
     for (const b of early) {
       expect(b.includeFinalState).toBe(false);
-      expect(b.forbidden.join(" ")).toMatch(/ведет к двери/i);
+      expect(b.forbidden.join(" ")).toMatch(/вед[её]т к двери/i);
     }
   });
 
@@ -405,7 +407,7 @@ describe("patient-agnostic locks (not one diagnosis)", () => {
     expect(onWeds.length).toBe(1);
     expect(sat?.observations.join(" ")).not.toMatch(/истериоформ/i);
     expect(mon?.observations.join(" ")).not.toMatch(/истериоформ/i);
-    expect(mon?.forbidden.join(" ")).toMatch(/мам|родительск|истериоформ/i);
+    expect(mon?.forbidden.join(" ")).toMatch(/визиты родственников|мам|родительск/i);
   });
 
   it("pins a parent-day event to the Wednesday nearest an explicit date", () => {
@@ -685,18 +687,25 @@ describe("admission history vs in-ward day", () => {
 });
 
 describe("observationsNeedFixation", () => {
-  it("flags a real agitation cascade, not mere hard verbal correction", () => {
+  it("flags agitation separately from hard verbal correction", () => {
     expect(
-      observationsNeedFixation([
-        "кричал, замахивался, вербальной коррекции не поддавался",
-      ]),
+      observationsAgitated(["кричал, замахивался, вербальной коррекции не поддавался"]),
     ).toBe(true);
     expect(
-      observationsNeedFixation([
+      observationsAgitated([
         "вербальной коррекции поддаётся с трудом, на замечания реагирует непродолжительно",
       ]),
     ).toBe(false);
-    expect(observationsNeedFixation(["в игровой смотрел телевизор"])).toBe(false);
+    expect(observationsAgitated(["в игровой смотрел телевизор"])).toBe(false);
+  });
+
+  it("requires the doctor to mention fixation — agitation alone is not enough", () => {
+    expect(
+      observationsNeedFixation(["кричал, замахивался, вербальной коррекции не поддавался"]),
+    ).toBe(false);
+    expect(
+      observationsNeedFixation(["кричал, применена мягкая фиксация на 15 минут"]),
+    ).toBe(true);
   });
 });
 
@@ -734,3 +743,113 @@ describe("intellectFromDiagnosis", () => {
     expect(intellectFromDiagnosis("F92.8")).toBe("age_norm");
   });
 });
+
+// Синтетический кейс по мотивам прода (депрессия, выписка по требованию):
+// пакет 11–16.09, поступление 09.09.
+const DEPRESSIVE_NARRATIVE =
+  "При поступлении был напряжен, тревожен, плаксив. Адаптировался постепенно, был тих, малозаметен, начал выборочно общаться со сверстниками. С мед. персоналом вежлив. На фоне приема таб. Флуоксетина 20 мг/сут тревога уменьшилась. 16.09.2026 в 12:00 в отделение пришла мать пациента. Мать и пациент выразили желание выписаться по категорическому требованию. С матерью и мальчиком проведена беседа о нежелательности преждевременной выписки. Решения они не поменяли, настаивают на выписке.\n" +
+  "Состояние в целом стабильное, опасных тенденций не обнаруживает. Оснований для госпитализации в недобровольном порядке согласно ст. 29 нет. Может быть выписан по требованию.";
+
+function depressiveDays() {
+  return [11, 12, 13, 14, 15, 16].map((d, i) => ({
+    isoDate: `2026-09-${d}`,
+    dayNumber: i + 3,
+    documentType: "daily" as const,
+  }));
+}
+
+function depressiveBriefs() {
+  return compileArc({
+    days: depressiveDays(),
+    directorContext: DEPRESSIVE_NARRATIVE,
+    batchAnswers: {
+      diagnosis: "F32.1 Депрессивный эпизод средней степени",
+      leading_syndrome: "depressive",
+      patient_sex: "male",
+    },
+    estimatedDischargeDate: "2026-09-16",
+  });
+}
+
+describe("narrative parsing (prod regression 16.09)", () => {
+  it("does not split sentences on мед. / таб. / ст. abbreviations", () => {
+    const all = depressiveBriefs().flatMap((b) => [...b.observations, ...b.forbidden]);
+    expect(all.some((o) => /^С мед$|^персоналом/.test(o.trim()))).toBe(false);
+    expect(all.some((o) => /^\S{1,3}$/.test(o.trim()))).toBe(false);
+  });
+
+  it("keeps the whole dated episode on its day, including the discharge demand", () => {
+    const last = depressiveBriefs().at(-1)!;
+    const obs = last.observations.join(" ");
+    expect(obs).toMatch(/пришла мать/);
+    expect(obs).toMatch(/категорическому требованию/);
+    expect(obs).toMatch(/нежелательности преждевременной выписки/);
+    expect(obs).toMatch(/настаивают на выписке/);
+  });
+
+  it("puts the discharge conclusion on the last day only", () => {
+    const briefs = depressiveBriefs();
+    expect(briefs.at(-1)!.observations.join(" ")).toMatch(/недобровольном|выписан по требованию/);
+    for (const b of briefs.slice(0, -1)) {
+      expect(b.observations.join(" ")).not.toMatch(/требовани|недобровольн|настаивают на выписке/);
+    }
+  });
+
+  it("recognizes «Мать» as a relative visit", () => {
+    expect(isRelativeVisitSentence("Пришла мать пациента.")).toBe(true);
+  });
+
+  it("does not make a quiet depressive child restless or irritable", () => {
+    for (const b of depressiveBriefs()) {
+      expect(b.behavior).not.toBe("restless");
+      expect(b.moodDetail).not.toContain("irritability");
+    }
+  });
+
+  it("keeps «НЕ повторяй» short: labels, not other days' text or therapy", () => {
+    for (const b of depressiveBriefs()) {
+      expect(b.forbidden.length).toBeLessThanOrEqual(8);
+      for (const f of b.forbidden) {
+        expect(f.length).toBeLessThanOrEqual(90);
+        expect(f).not.toMatch(/мг\/сут|Флуоксетин/i);
+      }
+    }
+  });
+
+  it("keeps a dated sentence that itself demands discharge on its own day", () => {
+    const briefs = compileArc({
+      days: depressiveDays(),
+      directorContext: "Был тих, малозаметен. 15.09.2026 мать потребовала выписку по требованию.",
+      batchAnswers: { leading_syndrome: "depressive" },
+      estimatedDischargeDate: "2026-09-16",
+    });
+    const day15 = briefs.find((b) => b.isoDate === "2026-09-15")!;
+    expect(day15.observations.join(" ")).toMatch(/потребовала выписку/);
+  });
+
+  it("does not pull background prose into a dated episode", () => {
+    const briefs = compileArc({
+      days: depressiveDays(),
+      directorContext:
+        "15.09.2026 пришла мать пациента. Фон настроения был снижен. В беседе с врачом вступал в контакт постепенно.",
+      batchAnswers: { leading_syndrome: "depressive" },
+      estimatedDischargeDate: "2026-09-16",
+    });
+    const day15 = briefs.find((b) => b.isoDate === "2026-09-15")!;
+    const episode = day15.observations.find((o) => /пришла мать/.test(o))!;
+    expect(episode).not.toMatch(/Фон настроения|В беседе с врачом/);
+  });
+
+  it("does not write discharge into a packet that ends before the planned discharge", () => {
+    const briefs = compileArc({
+      days: depressiveDays(),
+      directorContext: "Был тих. Может быть выписан по требованию под наблюдение психиатра.",
+      batchAnswers: { leading_syndrome: "depressive" },
+      estimatedDischargeDate: "2026-09-30",
+    });
+    for (const b of briefs) {
+      expect(b.observations.join(" ")).not.toMatch(/выписан по требованию/);
+    }
+  });
+});
+

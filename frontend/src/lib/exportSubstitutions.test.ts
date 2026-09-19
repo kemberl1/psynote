@@ -209,3 +209,29 @@ describe("diary date stamp", () => {
     );
   });
 });
+
+describe("weekend duty span", () => {
+  const monday = "День 6 · 14.09.2026 · Ежедневный осмотр";
+
+  it("fills [ВЫХОДНЫЕ] with the Saturday–Sunday before the exam day", () => {
+    const out = applyDiaryStamp(
+      "Дополнительные сведения о заболевании: за период выходных дней с [ВЫХОДНЫЕ] под наблюдением дежурного мед персонала.",
+      { title: monday },
+    );
+    expect(out).toContain("за период выходных дней с 12-13.09 под наблюдением");
+  });
+
+  it("repairs old diaries where the anonymizer turned the span into [ДАТА]", () => {
+    const out = applyDiaryStamp(
+      "Дата: [ДАТА] [ВРЕМЯ]\nДополнительные сведения о заболевании: за период выходных дней с [ДАТА] под наблюдением дежурного мед персонала.",
+      { title: monday },
+    );
+    expect(out).toContain("за период выходных дней с 12-13.09 под наблюдением");
+    expect(out).toContain("«14» сентября 2026 г.");
+  });
+
+  it("formats a weekend across months", () => {
+    const out = applyDiaryStamp("с [ВЫХОДНЫЕ]", { diaryDate: "2026-11-02" });
+    expect(out).toContain("с 31.10-1.11");
+  });
+});

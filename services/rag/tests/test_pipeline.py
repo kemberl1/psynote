@@ -315,8 +315,9 @@ def test_build_query_text_includes_syndrome() -> None:
     assert "психический статус" in q.lower()
 
 
-def test_build_query_text_uses_today_observations_and_fixation_style() -> None:
-    from app.generation import query_is_agitation
+def test_agitation_alone_does_not_ask_for_fixation() -> None:
+    """Возбуждение без слова врача о фиксации — фиксацию не ищем и не пишем."""
+    from app.generation import query_mentions_fixation
     mapped = map_answers(DOC_TYPE_DAILY, {
         "mood": "unstable",
         "__arc_context__": (
@@ -326,15 +327,28 @@ def test_build_query_text_uses_today_observations_and_fixation_style() -> None:
             "ЗАПРЕЩЕНО: физическое удержание. ГРАМОТНО: мягкая фиксация.\n"
         ),
     })
-    assert query_is_agitation(mapped) is True
+    assert query_mentions_fixation(mapped) is False
     q = build_query_text(mapped, DOC_TYPE_DAILY)
     assert "вербальной коррекции не поддавался" in q
-    assert "мягкая фиксация" in q
+    assert "мягкая фиксация" not in q
     assert "ЗАПРЕЩЕНО" not in q
 
 
+def test_doctor_fixation_uses_fixation_style() -> None:
+    from app.generation import query_mentions_fixation
+    mapped = map_answers(DOC_TYPE_DAILY, {
+        "mood": "unstable",
+        "__arc_context__": (
+            "СЕГОДНЯ опиши через наблюдения врача ТОЛЬКО это:\n"
+            "• кричал, замахивался, применена мягкая фиксация на 15 минут\n"
+        ),
+    })
+    assert query_mentions_fixation(mapped) is True
+    assert "мягкая фиксация" in build_query_text(mapped, DOC_TYPE_DAILY)
+
+
 def test_quiet_day_query_does_not_ask_for_fixation() -> None:
-    from app.generation import query_is_agitation
+    from app.generation import query_mentions_fixation
     mapped = map_answers(DOC_TYPE_DAILY, {
         "mood": "even",
         "__arc_context__": (
@@ -343,14 +357,14 @@ def test_quiet_day_query_does_not_ask_for_fixation() -> None:
             "ЗАПРЕЩЕНО: физическое удержание. ГРАМОТНО: мягкая фиксация.\n"
         ),
     })
-    assert query_is_agitation(mapped) is False
+    assert query_mentions_fixation(mapped) is False
     q = build_query_text(mapped, DOC_TYPE_DAILY)
     assert "телевизор" in q
     assert "мягкая фиксация" not in q
 
 
 def test_field_behavior_query_does_not_ask_for_fixation() -> None:
-    from app.generation import query_is_agitation
+    from app.generation import query_mentions_fixation
     mapped = map_answers(DOC_TYPE_DAILY, {
         "mood": "even",
         "__arc_context__": (
@@ -359,14 +373,14 @@ def test_field_behavior_query_does_not_ask_for_fixation() -> None:
             "ЗАПРЕЩЕНО: физическое удержание. ГРАМОТНО: мягкая фиксация.\n"
         ),
     })
-    assert query_is_agitation(mapped) is False
+    assert query_mentions_fixation(mapped) is False
     q = build_query_text(mapped, DOC_TYPE_DAILY)
     assert "полевое" in q
     assert "мягкая фиксация" not in q
 
 
 def test_hard_verbal_correction_query_does_not_ask_for_fixation() -> None:
-    from app.generation import query_is_agitation
+    from app.generation import query_mentions_fixation
     mapped = map_answers(DOC_TYPE_DAILY, {
         "mood": "unstable",
         "__arc_context__": (
@@ -376,7 +390,7 @@ def test_hard_verbal_correction_query_does_not_ask_for_fixation() -> None:
             "ЗАПРЕЩЕНО: физическое удержание. ГРАМОТНО: мягкая фиксация.\n"
         ),
     })
-    assert query_is_agitation(mapped) is False
+    assert query_mentions_fixation(mapped) is False
     q = build_query_text(mapped, DOC_TYPE_DAILY)
     assert "мягкая фиксация" not in q
 
@@ -565,3 +579,23 @@ def test_generate_strips_restraint_and_foreign_drug() -> None:
     assert "мягкая фиксация" in res.content.lower()
     assert "перициазин" not in res.content.lower()
     assert "см. лист назначений" in res.content
+
+
+def test_style_excerpt_takes_mental_status_not_old_header() -> None:
+    from app.generation import style_excerpt
+    sample = (
+        "13.08.2026 время: 10:45\nЖалобы: не предъявляет.\n"
+        + "Анамнез заболевания: без дополнений. " * 30
+        + "\nПсихический статус: Сознание ясное. В игровой строит из кубиков. "
+        "Фон настроения ровный.\nСоматический статус: без особенностей."
+    )
+    out = style_excerpt(sample)
+    assert out.startswith("Психический статус:")
+    assert "строит из кубиков" in out
+    assert "Анамнез" not in out and "Соматический" not in out
+
+
+def test_style_excerpt_cuts_long_status_on_sentence() -> None:
+    from app.generation import style_excerpt
+    out = style_excerpt("Психический статус: " + "Сознание ясное. " * 100, limit=200)
+    assert len(out) <= 200 and out.endswith(".")

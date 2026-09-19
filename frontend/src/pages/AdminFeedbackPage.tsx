@@ -38,7 +38,7 @@ export function AdminFeedbackPage() {
           <article key={it.id} className="admin-fb-card">
             <div className="admin-fb-card__top">
               <StarsStatic rating={it.rating} />
-              <Badge>{documentTypeLabel(it.document_type)}</Badge>
+              {it.document_type && <Badge>{documentTypeLabel(it.document_type)}</Badge>}
               <span className="admin-fb-card__date">{formatDateTime(it.updated_at)}</span>
             </div>
             <div className="admin-fb-card__title">{it.title_safe || "Дневник без названия"}</div>
@@ -56,6 +56,16 @@ export function AdminFeedbackPage() {
             )}
             {!it.comment && !it.quote && (
               <p className="admin-fb-card__muted">Только оценка, без комментария</p>
+            )}
+            {it.content_snapshot && (
+              <details className="admin-fb-card__snapshot">
+                <summary>
+                  {it.snapshot_backfilled
+                    ? "Текст дневника (сохранён позже отзыва — мог быть перегенерирован)"
+                    : "Текст дневника на момент отзыва"}
+                </summary>
+                <pre>{it.content_snapshot}</pre>
+              </details>
             )}
           </article>
         ))}

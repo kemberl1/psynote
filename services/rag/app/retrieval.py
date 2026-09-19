@@ -179,7 +179,8 @@ _STATUS_SIGNAL_RE = re.compile(
     re.I,
 )
 
-_STYLE_PROMPT_LIMIT = 2
+# 3 образца: с двумя обрезанными модель теряла живой стиль статуса.
+_STYLE_PROMPT_LIMIT = 3
 
 
 def pick_style_samples(

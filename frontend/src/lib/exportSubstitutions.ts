@@ -1,3 +1,4 @@
+import { weekendSpanLabel } from "./arcCompiler";
 import { normalizeDailySpacing, omitEmptyDiarySections } from "./diaryMarkup";
 import { fixObviousTypos } from "./typoFixes";
 
@@ -131,6 +132,22 @@ export function buildExportSubstitutions(opts: {
   return subs;
 }
 
+// Старые дневники: анонимайзер превратил даты сб–вс в [ДАТА], которая при
+// показе стала бы датой осмотра («с «14» сентября»). Новые — [ВЫХОДНЫЕ].
+const WEEKEND_DATE_PLACEHOLDER_RE =
+  /(за период выходных дней\s+с)\s+\[ДАТА\](?:\s*[-–]\s*\[ДАТА\])?/gi;
+
+/** [ВЫХОДНЫЕ] → «12-13.09»: сб–вс перед датой осмотра. */
+export function fillWeekendSpan(content: string, diaryDate?: string, title?: string): string {
+  const p = partsFromIsoOrDmy(diaryDate) ?? partsFromIsoOrDmy(diaryDateFromTitle(title));
+  if (!p) return content;
+  const span = weekendSpanLabel(new Date(p.y, p.m - 1, p.d));
+  return content
+    .replace(WEEKEND_DATE_PLACEHOLDER_RE, `$1 ${span}`)
+    .split("[ВЫХОДНЫЕ]")
+    .join(span);
+}
+
 const ATTENDING_PREFIX_RE = /^\s*лечащий\s+врач\s*[,.\-–—:]?\s*/i;
 
 /** Должность без повтора «Лечащий врач» — он уже есть в строке подписи. */
@@ -213,7 +230,9 @@ export function applyDiaryStamp(
   const subs = buildExportSubstitutions(opts);
   let out = forceCanonicalSignatures(
     rewriteSignaturePlaceholders(
-      rewriteHeadSignatureCaption(rewriteNumericDateHeaders(content)),
+      rewriteHeadSignatureCaption(
+        rewriteNumericDateHeaders(fillWeekendSpan(content, opts.diaryDate, opts.title)),
+      ),
     ),
   );
   for (const [key, val] of Object.entries(subs)) {
