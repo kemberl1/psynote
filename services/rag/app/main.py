@@ -32,6 +32,7 @@ from app.pipeline import (
 )
 from app.qdrant_store import QdrantStore
 from app.templates import SUPPORTED_DOC_TYPES
+from app.warmup import warm_embeddings_in_background
 
 logger = logging.getLogger(__name__)
 if not logging.getLogger().handlers:
@@ -50,6 +51,12 @@ app = FastAPI(
         "через admin UI (Этап 10). См. docs/03_rag_design.md."
     ),
 )
+
+
+@app.on_event("startup")
+def _warm_up() -> None:
+    """Первый дневник после деплоя не должен ждать загрузку модели поиска."""
+    warm_embeddings_in_background(settings)
 
 
 # ─── Конверт ответа (docs/07 §1) ─────────────────────────────────────────────

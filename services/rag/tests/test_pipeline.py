@@ -650,3 +650,43 @@ def test_age_is_not_free_text_for_anonymizer() -> None:
     from app.questionnaire import iter_free_text
     paths = [p for p, _ in iter_free_text(DOC_TYPE_DAILY, {"patient_age": 17})]
     assert paths == []
+
+
+def test_warmup_never_breaks_the_service() -> None:
+    """Прогрев модели — необязательный: сбой только пишется в лог."""
+    import app.warmup as warmup
+
+    class _Boom:
+        def __init__(self, *a, **k) -> None:
+            raise RuntimeError("модель недоступна")
+
+    import app.embeddings as embeddings
+    original = embeddings.Embedder
+    embeddings.Embedder = _Boom  # type: ignore[assignment]
+    try:
+        assert warmup.warm_embeddings(_settings()) is False
+    finally:
+        embeddings.Embedder = original  # type: ignore[assignment]
+
+
+def test_warmup_loads_the_model_once() -> None:
+    import app.warmup as warmup
+    import app.embeddings as embeddings
+
+    calls: list[str] = []
+
+    class _Fake:
+        def __init__(self, settings) -> None:
+            pass
+
+        def embed_query(self, text: str) -> list[float]:
+            calls.append(text)
+            return [0.0]
+
+    original = embeddings.Embedder
+    embeddings.Embedder = _Fake  # type: ignore[assignment]
+    try:
+        assert warmup.warm_embeddings(_settings()) is True
+    finally:
+        embeddings.Embedder = original  # type: ignore[assignment]
+    assert len(calls) == 1
