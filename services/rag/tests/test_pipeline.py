@@ -38,6 +38,7 @@ class FakeAnonymizer:
     def __init__(self, *, block: set[str] | None = None) -> None:
         self.block = block or set()
         self.seen: list[str] = []
+        self.closed = False
 
     def anonymize(self, text: str) -> AnonymizeResult:
         self.seen.append(text)
@@ -50,7 +51,7 @@ class FakeAnonymizer:
                                removed_count=removed, reason="ok")
 
     def close(self) -> None:
-        pass
+        self.closed = True
 
 
 class FakeLLM:
@@ -599,3 +600,25 @@ def test_style_excerpt_cuts_long_status_on_sentence() -> None:
     from app.generation import style_excerpt
     out = style_excerpt("Психический статус: " + "Сознание ясное. " * 100, limit=200)
     assert len(out) <= 200 and out.endswith(".")
+
+
+def test_generator_is_reused_between_requests() -> None:
+    """Дни пакета должны идти по уже открытому соединению к провайдеру."""
+    try:
+        from app import main
+    except (ImportError, TypeError) as exc:  # локальный Python 3.9: FastAPI-модели
+        pytest.skip(f"app.main недоступен в этом интерпретаторе: {exc}")
+    assert main.get_generator() is main.get_generator()
+
+
+def test_llm_client_and_anonymizer_survive_between_generations() -> None:
+    """Клиент провайдера переиспользуется и не закрывается после дня пакета."""
+    anon = FakeAnonymizer()
+    llm = FakeLLM()
+    gen = DiaryGenerator(_settings(), anonymizer=anon, llm=llm,
+                         retrieve_fn=_fake_retrieve([]))
+    gen.generate(DOC_TYPE_DAILY, {"mood": "even"})
+    first = gen._get_llm()
+    gen.generate(DOC_TYPE_DAILY, {"mood": "even"})
+    assert gen._get_llm() is first
+    assert anon.closed is False

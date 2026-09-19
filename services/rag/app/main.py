@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -89,11 +90,27 @@ def health() -> dict:
     }
 
 
+_generator: DiaryGenerator | None = None
+_generator_lock = threading.Lock()
+
+
+def get_generator() -> DiaryGenerator:
+    """Один генератор на процесс: http-соединения к провайдеру и анонимайзеру
+    живут между днями пакета. На каждый запрос новый клиент означал новый TCP-
+    коннект, а часть коннектов к провайдеру зависает (прод, 19.09)."""
+    global _generator
+    if _generator is None:
+        with _generator_lock:
+            if _generator is None:
+                _generator = DiaryGenerator(settings)
+    return _generator
+
+
 @app.post("/generate", tags=["generation"])
 def generate(req: GenerateRequest) -> JSONResponse:
     logger.info("generate: start doc_type=%s llm_timeout=%.0fs retries=%d",
                 req.document_type, settings.llm_timeout_s, settings.llm_max_retries)
-    generator = DiaryGenerator(settings)
+    generator = get_generator()
     try:
         result = generator.generate(req.document_type, req.answers)
     except UnsupportedDocTypeError as exc:
@@ -109,14 +126,13 @@ def generate(req: GenerateRequest) -> JSONResponse:
             return _error_response(
                 503, "LLM_AUTH_ERROR",
                 "Ошибка авторизации LLM (проверьте LLM_API_KEY)")
-        logger.error("generate: LLM недоступен (%s)", type(exc).__name__)
+        logger.error("generate: LLM недоступен (%s: %s)",
+                     type(exc).__name__, exc)
         return _error_response(503, "LLM_UNAVAILABLE",
                                "Сервис генерации временно недоступен")
     except Exception as exc:
         logger.error("generate: внутренняя ошибка: %s", type(exc).__name__)
         return _error_response(500, "INTERNAL_ERROR", "Внутренняя ошибка сервиса")
-    finally:
-        generator.close()
 
     return JSONResponse(
         status_code=200,

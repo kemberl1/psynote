@@ -104,6 +104,9 @@ class Settings:
     llm_model_small: str = os.getenv("LLM_MODEL_SMALL", "")
     # Тайм-аут одного запроса к LLM (сек) и число ретраев ВНУТРИ одной модели.
     llm_timeout_s: float = float(os.getenv("LLM_TIMEOUT_S", "170"))
+    # Отдельный таймаут на установку соединения: у провайдера за CloudFront
+    # часть TCP-коннектов зависает, и общий таймаут съедал минуту впустую.
+    llm_connect_timeout_s: float = float(os.getenv("LLM_CONNECT_TIMEOUT_S", "8"))
     llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
     # Backoff: начальная задержка и максимум (экспоненциальный с джиттером).
     llm_backoff_initial_s: float = float(

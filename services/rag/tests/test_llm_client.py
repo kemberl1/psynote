@@ -212,3 +212,56 @@ def test_models_order_dedup() -> None:
     s = _settings(llm_model_large="m",
                   llm_model_medium="m", llm_model_small="")
     assert s.llm_models() == ["m"]
+
+
+def _connect_timeout_error() -> APITimeoutError:
+    """Зависший TCP-коннект: у прода ~40% соединений к провайдеру не открываются."""
+    return APITimeoutError(request=httpx.Request("POST", "https://api.deepseek.com/x"))
+
+
+def test_connect_timeout_is_retried() -> None:
+    """Обрыв на этапе соединения — сетевой сбой: повторяем, а не роняем день."""
+    def behavior(kwargs, n):
+        if n == 1:
+            err = _connect_timeout_error()
+            err.__cause__ = httpx.ConnectTimeout("connect timed out")
+            raise err
+        return _Response("дневник со второй попытки", kwargs["model"])
+
+    fake = FakeOpenAI(behavior)
+    client = OpenAICompatibleClient(
+        _settings(llm_max_retries=3), openai_client=fake)
+    res = client.generate(_msgs())
+    assert res.content == "дневник со второй попытки"
+    assert len(fake.chat.completions.calls) == 2
+
+
+def test_read_timeout_still_does_not_retry() -> None:
+    """Модель уже пишет ответ — повтор только удвоит ожидание."""
+    def behavior(kwargs, n):
+        err = _connect_timeout_error()
+        err.__cause__ = httpx.ReadTimeout("read timed out")
+        raise err
+
+    fake = FakeOpenAI(behavior)
+    client = OpenAICompatibleClient(
+        _settings(llm_max_retries=3), openai_client=fake)
+    with pytest.raises(LLMError, match="timeout"):
+        client.generate(_msgs())
+    assert len(fake.chat.completions.calls) == 1
+
+
+def test_http_client_has_short_connect_timeout_and_keepalive() -> None:
+    """Зависший коннект должен стоить секунды, а соединение — переживать день."""
+    client = OpenAICompatibleClient(
+        _settings(llm_api_key="k", llm_timeout_s=60, llm_connect_timeout_s=8))
+    http = client.http_client
+    assert http is not None
+    assert http.timeout.connect == 8
+    assert http.timeout.read == 60
+    # Соединение живёт между днями пакета: иначе каждый день снова рискует
+    # попасть на зависший коннект к провайдеру.
+    limits = client.http_limits
+    assert limits is not None
+    assert limits.keepalive_expiry == 300
+    assert limits.max_keepalive_connections == 4

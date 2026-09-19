@@ -144,6 +144,9 @@ class OpenAICompatibleClient(LLMClient):
         self._settings = settings
         self._models = settings.llm_models()
         self._timeout = settings.llm_timeout_s
+        self._connect_timeout = settings.llm_connect_timeout_s
+        self._http_client: httpx.Client | None = None
+        self._http_limits: httpx.Limits | None = None
         self._max_retries = max(1, settings.llm_max_retries)
         self._temperature = settings.llm_temperature
         self._max_tokens = settings.llm_max_tokens
@@ -164,29 +167,59 @@ class OpenAICompatibleClient(LLMClient):
                 "LLM: LLM_API_KEY не задан — генерация будет недоступна")
             return
 
+        # Свой httpx-клиент: короткий таймаут на коннект (зависшее соединение
+        # не должно съедать весь бюджет ответа) + длинный keep-alive, чтобы дни
+        # пакета шли по уже открытому соединению.
         # Опциональный CA-bundle: TLS-верификация ОСТАЁТСЯ включённой
         # (docs/03 §9.2). Не отключаем verify!
-        http_client: httpx.Client | None = None
+        verify: Any = True
         if settings.llm_ca_bundle:
-            ssl_ctx = ssl.create_default_context(cafile=settings.llm_ca_bundle)
-            http_client = httpx.Client(
-                verify=ssl_ctx, timeout=float(self._timeout))
+            verify = ssl.create_default_context(cafile=settings.llm_ca_bundle)
+        limits = httpx.Limits(
+            max_keepalive_connections=4,
+            max_connections=8,
+            keepalive_expiry=300.0,
+        )
+        self._http_limits = limits
+        http_client = httpx.Client(
+            verify=verify,
+            timeout=httpx.Timeout(
+                connect=float(self._connect_timeout),
+                read=float(self._timeout),
+                write=float(self._connect_timeout),
+                pool=float(self._connect_timeout),
+            ),
+            limits=limits,
+        )
+        self._http_client = http_client
 
         self._client = OpenAI(
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key,
-            timeout=float(self._timeout),
+            # Явно и клиенту, и SDK — иначе SDK подставит свой дефолт (600s).
+            timeout=http_client.timeout,
             max_retries=0,  # ретраи делаем сами через tenacity
             http_client=http_client,
         )
         self._configured = True
 
         logger.info(
-            "LLM init: base_url=%s, models=%s, timeout=%.0fs, retries=%d, "
-            "custom_ca=%s",  # ключ НИКОГДА не логируем
+            "LLM init: base_url=%s, models=%s, timeout=%.0fs (connect %.0fs), "
+            "retries=%d, custom_ca=%s",  # ключ НИКОГДА не логируем
             settings.llm_base_url, self._models, self._timeout,
-            self._max_retries, bool(settings.llm_ca_bundle),
+            self._connect_timeout, self._max_retries,
+            bool(settings.llm_ca_bundle),
         )
+
+    @property
+    def http_client(self) -> httpx.Client | None:
+        """httpx-клиент (для проверок таймаутов в тестах)."""
+        return self._http_client
+
+    @property
+    def http_limits(self) -> httpx.Limits | None:
+        """Пул соединений: keep-alive между днями пакета."""
+        return self._http_limits
 
     @property
     def models(self) -> list[str]:
@@ -280,7 +313,17 @@ class OpenAICompatibleClient(LLMClient):
             raise LLMError("LLM rate limit", status_code=getattr(exc, "status_code", 429),
                            retryable=True) from exc
         except APITimeoutError as exc:
-            raise LLMError("LLM timeout", retryable=False) from exc
+            # Не открылось соединение — сетевой сбой, пробуем ещё раз (это
+            # секунды). Таймаут ЧТЕНИЯ значит, что модель уже пишет ответ:
+            # повтор только удвоит ожидание и оборвёт пакет по таймауту шлюза.
+            cause = exc.__cause__
+            connect_failed = isinstance(
+                cause, (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout))
+            if connect_failed:
+                logger.warning(
+                    "LLM: соединение с провайдером не открылось за %.0fs — повтор",
+                    self._connect_timeout)
+            raise LLMError("LLM timeout", retryable=connect_failed) from exc
         except APIConnectionError as exc:
             raise LLMError("LLM connection error", retryable=True) from exc
         except APIStatusError as exc:
