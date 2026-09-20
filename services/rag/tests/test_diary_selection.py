@@ -84,3 +84,18 @@ def test_configurable_exclude_can_be_extended() -> None:
     # …а файл-дневник по-прежнему берётся.
     assert selector.is_diary(
         Path("02_корпус/выписанные/А./дневники.docx")) is True
+
+
+def test_scan_skips_office_and_macos_service_files(tmp_path) -> None:
+    """«._имя» — служебные файлы macOS: содержимого нет, а в отчёте они
+    выглядели как 144 пропущенных документа."""
+    from app.ingestion import iter_corpus_files
+
+    (tmp_path / "дневники.docx").write_bytes(b"PK\x03\x04")
+    (tmp_path / "._дневники.docx").write_bytes(b"\x00\x05\x16\x07")
+    (tmp_path / "~$дневники.docx").write_bytes(b"PK\x03\x04")
+    (tmp_path / "заметки.odt").write_bytes(b"PK\x03\x04")
+    (tmp_path / "._заметки.odt").write_bytes(b"\x00\x05\x16\x07")
+
+    names = sorted(p.name for p in iter_corpus_files(tmp_path, include_tables=False))
+    assert names == ["дневники.docx", "заметки.odt"]

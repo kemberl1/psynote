@@ -85,15 +85,22 @@ def source_ref(path: Path, corpus_root: Path) -> str:
 def iter_corpus_files(root: Path, *, include_tables: bool) -> list[Path]:
     """Собрать поддерживаемые файлы корпуса (рекурсивно), БЕЗ отбора по типу.
 
-    Низкоуровневый обход: только фильтр по расширению и временным файлам Office
-    (`~$...`). Отбор именно ДНЕВНИКОВ выполняет :func:`select_diary_files`.
+    Низкоуровневый обход: только фильтр по расширению, временным файлам Office
+    (`~$...`) и служебным файлам macOS (`._...` — AppleDouble, содержимого в
+    них нет, а в отчёте они выглядели как «пропущено 144 документа»).
+    Отбор именно ДНЕВНИКОВ выполняет :func:`select_diary_files`.
     """
     suffixes = set(SUPPORTED_SUFFIXES)
     if not include_tables:
         suffixes -= SUPPORTED_TABLE_SUFFIXES
     files: list[Path] = []
     for p in sorted(root.rglob("*")):
-        if p.is_file() and p.suffix.lower() in suffixes and not p.name.startswith("~$"):
+        if (
+            p.is_file()
+            and p.suffix.lower() in suffixes
+            and not p.name.startswith("~$")
+            and not p.name.startswith("._")
+        ):
             files.append(p)
     return files
 
