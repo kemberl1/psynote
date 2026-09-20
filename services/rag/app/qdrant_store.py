@@ -68,6 +68,20 @@ class QdrantStore:
     def collection(self) -> str:
         return self._collection
 
+    def recreate_collection(self, vector_size: int) -> None:
+        """Удалить и создать коллекцию заново.
+
+        Нужна, когда изменилась РАЗМЕТКА чанков (doc_type/section/класс
+        диагноза): id точки считается от текста и payload, поэтому повторная
+        индексация иначе добавит новые точки, а старые с неверной разметкой
+        останутся и будут участвовать в поиске.
+        """
+        if self._client.collection_exists(self._collection):
+            logger.warning("Пересоздаю коллекцию '%s' — старые точки будут удалены.",
+                           self._collection)
+            self._client.delete_collection(self._collection)
+        self.ensure_collection(vector_size)
+
     def ensure_collection(self, vector_size: int) -> None:
         """Идемпотентно создать коллекцию с нужной размерностью и cosine (docs/05 §3)."""
         if self._client.collection_exists(self._collection):

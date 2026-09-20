@@ -102,6 +102,9 @@ def cmd_ingest(settings: Settings, args: argparse.Namespace) -> int:
     embedder = Embedder(settings)
     store = QdrantStore(settings)
 
+    if getattr(args, "recreate", False):
+        store.recreate_collection(embedder.dimension)
+
     pipeline = IngestionPipeline(settings, anon, embedder, store)
     try:
         stats = pipeline.run(files, corpus_root)
@@ -166,6 +169,9 @@ def build_parser() -> argparse.ArgumentParser:
                                "индексировать все поддерживаемые файлы в корне")
     p_ingest.add_argument("--limit", type=int, default=None,
                           help="обработать не более N файлов (smoke-прогон)")
+    p_ingest.add_argument(
+        "--recreate", action="store_true",
+        help="пересоздать коллекцию перед индексацией (если изменилась разметка чанков)")
     p_ingest.add_argument("--include-tables", action="store_true",
                           help="включить .xlsx (по умолчанию только дневники .docx/.odt/.doc)")
 

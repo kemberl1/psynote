@@ -45,8 +45,12 @@ _SECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 _DATE_PLACEHOLDER_RE = re.compile(r"^\s*\[(ДАТА|ПЕРИОД)\]")
 
 # Сигнал расширенного осмотра — присутствие нескольких именованных секций.
+# Осмотр за 10 дней отличают ДВЕ вещи: подпись заведующего отделением и
+# этапный эпикриз. «Жалобы» и «анамнез» есть и в обычном ежедневном бланке —
+# по ним 5807 записей корпуса ошибочно считались осмотрами (прод, 20.09).
 _EXAM_SIGNAL_RE = re.compile(
-    r"(жалоб|анамнез|физикальн|неврологическ|этапн\w*\s+эпикриз)", re.IGNORECASE)
+    r"(этапн\w*\s+эпикриз|совместно\s+с\s+заведующ|"
+    r"заведующ\w*\s+отделением|осмотр\s+за\s+10\s+дн)", re.IGNORECASE)
 
 # ─── Эвристики метаданных (опциональные поля docs/05) ────────────────────────
 _ICD_RE = re.compile(r"\b([A-ZА-Я]\d{2})(?:\.\d+)?\b")
@@ -85,15 +89,16 @@ def chunk_document(anonymized_text: str, settings: Settings) -> list[Chunk]:
     как daily или exam_10d и режем соответствующе.
     """
     records = _split_into_records(anonymized_text)
+    doc_meta = _document_meta(anonymized_text)
     chunks: list[Chunk] = []
     for record in records:
         record = record.strip()
         if len(record) < settings.chunk_min_chars:
             continue
-        if _EXAM_SIGNAL_RE.search(record) and _count_sections(record) >= 2:
-            chunks.extend(_chunk_exam(record, settings))
+        if _EXAM_SIGNAL_RE.search(record):
+            chunks.extend(_chunk_exam(record, settings, doc_meta))
         else:
-            chunks.extend(_chunk_daily(record, settings))
+            chunks.extend(_chunk_daily(record, settings, doc_meta))
     return chunks
 
 
@@ -137,20 +142,49 @@ def _count_sections(record: str) -> int:
 
 
 # ─── Ежедневная запись → один чанк (с мягким досеканием) ──────────────────────
-def _chunk_daily(record: str, settings: Settings) -> list[Chunk]:
-    meta = _extract_meta(record)
-    pieces = _soft_split(record, settings)
-    return [
-        Chunk(text=p, doc_type="daily", section="full",
-              syndrome=meta["syndrome"], diagnosis_class=meta["icd"],
-              dynamics=meta["dynamics"])
-        for p in pieces
-    ]
+def _chunk_daily(record: str, settings: Settings,
+                 doc_meta: dict | None = None) -> list[Chunk]:
+    """Ежедневная запись: по разделам бланка, если они есть.
+
+    Отдельный чанк «психический статус» — то, ради чего RAG и нужен: именно
+    его стиль подмешивается в промпт.
+    """
+    meta = _merge_meta(_extract_meta(record), doc_meta)
+    chunks: list[Chunk] = []
+    if _count_sections(record) >= 2:
+        for section_code, section_text in _split_exam_sections(record):
+            section_text = section_text.strip()
+            if len(section_text) < settings.chunk_min_chars:
+                continue
+            for piece in _soft_split(section_text, settings):
+                chunks.append(Chunk(
+                    text=piece, doc_type="daily", section=section_code,
+                    syndrome=meta["syndrome"], diagnosis_class=meta["icd"],
+                    dynamics=meta["dynamics"]))
+    if not chunks:
+        chunks = [
+            Chunk(text=p, doc_type="daily", section="full",
+                  syndrome=meta["syndrome"], diagnosis_class=meta["icd"],
+                  dynamics=meta["dynamics"])
+            for p in _soft_split(record, settings)
+            if not _is_document_header(p)
+        ]
+    return chunks
+
+
+_HEADER_RE = re.compile(
+    r"основное заболевание|история болезни|сборник|лист назначений", re.IGNORECASE)
+
+
+def _is_document_header(piece: str) -> bool:
+    """Шапка документа — не образец стиля: клинического наблюдения в ней нет."""
+    return len(piece) < 160 and bool(_HEADER_RE.search(piece))
 
 
 # ─── Расширенный осмотр → чанки по секциям ────────────────────────────────────
-def _chunk_exam(record: str, settings: Settings) -> list[Chunk]:
-    meta = _extract_meta(record)
+def _chunk_exam(record: str, settings: Settings,
+                doc_meta: dict | None = None) -> list[Chunk]:
+    meta = _merge_meta(_extract_meta(record), doc_meta)
     sections = _split_exam_sections(record)
     chunks: list[Chunk] = []
     for section_code, section_text in sections:
@@ -224,6 +258,39 @@ def _soft_split(text: str, settings: Settings) -> list[str]:
             break
         start = max(end - overlap, start + 1)
     return pieces
+
+
+def _document_meta(text: str) -> dict:
+    """Метаданные всего документа: код МКБ и синдром из шапки истории болезни.
+
+    В сборнике дневников одного пациента диагноз написан один раз, а записи
+    дня его не повторяют. Берём метку документа ТОЛЬКО если она однозначна:
+    два разных класса в файле — лучше без метки, чем с чужой.
+    """
+    classes = {
+        f"F{raw[1]}x"
+        for raw in (m.group(1) for m in _ICD_RE.finditer(text))
+        if raw[0].upper() in ("F", "Ф") and raw[1:].isdigit()
+    }
+    syndromes = {
+        normalize_syndrome(m.group(1))
+        for m in _SYNDROME_RE.finditer(text)
+    } - {None, ""}
+    return {
+        "icd": next(iter(classes)) if len(classes) == 1 else None,
+        "syndrome": next(iter(syndromes)) if len(syndromes) == 1 else None,
+        "dynamics": None,
+    }
+
+
+def _merge_meta(record_meta: dict, doc_meta: dict | None) -> dict:
+    """Метка записи важнее метки документа; пустые поля добираем из документа."""
+    if not doc_meta:
+        return record_meta
+    return {
+        key: record_meta.get(key) or doc_meta.get(key)
+        for key in ("icd", "syndrome", "dynamics")
+    }
 
 
 # ─── Извлечение опциональных метаданных ───────────────────────────────────────
