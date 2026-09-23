@@ -446,6 +446,31 @@ export function steadyStateLines(
       `формулировкой: «${target}». Не чередуй «формальная / частично сохранна / ` +
       "достаточная / формируется» от дня к дню.",
   );
+  if (!ID_DIAGNOSIS_RE.test(diagnosis)) {
+    // Врач: волевой контроль не может быть «достаточен» в одном дне и «резко
+    // ослаблен» в соседнем, а мышление у непсихотического ребёнка к концу
+    // госпитализации не «конкретизируется» — меняется только темп.
+    const volition =
+      phase === "improving" || phase === "residual"
+        ? "волевой контроль поведения постепенно упорядочивается"
+        : "волевой контроль поведения ослаблен";
+    lines.push(
+      `Волевой контроль — одна формулировка на весь период: «${volition}». ` +
+        "Не чередуй «достаточен» и «резко ослаблен / резко снижен» от дня ко дню: " +
+        "по дуге он меняется только в одну сторону.",
+    );
+    const thinking =
+      phase === "improving" || phase === "residual"
+        ? "мышление последовательное, в обычном темпе"
+        : "мышление последовательное, темп несколько замедлен";
+    lines.push(
+      `Мышление — только темп и целенаправленность: «${thinking}». ` +
+        "Умственной отсталости в диагнозе нет, поэтому ЗАПРЕЩЕНЫ «конкретное», " +
+        "«конкретизированное», «тугоподвижное», «с элементами обстоятельности», " +
+        "«наглядно-действенное». К концу госпитализации мышление может только " +
+        "выравниваться по темпу, ухудшаться ему нельзя.",
+    );
+  }
   return lines;
 }
 
@@ -859,7 +884,7 @@ function priorWeekendInPacket(days: ArcDayPlan[], index: number): boolean {
   if (calendarFor(days[index]?.isoDate ?? "") !== "monday") return false;
   for (let j = 0; j < index; j++) {
     const c = calendarFor(days[j].isoDate);
-    if ((c === "saturday" || c === "sunday") && days[j].dayNumber > 3) {
+    if ((c === "saturday" || c === "sunday") && !hasOwnDocument(days, days[j].isoDate)) {
       return true;
     }
   }
@@ -931,31 +956,78 @@ function formatWeekendSpan(sat: Date, sun: Date): string {
   return `${sD}.${String(sM).padStart(2, "0")}-${eD}.${String(eM).padStart(2, "0")}`;
 }
 
-/** «12-13.09» — последние сб–вс на дату осмотра (для плейсхолдера [ВЫХОДНЫЕ]). */
-export function weekendSpanLabel(date: Date): string {
+/** Суббота и воскресенье той же недели, что и дата. */
+function weekendPairOf(date: Date): [Date, Date] {
   const sat = saturdayOf(date);
   const sun = new Date(sat);
   sun.setDate(sat.getDate() + 1);
+  return [sat, sun];
+}
+
+/** «6.09» — один выходной день для формулы дежурного персонала. */
+function formatWeekendDay(d: Date): string {
+  return `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** День пакета: порядок в массиве = номер дня выбранного периода. */
+type PacketDay = {
+  isoDate: string;
+  documentType?: "daily" | "exam_10d";
+  role?: DayRole;
+};
+
+/**
+ * За этот день пакета пишется собственный документ: либо он в первых трёх днях
+ * ПЕРИОДА, либо это осмотр за 10 дней (он пишется и в выходной).
+ */
+function hasOwnDocument(packet: readonly PacketDay[], iso: string): boolean {
+  const i = packet.findIndex((p) => p.isoDate === iso);
+  if (i < 0) return false;
+  return i <= 2 || packet[i].documentType === "exam_10d" || packet[i].role === "exam";
+}
+
+/**
+ * Выходные, за которые отдельного документа НЕТ. День со своим документом в
+ * формулу дежурного персонала не идёт: иначе понедельник пишет «под
+ * наблюдением дежурного» про день, у которого есть свой осмотр.
+ */
+function unwrittenWeekendDays(packet: readonly PacketDay[], date: Date): Date[] {
+  return weekendPairOf(date).filter((d) => !hasOwnDocument(packet, formatIso(d)));
+}
+
+function dutyFormulaForDays(days: Date[]): string | null {
+  if (days.length === 0) return null;
+  const span =
+    days.length === 1
+      ? `выходного дня ${formatWeekendDay(days[0])}`
+      : `выходных дней с ${formatWeekendSpan(days[0], days[1])}`;
+  return `за период ${span} под наблюдением дежурного мед персонала.`;
+}
+
+/** «12-13.09» — последние сб–вс на дату осмотра (для плейсхолдера [ВЫХОДНЫЕ]). */
+export function weekendSpanLabel(date: Date): string {
+  const [sat, sun] = weekendPairOf(date);
   return formatWeekendSpan(sat, sun);
 }
 
 /**
  * Формула бланка после диагноза — на ПОНЕДЕЛЬНИКЕ после выходных.
- * Первые 3 дня госпитализации — без формулы. Суббота/воскресенье — null
- * (отдельный дневник за выходной после 3-го дня не пишется).
+ * Первые 3 дня ПЕРИОДА — без формулы (`dayInPeriod` считается от первого дня
+ * выбранного периода, 1-based, а не от дня госпитализации).
+ * Суббота/воскресенье — null (отдельный дневник за такой выходной не пишется).
+ * `packet` — дни этого пакета: выходной из первых трёх дней периода в формулу
+ * не попадает, за него написан свой дневник.
  */
-export function weekendDutyNote(isoDate: string, dayNumber: number): string | null {
-  if (dayNumber <= 3) return null;
+export function weekendDutyNote(
+  isoDate: string,
+  dayInPeriod: number,
+  packet: readonly PacketDay[] = [],
+): string | null {
+  if (dayInPeriod <= 3) return null;
   const date = parseIso(isoDate);
   if (!date) return null;
   if (date.getDay() !== 1) return null;
-  const sat = saturdayOf(date);
-  const sun = new Date(sat);
-  sun.setDate(sat.getDate() + 1);
-  return (
-    `за период выходных дней с ${formatWeekendSpan(sat, sun)} ` +
-    "под наблюдением дежурного мед персонала."
-  );
+  return dutyFormulaForDays(unwrittenWeekendDays(packet, date));
 }
 
 function isTherapyText(text: string): boolean {
@@ -1211,30 +1283,27 @@ function recapHostIndex(briefs: DayBrief[], weekendIndex: number): number {
   return -1;
 }
 
-function dutyFormulaFromWeekend(weekendIso: string): string | null {
+function dutyFormulaFromWeekend(
+  weekendIso: string,
+  packet: readonly PacketDay[] = [],
+): string | null {
   const date = parseIso(weekendIso);
   if (!date) return null;
-  const sat = saturdayOf(date);
-  const sun = new Date(sat);
-  sun.setDate(sat.getDate() + 1);
-  return (
-    `за период выходных дней с ${formatWeekendSpan(sat, sun)} ` +
-    "под наблюдением дежурного мед персонала."
-  );
+  return dutyFormulaForDays(unwrittenWeekendDays(packet, date));
 }
 
 function attachWeekendRecaps(briefs: DayBrief[]): void {
   for (let i = 0; i < briefs.length; i++) {
     const b = briefs[i];
-    if (b.dayNumber <= 3) continue;
+    if (i <= 2 || b.role === "exam") continue;
     if (b.calendar !== "saturday" && b.calendar !== "sunday") continue;
     const host = recapHostIndex(briefs, i);
     if (host < 0) continue;
     const target = briefs[host];
     target.weekendRecap = true;
     const formula =
-      weekendDutyNote(target.isoDate, target.dayNumber) ??
-      dutyFormulaFromWeekend(b.isoDate);
+      weekendDutyNote(target.isoDate, target.periodIndex + 1, briefs) ??
+      dutyFormulaFromWeekend(b.isoDate, briefs);
     if (!formula) continue;
     const extras = b.observations.filter(
       (o) =>
@@ -1454,7 +1523,7 @@ export function compileArc(input: CompileArcInput): DayBrief[] {
       lengthHint: role === "exam" ? "exam" : role === "quiet" ? "short" : "medium",
       weekendRecap: priorWeekendInPacket(days, index),
       weekendDutyNote: priorWeekendInPacket(days, index)
-        ? weekendDutyNote(day.isoDate, day.dayNumber)
+        ? weekendDutyNote(day.isoDate, index + 1, days)
         : null,
       weekendRecapNotes: [],
     };
@@ -1555,15 +1624,15 @@ export function formatDayBrief(
     );
   }
   if (brief.calendar === "saturday" || brief.calendar === "sunday") {
-    if (brief.dayNumber <= 3) {
+    if (brief.periodIndex <= 2) {
       lines.push(
-        "Выходной, но это один из первых трёх дней госпитализации: пиши обычный ежедневный осмотр. " +
+        "Выходной, но это один из первых трёх дней периода: пиши обычный ежедневный осмотр. " +
           "«Дополнительные сведения о заболевании» оставь «нет». " +
           "НЕ пиши формулу «за период выходных дней» и «под наблюдением дежурного мед персонала».",
       );
     } else {
       lines.push(
-        "Выходной после 3-го дня госпитализации: отдельный дневник за сегодня НЕ пишется. " +
+        "Выходной после 3-го дня периода: отдельный дневник за сегодня НЕ пишется. " +
           "Если этот текст всё же генерируется — сделай его максимально коротким и без формулы дежурного персонала; " +
           "пересказ выходных уйдёт в понедельник.",
       );
@@ -1573,7 +1642,7 @@ export function formatDayBrief(
       ? `«${brief.weekendDutyNote}»`
       : "формулу из брифа про дежурный персонал";
     lines.push(
-      "Понедельник после пропущенных сб/вс ЭТОГО пакета: отдельный дневник за субботу и воскресенье не пишется. " +
+      "Понедельник после пропущенных сб/вс ЭТОГО пакета: за пропущенные выходные отдельный дневник не пишется. " +
         `После диагноза в «Дополнительные сведения о заболевании» напиши ${formula} ` +
         "— формула про дежурный персонал и кратко (1–2 предложения) что было за выходные, если это есть в наблюдениях. " +
         "Эту формулу не ставь в психический статус и не выдумывай прогулки и инциденты.",
@@ -1706,6 +1775,9 @@ export function formatDayBrief(
   }
   lines.push(
     "Конкретика дня: можно дорисовать быт отделения ИЗ портрета (бездеятелен → в палате/игровой; не взаимодействует → обособлен; полевой → ходит по палате). Это перевод эпикриза, не новые факты.",
+  );
+  lines.push(
+    "Ребёнок в стационаре всё время в поле зрения персонала: НЕ пиши «свободно перемещается по отделению», «бесцельно ходит по коридору», «гуляет по отделению», «подходит к игровой». Полевое поведение — в пределах палаты и игровой.",
   );
   lines.push(
     "Нельзя выдумывать факты, которых нет в контексте: прогулки, визиты, консультации, процедуры, самоповреждение, смену схемы, «выходные» не в тот календарный день.",

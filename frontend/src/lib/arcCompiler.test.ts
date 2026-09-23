@@ -585,7 +585,9 @@ describe("weekendDutyNote", () => {
     expect(briefs[0].weekendDutyNote).toBeNull();
     expect(briefs[1].weekendDutyNote).toBeNull();
     expect(briefs[2].weekendDutyNote).toBeNull();
-    expect(briefs[3].weekendDutyNote).toMatch(/с 8-9\.08/);
+    // 08.08 — третий день периода, за субботу пишется свой дневник, поэтому
+    // формулы дежурного персонала в понедельник нет.
+    expect(briefs[3].weekendDutyNote).toBeNull();
     const early = buildGenerateAnswers(
       { overall_dynamics: "stable" },
       1,
@@ -714,24 +716,32 @@ describe("observationsNeedFixation", () => {
 });
 
 describe("shouldSkipWeekendDaily", () => {
-  it("skips Saturday/Sunday after hospital day 3", () => {
+  it("skips Saturday/Sunday after the third day of the period", () => {
     expect(
-      shouldSkipWeekendDaily({ isoDate: "2026-07-25", dayNumber: 23, documentType: "daily" }),
+      shouldSkipWeekendDaily({ isoDate: "2026-07-25", dayNumber: 23, documentType: "daily" }, 5),
     ).toBe(true);
     expect(
-      shouldSkipWeekendDaily({ isoDate: "2026-07-26", dayNumber: 24, documentType: "daily" }),
+      shouldSkipWeekendDaily({ isoDate: "2026-07-26", dayNumber: 24, documentType: "daily" }, 6),
     ).toBe(true);
   });
 
-  it("keeps the first three hospital days and weekdays and 10-day exams", () => {
+  it("keeps the first three days of the period whatever the hospital day is", () => {
+    // Врач ставит начало периода по первичному осмотру, а не по дню
+    // поступления: ребёнок может пролежать в приёмном отделении.
     expect(
-      shouldSkipWeekendDaily({ isoDate: "2026-08-01", dayNumber: 2, documentType: "daily" }),
+      shouldSkipWeekendDaily({ isoDate: "2026-07-25", dayNumber: 23, documentType: "daily" }, 0),
     ).toBe(false);
     expect(
-      shouldSkipWeekendDaily({ isoDate: "2026-07-27", dayNumber: 8, documentType: "daily" }),
+      shouldSkipWeekendDaily({ isoDate: "2026-07-26", dayNumber: 24, documentType: "daily" }, 2),
+    ).toBe(false);
+  });
+
+  it("keeps weekdays and 10-day exams", () => {
+    expect(
+      shouldSkipWeekendDaily({ isoDate: "2026-07-27", dayNumber: 8, documentType: "daily" }, 7),
     ).toBe(false);
     expect(
-      shouldSkipWeekendDaily({ isoDate: "2026-08-01", dayNumber: 20, documentType: "exam_10d" }),
+      shouldSkipWeekendDaily({ isoDate: "2026-08-01", dayNumber: 20, documentType: "exam_10d" }, 9),
     ).toBe(false);
   });
 });
@@ -1064,3 +1074,130 @@ describe("admission status and suicidal history (prod 92.0)", () => {
   });
 });
 
+
+// Отзывы врача от 22.09: выходные считаются от начала периода, формула
+// дежурного — только за реально пропущенные дни, константы волевого контроля
+// и мышления, быт отделения без свободных прогулок по отделению.
+describe("doctor feedback 22.09", () => {
+  const daily = (isoDate: string, dayNumber: number) => ({
+    isoDate,
+    dayNumber,
+    documentType: "daily" as const,
+  });
+  // Период с 05.09 (сб): оба выходных попадают в первые три дня периода.
+  const weekendStart = [
+    daily("2026-09-05", 3),
+    daily("2026-09-06", 4),
+    daily("2026-09-07", 5),
+  ];
+  // Период с 03.09 (чт): сб 05.09 — третий день периода, вс 06.09 — четвёртый.
+  const periodFromThursday = [
+    daily("2026-09-03", 1),
+    daily("2026-09-04", 2),
+    daily("2026-09-05", 3),
+    daily("2026-09-06", 4),
+    daily("2026-09-07", 5),
+  ];
+  const arcOf = (
+    days: { isoDate: string; dayNumber: number; documentType: "daily" | "exam_10d" }[],
+  ) =>
+    compileArc({
+      days,
+      directorContext: "Состояние с улучшением.",
+      batchAnswers: { overall_dynamics: "stable" },
+      estimatedDischargeDate: "",
+    });
+
+  it("writes weekend diaries that fall into the first three days of the period", () => {
+    expect(weekendStart.map((d, i) => shouldSkipWeekendDaily(d, i))).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    expect(arcOf(weekendStart)[2].weekendDutyNote).toBeNull();
+  });
+
+  it("names only the skipped Sunday when Saturday still got its own diary", () => {
+    expect(periodFromThursday.map((d, i) => shouldSkipWeekendDaily(d, i))).toEqual([
+      false,
+      false,
+      false,
+      true,
+      false,
+    ]);
+    const monday = arcOf(periodFromThursday)[4];
+    expect(monday.weekendDutyNote).toBe(
+      "за период выходного дня 6.09 под наблюдением дежурного мед персонала.",
+    );
+    expect(monday.weekendDutyNote).not.toMatch(/5-6\.09/);
+  });
+
+  it("still spans both days when neither weekend day has its own diary", () => {
+    const fullWeek = [
+      daily("2026-09-09", 7),
+      daily("2026-09-10", 8),
+      daily("2026-09-11", 9),
+      daily("2026-09-12", 10),
+      daily("2026-09-13", 11),
+      daily("2026-09-14", 12),
+    ];
+    expect(fullWeek.map((d, i) => shouldSkipWeekendDaily(d, i))).toEqual([
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+    ]);
+    expect(arcOf(fullWeek)[5].weekendDutyNote).toBe(
+      "за период выходных дней с 12-13.09 под наблюдением дежурного мед персонала.",
+    );
+  });
+
+  it("does not count a Saturday 10-day exam as a missed weekend day", () => {
+    const withExam = [
+      daily("2026-09-09", 7),
+      daily("2026-09-10", 8),
+      daily("2026-09-11", 9),
+      { isoDate: "2026-09-12", dayNumber: 10, documentType: "exam_10d" as const },
+      daily("2026-09-13", 11),
+      daily("2026-09-14", 12),
+    ];
+    // Осмотр за 10 дней пишется и в субботу — он не «под наблюдением дежурного».
+    expect(shouldSkipWeekendDaily(withExam[3], 3)).toBe(false);
+    expect(arcOf(withExam)[5].weekendDutyNote).toBe(
+      "за период выходного дня 13.09 под наблюдением дежурного мед персонала.",
+    );
+  });
+
+  it("holds волевой контроль and мышление steady without an F7x diagnosis", () => {
+    const early = steadyStateLines("F92.0. Депрессивное расстройство поведения", "", "field")
+      .join(" ");
+    expect(early).toMatch(/Волевой контроль — одна формулировка на весь период/);
+    expect(early).toMatch(/волевой контроль поведения ослаблен/);
+    const late = steadyStateLines("F92.0. Депрессивное расстройство поведения", "", "residual")
+      .join(" ");
+    expect(late).toMatch(/постепенно упорядочивается/);
+    expect(late).toMatch(/мышление последовательное, в обычном темпе/);
+    expect(late).toMatch(/ЗАПРЕЩЕНЫ «конкретное», «конкретизированное»/);
+  });
+
+  it("leaves the thinking wording to the cognitive lock for an F7x diagnosis", () => {
+    const lines = steadyStateLines("F71.18 Умеренная умственная отсталость", "", "residual")
+      .join(" ");
+    expect(lines).not.toMatch(/Мышление — только темп/);
+    expect(lines).not.toMatch(/Волевой контроль — одна формулировка/);
+  });
+
+  it("forbids free roaming around the ward in the day brief", () => {
+    const briefs = compileArc({
+      days: periodFromThursday,
+      directorContext: "Полевое поведение, бездеятелен.",
+      batchAnswers: { overall_dynamics: "stable" },
+      estimatedDischargeDate: "",
+    });
+    const arc = String(applyBriefToAnswers({}, briefs[4], {}, "").__arc_context__);
+    expect(arc).toMatch(/НЕ пиши «свободно перемещается по отделению»/);
+    expect(arc).toMatch(/в пределах палаты и игровой/);
+  });
+});

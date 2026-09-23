@@ -252,6 +252,11 @@ def test_build_messages_daily_locks_diagnosis_and_plain_markup() -> None:
     assert "звукокомплекс" in system.lower()
     assert "не противоречь" in system.lower() or "не противоречь" in system
     assert "под наблюдением" in system.lower()
+    # Отзыв врача 22.09: ребёнок не гуляет по отделению сам, волевой контроль
+    # не скачет между днями.
+    assert "Свободное перемещение по отделению не пиши" in system
+    assert "в пределах палаты и игровой" in system
+    assert "ОДНА формулировка на весь период" in system
     assert "вероятно" in system.lower()
     assert "Соматический статус:" in system
     assert "План лечения (дополнения к плану):" in system
@@ -302,6 +307,12 @@ def test_build_messages_exam10d_has_epicrisis() -> None:
     msgs = build_messages(DOC_TYPE_EXAM_10D, mapped, [])
     system = next(m.content for m in msgs if m.role == "system")
     assert "Этапный эпикриз:" in system
+    # Отзыв врача 22.09: эпикриз — по существу периода, без преамбулы, без
+    # даты поступления и без переписывания неврологии и соматики.
+    assert "не рассуждение на свободную тему" in system
+    assert "находится на стационарном лечении" in system
+    assert "соматический статус сюда НЕ переписывай" in system
+    assert "соматически благополучен" in system
     assert "заведующим отделением" in system
     assert "ОСМОТР\nлечащим врачом совместно с заведующим отделением" in system
     assert "Психический статус (его изменение):" in system

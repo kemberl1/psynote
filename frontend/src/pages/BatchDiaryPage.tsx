@@ -100,7 +100,7 @@ export function BatchDiaryPage() {
   ]);
 
   const generatedDays = useMemo(
-    () => planPreview?.days.filter((d) => !shouldSkipWeekendDaily(d)) ?? [],
+    () => planPreview?.days.filter((d, i) => !shouldSkipWeekendDaily(d, i)) ?? [],
     [planPreview],
   );
   const skippedWeekendCount = (planPreview?.days.length ?? 0) - generatedDays.length;
@@ -160,7 +160,7 @@ export function BatchDiaryPage() {
           briefs[i],
         ),
       }))
-      .filter((_, i) => !shouldSkipWeekendDaily(planPreview.days[i]));
+      .filter((_, i) => !shouldSkipWeekendDaily(planPreview.days[i], i));
 
     if (days.length === 0) {
       setStarting(false);
@@ -290,7 +290,7 @@ export function BatchDiaryPage() {
           <p className="batch-preview">
             Будет сгенерировано <b>{generatedDays.length}</b> записей
             {skippedWeekendCount > 0
-              ? ` (календарных дней ${planPreview.days.length}, выходные после 3-го дня госпитализации пропускаются)`
+              ? ` (календарных дней ${planPreview.days.length}, выходные после 3-го дня периода пропускаются)`
               : ""}
             : <b>{generatedDays.filter((d) => d.documentType === "daily").length}</b>{" "}
             ежедневных,{" "}

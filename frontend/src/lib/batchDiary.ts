@@ -159,21 +159,28 @@ export function isWeekendIso(iso: string): boolean {
 }
 
 /**
- * Ежедневный осмотр на сб/вс не пишем, кроме первых 3 дней госпитализации.
+ * Ежедневный осмотр на сб/вс не пишем, кроме первых 3 дней ПЕРИОДА.
+ * Врач: отсчёт идёт не от поступления, а от первого дня выбранного периода —
+ * ребёнок сначала в приёмном отделении, и день приёма в отделение может не
+ * совпасть с днём госпитализации; начало периода врач ставит по первичному
+ * осмотру, от него и начинаются дневники.
  * Осмотр за 10 дней на выходных оставляем — это этапный бланк.
  */
-export function shouldSkipWeekendDaily(day: {
-  isoDate: string;
-  dayNumber: number;
-  documentType: BatchDocType;
-}): boolean {
+export function shouldSkipWeekendDaily(
+  day: {
+    isoDate: string;
+    dayNumber: number;
+    documentType: BatchDocType;
+  },
+  periodIndex: number,
+): boolean {
   if (day.documentType === "exam_10d") return false;
-  if (day.dayNumber <= 3) return false;
+  if (periodIndex <= 2) return false;
   return isWeekendIso(day.isoDate);
 }
 
 export function daysToGenerate(plan: BatchPlan): BatchDayPlan[] {
-  return plan.days.filter((d) => !shouldSkipWeekendDaily(d));
+  return plan.days.filter((d, i) => !shouldSkipWeekendDaily(d, i));
 }
 
 export function intellectFromDiagnosis(diagnosisStr: string): string {
@@ -577,6 +584,6 @@ export function rebuildBatchDayJobs(packed: Answers): {
           briefs[i],
         ),
       }))
-      .filter((_, i) => !shouldSkipWeekendDaily(plan.days[i])),
+      .filter((_, i) => !shouldSkipWeekendDaily(plan.days[i], i)),
   };
 }
