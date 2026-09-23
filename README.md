@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <a href="https://mzvvi52fe6xm9e433yo0mgb4.185.119.57.28.sslip.io">Прод</a> ·
+  <a href="https://psynotetech.ru">Прод</a> ·
   <a href="https://github.com/kemberl1/psynote/deployments">Деплои</a> ·
   <a href="https://github.com/kemberl1/psynote/releases">Релизы</a> ·
   <a href="#-архитектура">Архитектура</a> ·
@@ -188,7 +188,7 @@ docker compose down -v     # + удалить volume-данные (postgres, qdr
 
 ### Прод (врачи, HTTPS, автодеплой из `main`)
 
-- **Сайт:** [открыть PsyNote](https://mzvvi52fe6xm9e433yo0mgb4.185.119.57.28.sslip.io)
+- **Сайт:** [открыть PsyNote](https://psynotetech.ru)
 - **Вход:** `admin@aimed.local` (seed-пароль — в [`docs/12_deploy_timeweb.md`](docs/12_deploy_timeweb.md), смени после первого входа)
 - **Когда выкатилось:** каждый пуш в `main` → Coolify собирает, GitHub пишет [деплой](https://github.com/kemberl1/psynote/deployments) и [релиз](https://github.com/kemberl1/psynote/releases) со ссылкой на сайт
 
