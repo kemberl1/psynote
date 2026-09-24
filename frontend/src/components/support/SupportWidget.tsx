@@ -7,6 +7,13 @@ import {
 } from "../../api/queries";
 import { formatChatTime } from "../../lib/format";
 import { Button } from "../ui";
+import {
+  AttachButton,
+  DraftFiles,
+  DropOverlay,
+  MessageAttachments,
+  useDraftFiles,
+} from "./attachments";
 import "./support.css";
 
 function ChatIcon() {
@@ -25,6 +32,7 @@ function ChatIcon() {
 export function SupportWidget() {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  const attach = useDraftFiles();
   const logRef = useRef<HTMLDivElement>(null);
   const { data, isPending } = useSupportThread(true, open ? 5000 : 30_000);
   const send = useSendSupportMessage();
@@ -44,10 +52,25 @@ export function SupportWidget() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [open, messages.length]);
 
+  const scrollToBottomIfNear = () => {
+    const el = logRef.current;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 400) {
+      el.scrollTop = el.scrollHeight;
+    }
+  };
+
+  const canSend = Boolean(draft.trim()) || attach.files.length > 0;
   const submit = () => {
-    const body = draft.trim();
-    if (!body || send.isPending) return;
-    send.mutate(body, { onSuccess: () => setDraft("") });
+    if (!canSend || send.isPending) return;
+    send.mutate(
+      { body: draft.trim(), files: attach.files },
+      {
+        onSuccess: () => {
+          setDraft("");
+          attach.clear();
+        },
+      },
+    );
   };
 
   return (
@@ -66,7 +89,8 @@ export function SupportWidget() {
       </button>
 
       {open && (
-        <section className="support-panel" aria-label="Чат поддержки">
+        <section className="support-panel" aria-label="Чат поддержки" {...attach.dropHandlers}>
+          <DropOverlay visible={attach.dragging} />
           <header className="support-panel__head">
             <div>
               <div className="support-panel__title">Поддержка</div>
@@ -97,7 +121,8 @@ export function SupportWidget() {
                 <div className="support-empty__title">Пока тихо</div>
                 <div className="support-empty__text">
                   Опишите проблему своими словами — чем конкретнее, тем быстрее
-                  разберёмся. Можно вставить фрагмент дневника.
+                  разберёмся. Можно вставить фрагмент дневника или приложить
+                  скриншот — кнопкой-скрепкой, перетаскиванием или Ctrl+V.
                 </div>
               </div>
             )}
@@ -111,7 +136,12 @@ export function SupportWidget() {
                   <div className="support-msg__who">
                     {mine ? "Вы" : "Поддержка"}
                   </div>
-                  <div className="support-msg__bubble">{m.body}</div>
+                  <MessageAttachments
+                    attachments={m.attachments}
+                    scope="user"
+                    onMediaLoad={scrollToBottomIfNear}
+                  />
+                  {m.body && <div className="support-msg__bubble">{m.body}</div>}
                   <div className="support-msg__time">{formatChatTime(m.created_at)}</div>
                 </div>
               );
@@ -125,6 +155,8 @@ export function SupportWidget() {
               submit();
             }}
           >
+            <DraftFiles files={attach.files} error={attach.error} onRemove={attach.remove} />
+            <AttachButton onFiles={attach.add} disabled={send.isPending} />
             <textarea
               className="support-panel__input"
               rows={1}
@@ -132,6 +164,7 @@ export function SupportWidget() {
               placeholder="Сообщение…"
               maxLength={4000}
               onChange={(e) => setDraft(e.target.value)}
+              onPaste={attach.onPaste}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -144,7 +177,7 @@ export function SupportWidget() {
               size="sm"
               type="submit"
               loading={send.isPending}
-              disabled={!draft.trim() || send.isPending}
+              disabled={!canSend || send.isPending}
             >
               Отправить
             </Button>

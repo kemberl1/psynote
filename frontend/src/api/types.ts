@@ -290,7 +290,22 @@ export interface SupportMessage {
   sender_role: "user" | "support" | string;
   sender_name: string;
   body: string;
+  attachments?: SupportAttachment[];
   created_at: string;
+}
+
+export interface SupportAttachment {
+  id: string;
+  message_id: string;
+  filename: string;
+  content_type: string;
+  size: number;
+}
+
+/** Черновик сообщения в чат поддержки: текст + файлы. */
+export interface SupportDraft {
+  body: string;
+  files: File[];
 }
 
 export interface SupportThreadView {

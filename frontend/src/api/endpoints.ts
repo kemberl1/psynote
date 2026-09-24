@@ -1,6 +1,6 @@
 // Типизированные обёртки над конкретными эндпоинтами gateway (docs/07).
 // Этап 10: добавлены admin-эндпоинты загрузки документов.
-import { request, uploadRequest } from "./client";
+import { blobRequest, request, uploadRequest } from "./client";
 import type {
   AdminDocument,
   AdminDocumentListResult,
@@ -26,6 +26,7 @@ import type {
   QuestionnaireSchema,
   RegisterRequest,
   RegisterResult,
+  SupportDraft,
   SupportMessage,
   SupportSummary,
   NewsListResult,
@@ -170,12 +171,34 @@ export function fetchSupportThread(signal?: AbortSignal): Promise<SupportThreadV
   return request<SupportThreadView>("/support/thread", { signal });
 }
 
-export function sendSupportMessage(
-  body: string, signal?: AbortSignal,
+/** Текст — JSON, с файлами — multipart (body + files[]). */
+function postSupportDraft(
+  path: string, draft: SupportDraft, signal?: AbortSignal,
 ): Promise<SupportMessage> {
-  return request<SupportMessage>("/support/messages", {
-    method: "POST", body: { body }, signal,
-  });
+  if (draft.files.length === 0) {
+    return request<SupportMessage>(path, {
+      method: "POST", body: { body: draft.body }, signal,
+    });
+  }
+  const form = new FormData();
+  form.append("body", draft.body);
+  for (const f of draft.files) form.append("files", f, f.name);
+  return uploadRequest<SupportMessage>(path, form, signal);
+}
+
+export function sendSupportMessage(
+  draft: SupportDraft, signal?: AbortSignal,
+): Promise<SupportMessage> {
+  return postSupportDraft("/support/messages", draft, signal);
+}
+
+export type SupportAttachmentScope = "user" | "admin";
+
+export function fetchSupportAttachment(
+  id: string, scope: SupportAttachmentScope, signal?: AbortSignal,
+): Promise<Blob> {
+  const prefix = scope === "admin" ? "/admin/support" : "/support";
+  return blobRequest(`${prefix}/attachments/${encodeURIComponent(id)}`, signal);
 }
 
 export function markSupportRead(signal?: AbortSignal): Promise<{ ok: boolean }> {
@@ -211,11 +234,11 @@ export function fetchAdminSupportThread(
 }
 
 export function replyAdminSupport(
-  threadId: string, body: string, signal?: AbortSignal,
+  threadId: string, draft: SupportDraft, signal?: AbortSignal,
 ): Promise<SupportMessage> {
-  return request<SupportMessage>(
+  return postSupportDraft(
     `/admin/support/threads/${encodeURIComponent(threadId)}/messages`,
-    { method: "POST", body: { body }, signal },
+    draft, signal,
   );
 }
 

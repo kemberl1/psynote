@@ -21,6 +21,28 @@ func previewMessage(body string) string {
 	return string(runes[:messagePreviewLimit]) + "…"
 }
 
+// attachmentPreview is the inbox preview for a message: its text, or a hint
+// about the attached files when the text is empty.
+func attachmentPreview(body string, files []SupportAttachmentUpload) string {
+	if p := previewMessage(body); p != "" || len(files) == 0 {
+		return p
+	}
+	images := 0
+	for _, f := range files {
+		if strings.HasPrefix(f.ContentType, "image/") {
+			images++
+		}
+	}
+	switch {
+	case len(files) == 1 && images == 1:
+		return "🖼 Изображение"
+	case len(files) == 1:
+		return previewMessage("📎 " + files[0].Filename)
+	default:
+		return fmt.Sprintf("📎 Вложений: %d", len(files))
+	}
+}
+
 func scanThread(row pgx.Row) (*SupportThread, error) {
 	var t SupportThread
 	err := row.Scan(
@@ -165,12 +187,70 @@ func (r *PgxRepository) ListMessages(ctx context.Context, threadID string) ([]Su
 		); err != nil {
 			return nil, fmt.Errorf("store: scan support message: %w", err)
 		}
+		m.Attachments = []SupportAttachment{}
 		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iterate support messages: %w", err)
+	}
+	rows.Close()
+
+	byMessage, err := r.listThreadAttachments(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if atts, ok := byMessage[out[i].ID]; ok {
+			out[i].Attachments = atts
+		}
+	}
+	return out, nil
+}
+
+func (r *PgxRepository) listThreadAttachments(ctx context.Context, threadID string) (map[string][]SupportAttachment, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, message_id, filename, content_type, size_bytes
+		FROM support_attachment
+		WHERE thread_id = $1
+		ORDER BY created_at ASC, id ASC`, threadID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list support attachments: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string][]SupportAttachment)
+	for rows.Next() {
+		var a SupportAttachment
+		if err := rows.Scan(&a.ID, &a.MessageID, &a.Filename, &a.ContentType, &a.Size); err != nil {
+			return nil, fmt.Errorf("store: scan support attachment: %w", err)
+		}
+		out[a.MessageID] = append(out[a.MessageID], a)
 	}
 	return out, rows.Err()
 }
 
-func (r *PgxRepository) AddMessage(ctx context.Context, threadID, senderID, senderRole, body string) (*SupportMessage, error) {
+func (r *PgxRepository) GetAttachment(ctx context.Context, attachmentID string) (*SupportAttachmentFile, error) {
+	var f SupportAttachmentFile
+	err := r.pool.QueryRow(ctx, `
+		SELECT a.id, a.message_id, a.filename, a.content_type, a.size_bytes,
+		       a.thread_id, t.doctor_id, a.data
+		FROM support_attachment a
+		JOIN support_thread t ON t.id = a.thread_id
+		WHERE a.id = $1`, attachmentID,
+	).Scan(
+		&f.ID, &f.MessageID, &f.Filename, &f.ContentType, &f.Size,
+		&f.ThreadID, &f.DoctorID, &f.Data,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("store: get support attachment: %w", err)
+	}
+	return &f, nil
+}
+
+func (r *PgxRepository) AddMessage(ctx context.Context, threadID, senderID, senderRole, body string, files []SupportAttachmentUpload) (*SupportMessage, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: begin support tx: %w", err)
@@ -188,6 +268,20 @@ func (r *PgxRepository) AddMessage(ctx context.Context, threadID, senderID, send
 		return nil, fmt.Errorf("store: insert support message: %w", err)
 	}
 
+	msg.Attachments = make([]SupportAttachment, 0, len(files))
+	for _, f := range files {
+		a := SupportAttachment{MessageID: msg.ID, Filename: f.Filename, ContentType: f.ContentType, Size: len(f.Data)}
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO support_attachment (message_id, thread_id, filename, content_type, size_bytes, data)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			RETURNING id`,
+			msg.ID, threadID, f.Filename, f.ContentType, len(f.Data), f.Data,
+		).Scan(&a.ID); err != nil {
+			return nil, fmt.Errorf("store: insert support attachment: %w", err)
+		}
+		msg.Attachments = append(msg.Attachments, a)
+	}
+
 	incAdmin := 0
 	incUser := 0
 	if senderRole == "user" {
@@ -202,7 +296,7 @@ func (r *PgxRepository) AddMessage(ctx context.Context, threadID, senderID, send
 			unread_by_admin = unread_by_admin + $4,
 			unread_by_user = unread_by_user + $5
 		WHERE id = $1`,
-		threadID, msg.CreatedAt, previewMessage(body), incAdmin, incUser)
+		threadID, msg.CreatedAt, attachmentPreview(body, files), incAdmin, incUser)
 	if err != nil {
 		return nil, fmt.Errorf("store: update support thread: %w", err)
 	}

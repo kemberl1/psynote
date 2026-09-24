@@ -24,7 +24,9 @@ import {
     fetchQuestionnaire,
     fetchRequestDetail,
     fetchRequestFeedback,
+    fetchSupportAttachment,
     fetchSupportThread,
+    type SupportAttachmentScope,
     generate,
     markAdminSupportRead,
     markSupportRead,
@@ -52,6 +54,7 @@ import type {
     PendingRequest,
     PendingResult,
     QuestionnaireSchema,
+    SupportDraft,
     SupportMessage,
     SupportSummary,
     SupportThreadListResult,
@@ -242,11 +245,27 @@ export function useSupportThread(
 
 export function useSendSupportMessage() {
   const qc = useQueryClient();
-  return useMutation<SupportMessage, unknown, string>({
-    mutationFn: (body) => sendSupportMessage(body),
+  return useMutation<SupportMessage, unknown, SupportDraft>({
+    mutationFn: (draft) => sendSupportMessage(draft),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.supportThread });
     },
+  });
+}
+
+/** Содержимое вложения. Файлы неизменяемы — кэшируем навсегда. */
+export function useSupportAttachment(
+  id: string,
+  scope: SupportAttachmentScope,
+  enabled = true,
+): UseQueryResult<Blob> {
+  return useQuery({
+    queryKey: ["support", "attachment", scope, id] as const,
+    queryFn: ({ signal }) => fetchSupportAttachment(id, scope, signal),
+    enabled,
+    staleTime: Infinity,
+    gcTime: 10 * 60_000,
+    retry: 1,
   });
 }
 
@@ -312,8 +331,8 @@ export function useAdminSupportThread(
 
 export function useReplyAdminSupport(threadId: string) {
   const qc = useQueryClient();
-  return useMutation<SupportMessage, unknown, string>({
-    mutationFn: (body) => replyAdminSupport(threadId, body),
+  return useMutation<SupportMessage, unknown, SupportDraft>({
+    mutationFn: (draft) => replyAdminSupport(threadId, draft),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.adminSupportThread(threadId) });
       void qc.invalidateQueries({ queryKey: queryKeys.adminSupportThreads });

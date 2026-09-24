@@ -100,7 +100,7 @@ export function filenameFromDisposition(header: string | null): string | null {
 }
 
 /** Создаёт временную ссылку и кликает по ней, затем чистит ресурсы. */
-function triggerBlobDownload(blob: Blob, filename: string): void {
+export function triggerBlobDownload(blob: Blob, filename: string): void {
   const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = objectUrl;

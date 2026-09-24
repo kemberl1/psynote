@@ -9,6 +9,13 @@ import {
 } from "../api/queries";
 import type { SupportMessage, SupportThreadListItem } from "../api/types";
 import { Badge, Button, EmptyState, Spinner } from "../components/ui";
+import {
+  AttachButton,
+  DraftFiles,
+  DropOverlay,
+  MessageAttachments,
+  useDraftFiles,
+} from "../components/support/attachments";
 import { formatChatTime, formatDateTime } from "../lib/format";
 import "../components/support/support.css";
 import "./admin.css";
@@ -89,6 +96,7 @@ function AdminChat({
   const markRead = useMarkAdminSupportRead();
   const reply = useReplyAdminSupport(threadId);
   const [draft, setDraft] = useState("");
+  const attach = useDraftFiles();
   const logRef = useRef<HTMLDivElement>(null);
   const thread = data?.thread ?? fallback;
   const messages = data?.messages ?? [];
@@ -103,14 +111,36 @@ function AdminChat({
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages.length, threadId]);
 
+  // черновик вложений не переезжает в чужой диалог
+  const clearAttach = attach.clear;
+  useEffect(() => {
+    clearAttach();
+  }, [threadId, clearAttach]);
+
+  const scrollToBottomIfNear = () => {
+    const el = logRef.current;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 400) {
+      el.scrollTop = el.scrollHeight;
+    }
+  };
+
+  const canSend = Boolean(draft.trim()) || attach.files.length > 0;
   const submit = () => {
-    const body = draft.trim();
-    if (!body || reply.isPending) return;
-    reply.mutate(body, { onSuccess: () => setDraft("") });
+    if (!canSend || reply.isPending) return;
+    reply.mutate(
+      { body: draft.trim(), files: attach.files },
+      {
+        onSuccess: () => {
+          setDraft("");
+          attach.clear();
+        },
+      },
+    );
   };
 
   return (
-    <>
+    <div className="admin-chat" {...attach.dropHandlers}>
+      <DropOverlay visible={attach.dragging} />
       <header className="admin-chat__head">
         <div>
           <div className="admin-chat__name">
@@ -133,7 +163,7 @@ function AdminChat({
           <div className="admin-inbox__empty">Не удалось загрузить переписку</div>
         )}
         {messages.map((m) => (
-          <AdminBubble key={m.id} message={m} />
+          <AdminBubble key={m.id} message={m} onMediaLoad={scrollToBottomIfNear} />
         ))}
       </div>
 
@@ -144,6 +174,8 @@ function AdminChat({
           submit();
         }}
       >
+        <DraftFiles files={attach.files} error={attach.error} onRemove={attach.remove} />
+        <AttachButton onFiles={attach.add} disabled={reply.isPending} />
         <textarea
           className="admin-chat__input"
           rows={2}
@@ -151,6 +183,7 @@ function AdminChat({
           maxLength={4000}
           placeholder="Ответ врачу…"
           onChange={(e) => setDraft(e.target.value)}
+          onPaste={attach.onPaste}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -162,23 +195,34 @@ function AdminChat({
           variant="primary"
           type="submit"
           loading={reply.isPending}
-          disabled={!draft.trim() || reply.isPending}
+          disabled={!canSend || reply.isPending}
         >
           Ответить
         </Button>
       </form>
-    </>
+    </div>
   );
 }
 
-function AdminBubble({ message }: { message: SupportMessage }) {
+function AdminBubble({
+  message,
+  onMediaLoad,
+}: {
+  message: SupportMessage;
+  onMediaLoad?: () => void;
+}) {
   const staff = message.sender_role === "support";
   return (
     <div className={`support-msg ${staff ? "support-msg--user" : "support-msg--support"}`}>
       <div className="support-msg__who">
         {staff ? "Вы · поддержка" : message.sender_name || "Врач"}
       </div>
-      <div className="support-msg__bubble">{message.body}</div>
+      <MessageAttachments
+        attachments={message.attachments}
+        scope="admin"
+        onMediaLoad={onMediaLoad}
+      />
+      {message.body && <div className="support-msg__bubble">{message.body}</div>}
       <div className="support-msg__time">{formatChatTime(message.created_at)}</div>
     </div>
   );

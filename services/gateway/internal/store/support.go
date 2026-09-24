@@ -27,13 +27,40 @@ type SupportThreadListItem struct {
 
 // SupportMessage is one chat message.
 type SupportMessage struct {
-	ID         string    `json:"id"`
-	ThreadID   string    `json:"thread_id"`
-	SenderID   string    `json:"sender_id"`
-	SenderRole string    `json:"sender_role"` // user | support
-	SenderName string    `json:"sender_name"`
-	Body       string    `json:"body"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID          string              `json:"id"`
+	ThreadID    string              `json:"thread_id"`
+	SenderID    string              `json:"sender_id"`
+	SenderRole  string              `json:"sender_role"` // user | support
+	SenderName  string              `json:"sender_name"`
+	Body        string              `json:"body"`
+	Attachments []SupportAttachment `json:"attachments"`
+	CreatedAt   time.Time           `json:"created_at"`
+}
+
+// SupportAttachment is file metadata shown in the chat (content is fetched
+// separately by id).
+type SupportAttachment struct {
+	ID          string `json:"id"`
+	MessageID   string `json:"message_id"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	Size        int    `json:"size"`
+}
+
+// SupportAttachmentUpload is a file attached to a new message.
+type SupportAttachmentUpload struct {
+	Filename    string
+	ContentType string
+	Data        []byte
+}
+
+// SupportAttachmentFile is an attachment with its content and owning thread
+// (for access checks on download).
+type SupportAttachmentFile struct {
+	SupportAttachment
+	ThreadID string
+	DoctorID string
+	Data     []byte
 }
 
 // SupportSummary is a compact unread counter for the admin badge.
@@ -50,7 +77,8 @@ type SupportRepository interface {
 	GetOrCreateThread(ctx context.Context, doctorID string) (*SupportThread, error)
 	ListThreads(ctx context.Context, limit, offset int) ([]SupportThreadListItem, int, error)
 	ListMessages(ctx context.Context, threadID string) ([]SupportMessage, error)
-	AddMessage(ctx context.Context, threadID, senderID, senderRole, body string) (*SupportMessage, error)
+	AddMessage(ctx context.Context, threadID, senderID, senderRole, body string, files []SupportAttachmentUpload) (*SupportMessage, error)
+	GetAttachment(ctx context.Context, attachmentID string) (*SupportAttachmentFile, error)
 	MarkRead(ctx context.Context, threadID, who string) error
 	SupportSummary(ctx context.Context) (*SupportSummary, error)
 }

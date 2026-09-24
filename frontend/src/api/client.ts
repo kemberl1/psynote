@@ -221,3 +221,47 @@ export async function uploadRequest<TData>(
 
   return env.data as TData;
 }
+
+// ─── Бинарные ответы (вложения чата) ────────────────────────────────────────
+
+/** GET защищённого бинарного ресурса → Blob (с авто-refresh при 401). */
+export async function blobRequest(
+  path: string,
+  signal?: AbortSignal,
+  _isRetry = false,
+): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  const access = getAccessToken();
+  if (access) headers["Authorization"] = `Bearer ${access}`;
+
+  let res: Response;
+  try {
+    res = await fetch(buildUrl(path), { headers, signal });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
+    throw new ApiError("NETWORK", "сетевая ошибка", 0);
+  }
+
+  if (res.status === 401 && !_isRetry) {
+    const refreshed = await tryRefresh();
+    if (refreshed) return blobRequest(path, signal, true);
+    clearTokens();
+    notifySessionEnded();
+    throw new ApiError("UNAUTHORIZED", "сессия истекла", 401);
+  }
+
+  if (!res.ok) {
+    let env: Envelope<unknown> | null = null;
+    try {
+      env = (await res.json()) as Envelope<unknown>;
+    } catch {
+      // не-JSON — оставляем дефолты
+    }
+    throw new ApiError(
+      normalizeCode(env?.error?.code, res.status),
+      env?.error?.message ?? `HTTP ${res.status}`,
+      res.status,
+    );
+  }
+  return res.blob();
+}

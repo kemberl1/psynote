@@ -132,11 +132,13 @@ func NewRouter(cfg config.Config, deps Deps) http.Handler {
 		mux.HandleFunc("GET "+config.APIPrefix+"/support/thread", protect(newSupportThreadHandler(deps.SupportRepo)))
 		mux.HandleFunc("POST "+config.APIPrefix+"/support/messages", protect(newSupportSendHandler(deps.SupportRepo)))
 		mux.HandleFunc("POST "+config.APIPrefix+"/support/thread/read", protect(newSupportReadHandler(deps.SupportRepo)))
+		mux.HandleFunc("GET "+config.APIPrefix+"/support/attachments/{id}", protect(newSupportAttachmentHandler(deps.SupportRepo, false)))
 		mux.HandleFunc("GET "+config.APIPrefix+"/admin/support/summary", protectAdmin(newAdminSupportSummaryHandler(deps.SupportRepo)))
 		mux.HandleFunc("GET "+config.APIPrefix+"/admin/support/threads", protectAdmin(newAdminSupportListHandler(deps.SupportRepo)))
 		mux.HandleFunc("GET "+config.APIPrefix+"/admin/support/threads/{id}", protectAdmin(newAdminSupportDetailHandler(deps.SupportRepo)))
 		mux.HandleFunc("POST "+config.APIPrefix+"/admin/support/threads/{id}/messages", protectAdmin(newAdminSupportReplyHandler(deps.SupportRepo)))
 		mux.HandleFunc("POST "+config.APIPrefix+"/admin/support/threads/{id}/read", protectAdmin(newAdminSupportReadHandler(deps.SupportRepo)))
+		mux.HandleFunc("GET "+config.APIPrefix+"/admin/support/attachments/{id}", protectAdmin(newSupportAttachmentHandler(deps.SupportRepo, true)))
 	} else {
 		unavail := newUnavailableHandler()
 		mux.HandleFunc("GET "+config.APIPrefix+"/support/thread", unavail)

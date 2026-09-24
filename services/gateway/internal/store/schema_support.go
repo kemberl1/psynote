@@ -35,6 +35,21 @@ CREATE TABLE IF NOT EXISTS support_message (
 CREATE INDEX IF NOT EXISTS idx_support_message_thread
     ON support_message(thread_id, created_at ASC);
 
+CREATE TABLE IF NOT EXISTS support_attachment (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    message_id   UUID NOT NULL REFERENCES support_message(id) ON DELETE CASCADE,
+    thread_id    UUID NOT NULL REFERENCES support_thread(id) ON DELETE CASCADE,
+    filename     TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes   INTEGER NOT NULL,
+    data         BYTEA NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_support_attachment_message
+    ON support_attachment(message_id);
+CREATE INDEX IF NOT EXISTS idx_support_attachment_thread
+    ON support_attachment(thread_id);
+
 CREATE TABLE IF NOT EXISTS generation_feedback (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     request_id  UUID NOT NULL REFERENCES generation_request(id) ON DELETE CASCADE,
